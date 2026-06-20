@@ -25,17 +25,64 @@ pub async fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("poly_lp_bot=info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("polyfarmer=info")),
         )
         .init();
 
     info!("================================");
-    info!("   poly-lp-bot starting");
+    info!("   polyfarmer starting");
     info!("================================");
 
     let config = Arc::new(Config::from_env()?);
+
+    // ── Credential store + first-run admin password ───────────────────────────
+    let store = Arc::new(crate::creds::CredentialStore::open(config.data_dir.clone())?);
+    if !store.is_initialized() {
+        let pw = store.init_admin()?;
+        info!("══════════════════════════════════════════════════════");
+        info!("  First-run admin password:  {}", pw);
+        info!("  Open the dashboard and change it on first login.");
+        info!("══════════════════════════════════════════════════════");
+    }
+
+    // ── Spawn: web dashboard (reachable even before the wallet is configured) ──
+    {
+        let bind = config.dashboard_bind.clone();
+        match tokio::net::TcpListener::bind(&bind).await {
+            Ok(listener) => {
+                info!("Dashboard on http://{}", bind);
+                let web_state = crate::web::WebState::new(Arc::clone(&store));
+                tokio::spawn(async move {
+                    if let Err(e) = axum::serve(listener, crate::web::router(web_state)).await {
+                        error!("Web server error: {}", e);
+                    }
+                });
+            }
+            Err(e) => error!("Failed to bind dashboard on {}: {}", bind, e),
+        }
+    }
+
+    // ── Wallet credentials (entered via dashboard, encrypted at rest) ──────────
+    let creds = match store.load_wallet()? {
+        Some(c) => c,
+        None => {
+            warn!(
+                "No wallet configured — open the dashboard at http://{} to set it up, \
+                 then restart to begin trading.",
+                config.dashboard_bind
+            );
+            tokio::signal::ctrl_c().await?;
+            info!("Shutdown complete");
+            return Ok(());
+        }
+    };
+    let proxy_wallet: alloy::primitives::Address = creds
+        .proxy_wallet
+        .parse()
+        .map_err(|_| eyre::eyre!("stored proxy wallet is not a valid address"))?;
+
     let alerter = Arc::new(Alerter::new(&config.alerts_file));
-    let executor = Arc::new(Executor::new(&config).await?);
+    let executor = Arc::new(Executor::new(creds.expose_key(), proxy_wallet).await?);
 
     // ── Load initial markets ──────────────────────────────────────────────────
     let initial_configs = load_markets(&config.markets_file)?;
@@ -157,23 +204,6 @@ pub async fn run() -> Result<()> {
                 }
             }
         });
-    }
-
-    // ── Spawn: web dashboard ──────────────────────────────────────────────────
-    {
-        let bind = std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
-        match tokio::net::TcpListener::bind(&bind).await {
-            Ok(listener) => {
-                info!("Dashboard on http://{}", bind);
-                let app = crate::web::router();
-                tokio::spawn(async move {
-                    if let Err(e) = axum::serve(listener, app).await {
-                        error!("Web server error: {}", e);
-                    }
-                });
-            }
-            Err(e) => error!("Failed to bind dashboard on {}: {}", bind, e),
-        }
     }
 
     alerter.info("Bot started");

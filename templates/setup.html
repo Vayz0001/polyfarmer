@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>polyfarmer · setup</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+</head>
+<body>
+  <main class="wrap">
+    <div class="card setup">
+      <div class="brand"><span class="logo">▲</span> polyfarmer <span class="v">setup</span></div>
+
+      {% if let Some(n) = notice %}<div class="ok">{{ n }}</div>{% endif %}
+      {% if let Some(e) = error %}<div class="err">{{ e }}</div>{% endif %}
+
+      <form class="stack section" method="post" action="/setup/password">
+        <h3 class="h">Password{% if must_change %} <span class="warn-inline">change required</span>{% endif %}</h3>
+        <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+        <input class="inp" type="password" name="password" placeholder="New password (min 8)" required />
+        <input class="inp" type="password" name="confirm" placeholder="Confirm password" required />
+        <button class="btn" type="submit">Update password</button>
+      </form>
+
+      <form class="stack section" method="post" action="/setup/wallet">
+        <h3 class="h">Wallet{% if has_wallet %} <span class="ok-inline">configured ✓</span>{% endif %}</h3>
+        <p class="muted">Stored encrypted on this machine — never sent anywhere. Use a dedicated wallet funded with pUSD.</p>
+        <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+        <input class="inp" type="password" name="private_key" placeholder="Private key (0x…)" required />
+        <input class="inp" type="text" name="proxy_wallet" placeholder="Polymarket wallet address (0x…)" required />
+        <button class="btn" type="submit">Save wallet (encrypted)</button>
+      </form>
+
+      <div class="row">
+        <a class="btn ghost" href="/">← Dashboard</a>
+        <form method="post" action="/logout"><button class="btn ghost" type="submit">Log out</button></form>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

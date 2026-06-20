@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod config;
+pub mod creds;
 pub mod engine;
 pub mod storage;
 pub mod types;

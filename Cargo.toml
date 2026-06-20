@@ -37,6 +37,12 @@ askama = "0.16"                # compile-time templates, auto-escaping (XSS-safe
 tower-http = { version = "0.6", features = ["compression-br", "trace"] }
 rust-embed = "8.11"           # bake templates + static assets into the binary
 mime_guess = "2"              # content-types for embedded assets
+tower-sessions = "0.15"       # cookie sessions (login state, CSRF token)
+
+# ── Auth + credential encryption ──────────────────────────────────────────────
+argon2 = "0.5"                # password hashing (login) — OWASP standard, RustCrypto
+chacha20poly1305 = "0.10"     # AEAD to encrypt the wallet key at rest, RustCrypto
+rand = "0.8"                  # secure RNG (salts, nonces, master key, tokens)
 
 # ── Config, secrets, errors, logging ──────────────────────────────────────────
 dotenvy = "0.15"

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{{ title }}</title>
+  <title>polyfarmer</title>
   <link rel="stylesheet" href="/assets/app.css" />
   <script src="/assets/htmx.min.js" defer></script>
 </head>
@@ -11,8 +11,21 @@
   <main class="wrap">
     <div class="card">
       <div class="brand"><span class="logo">▲</span> polyfarmer <span class="v">v{{ version }}</span></div>
-      <div class="status"><span class="dot"></span> engine running</div>
-      <p class="muted">self-hosted · dashboard scaffold (segment 2) · keys never leave your machine</p>
+
+      {% if must_change %}
+        <div class="warn">Finish setup — <a href="/setup">change your password</a></div>
+      {% else if !has_wallet %}
+        <div class="warn">No wallet configured — <a href="/setup">add it to start trading</a></div>
+      {% else %}
+        <div class="status"><span class="dot"></span> wallet configured</div>
+      {% endif %}
+
+      <p class="muted">self-hosted · keys never leave your machine</p>
+
+      <div class="row">
+        <a class="btn ghost" href="/setup">Settings</a>
+        <form method="post" action="/logout"><button class="btn ghost" type="submit">Log out</button></form>
+      </div>
     </div>
   </main>
 </body>

@@ -1,5 +1,4 @@
-use crate::config::Config;
-use alloy::primitives::U256;
+use alloy::primitives::{Address, U256};
 use alloy::signers::Signer as _;
 use alloy::signers::local::PrivateKeySigner;
 use eyre::Result;
@@ -9,7 +8,6 @@ use polymarket_client_sdk_v2::auth::Normal;
 use polymarket_client_sdk_v2::clob::types::SignatureType;
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal::Decimal;
-use secrecy::ExposeSecret;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
@@ -27,15 +25,16 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub async fn new(config: &Config) -> Result<Self> {
-        let signer: PrivateKeySigner = config.private_key.expose_secret().parse()?;
+    /// Authenticate with the Polymarket V2 CLOB using decrypted wallet creds.
+    pub async fn new(private_key: &str, proxy_wallet: Address) -> Result<Self> {
+        let signer: PrivateKeySigner = private_key.parse()?;
         let signer = signer.with_chain_id(Some(POLYGON_CHAIN_ID));
 
         info!("Signer address: {}", signer.address());
 
         let client = Client::new(CLOB_URL, ClobConfig::default())?
             .authentication_builder(&signer)
-            .funder(config.proxy_wallet)
+            .funder(proxy_wallet)
             .signature_type(SignatureType::GnosisSafe)
             .authenticate()
             .await?;

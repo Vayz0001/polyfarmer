@@ -1,47 +1,40 @@
-use alloy::primitives::Address;
-use eyre::{eyre, Result};
-use secrecy::SecretString;
+//! Process configuration from the environment.
+//!
+//! Note: wallet **secrets** (private key, proxy wallet) are NOT here — they are
+//! entered via the dashboard and stored encrypted by [`crate::creds`]. This file
+//! only holds non-secret paths/bind settings, so the bot can boot (and serve the
+//! setup dashboard) without any `.env`.
+
+use eyre::Result;
 use std::env;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 pub struct Config {
-    /// EOA private key — kept in SecretString to prevent accidental logging
-    pub private_key: SecretString,
-
-    /// Gnosis Safe proxy wallet address (the one shown on polymarket.com/settings)
-    pub proxy_wallet: Address,
-
-    /// Path to markets.json (written by TS Discord bot, polled by Rust)
+    /// Directory for runtime state + encrypted credentials (gitignored).
+    pub data_dir: PathBuf,
+    /// markets.json — persisted market configs.
     pub markets_file: PathBuf,
-
-    /// Path to alerts.json (appended by Rust, read+cleared by TS Discord bot)
+    /// alerts.json — append-only alert log (read by the optional Discord notifier).
     pub alerts_file: PathBuf,
+    /// Dashboard bind address (default localhost; override for tunnels/containers).
+    pub dashboard_bind: String,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
         dotenvy::dotenv().ok();
 
-        let private_key = SecretString::from(
-            env::var("POLYMARKET_PRIVATE_KEY")
-                .map_err(|_| eyre!("POLYMARKET_PRIVATE_KEY not set"))?,
-        );
-
-        let proxy_wallet = Address::from_str(
-            &env::var("POLYMARKET_PROXY_WALLET")
-                .map_err(|_| eyre!("POLYMARKET_PROXY_WALLET not set"))?,
-        )
-        .map_err(|_| eyre!("Invalid POLYMARKET_PROXY_WALLET address"))?;
-
+        let data_dir =
+            PathBuf::from(env::var("DATA_DIR").unwrap_or_else(|_| "data".to_string()));
         let markets_file = PathBuf::from(
-            env::var("MARKETS_FILE").unwrap_or_else(|_| "markets.json".to_string()),
+            env::var("MARKETS_FILE").unwrap_or_else(|_| "data/markets.json".to_string()),
         );
-
         let alerts_file = PathBuf::from(
-            env::var("ALERTS_FILE").unwrap_or_else(|_| "alerts.json".to_string()),
+            env::var("ALERTS_FILE").unwrap_or_else(|_| "data/alerts.json".to_string()),
         );
+        let dashboard_bind =
+            env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
 
-        Ok(Config { private_key, proxy_wallet, markets_file, alerts_file })
+        Ok(Config { data_dir, markets_file, alerts_file, dashboard_bind })
     }
 }
