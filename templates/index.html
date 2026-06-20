@@ -12,9 +12,7 @@
     <div class="card">
       <div class="brand"><span class="logo">▲</span> polyfarmer <span class="v">v{{ version }}</span></div>
 
-      {% if must_change %}
-        <div class="warn">Finish setup — <a href="/setup">change your password</a></div>
-      {% else if !has_wallet %}
+      {% if !has_wallet %}
         <div class="warn">No wallet configured — <a href="/setup">add it to start trading</a></div>
       {% else %}
         <div class="status"><span class="dot"></span> wallet configured</div>

@@ -11,18 +11,26 @@ use polyfarmer::web::{router, WebState};
 use tower::ServiceExt; // for `oneshot`
 
 fn unique_dir() -> std::path::PathBuf {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir().join(format!("pf-web-test-{n}"))
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    // Atomic counter guarantees uniqueness even across parallel tests.
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    std::env::temp_dir().join(format!("pf-web-test-{pid}-{n}"))
 }
 
-/// Build a router backed by a fresh store; returns the router + admin password.
+/// Router backed by an *initialized* store (password set); returns it + password.
 fn test_app() -> (Router, String) {
     let store = CredentialStore::open(unique_dir()).unwrap();
-    let pw = store.init_admin().unwrap();
+    let pw = "test-password-123".to_string();
+    store.set_password(&pw).unwrap();
     (router(WebState::new(Arc::new(store))), pw)
+}
+
+/// Router backed by a fresh, *uninitialized* store (first-run state).
+fn test_app_uninit() -> Router {
+    let store = CredentialStore::open(unique_dir()).unwrap();
+    router(WebState::new(Arc::new(store)))
 }
 
 async fn body_string(res: axum::response::Response) -> String {
@@ -134,6 +142,69 @@ async fn full_login_grants_access() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     assert!(body_string(res).await.contains("Wallet"));
+}
+
+#[tokio::test]
+async fn non_local_blocked_until_setup() {
+    use axum::extract::ConnectInfo;
+    use std::net::SocketAddr;
+
+    let app = test_app_uninit();
+
+    // Non-loopback peer during first-run → 403.
+    let mut req = Request::builder().uri("/").body(Body::empty()).unwrap();
+    req.extensions_mut()
+        .insert(ConnectInfo("203.0.113.5:5555".parse::<SocketAddr>().unwrap()));
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // Loopback peer → allowed through to the wizard.
+    let mut req = Request::builder().uri("/").body(Body::empty()).unwrap();
+    req.extensions_mut()
+        .insert(ConnectInfo("127.0.0.1:5555".parse::<SocketAddr>().unwrap()));
+    let res = app.oneshot(req).await.unwrap();
+    assert!(res.status().is_redirection());
+}
+
+#[tokio::test]
+async fn first_run_welcome_creates_account() {
+    let app = test_app_uninit();
+
+    // First run: any protected route → /welcome
+    let res = app
+        .clone()
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert!(res.status().is_redirection());
+    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/welcome");
+
+    // Welcome page renders with csrf + cookie
+    let res = app
+        .clone()
+        .oneshot(Request::builder().uri("/welcome").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let cookie = session_cookie(&res).expect("cookie");
+    let csrf = extract_csrf(&body_string(res).await);
+
+    // Create the account → redirect to /setup
+    let form = format!("csrf={csrf}&password=supersecret&confirm=supersecret");
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/welcome")
+                .header(header::COOKIE, &cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(form))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(res.status().is_redirection(), "got {}", res.status());
+    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/setup");
 }
 
 #[tokio::test]

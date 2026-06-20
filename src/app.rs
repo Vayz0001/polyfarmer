@@ -35,14 +35,10 @@ pub async fn run() -> Result<()> {
 
     let config = Arc::new(Config::from_env()?);
 
-    // ── Credential store + first-run admin password ───────────────────────────
+    // ── Credential store ──────────────────────────────────────────────────────
     let store = Arc::new(crate::creds::CredentialStore::open(config.data_dir.clone())?);
     if !store.is_initialized() {
-        let pw = store.init_admin()?;
-        info!("══════════════════════════════════════════════════════");
-        info!("  First-run admin password:  {}", pw);
-        info!("  Open the dashboard and change it on first login.");
-        info!("══════════════════════════════════════════════════════");
+        info!("First run — open the dashboard to create your admin password.");
     }
 
     // ── Spawn: web dashboard (reachable even before the wallet is configured) ──
@@ -52,8 +48,10 @@ pub async fn run() -> Result<()> {
             Ok(listener) => {
                 info!("Dashboard on http://{}", bind);
                 let web_state = crate::web::WebState::new(Arc::clone(&store));
+                let svc = crate::web::router(web_state)
+                    .into_make_service_with_connect_info::<std::net::SocketAddr>();
                 tokio::spawn(async move {
-                    if let Err(e) = axum::serve(listener, crate::web::router(web_state)).await {
+                    if let Err(e) = axum::serve(listener, svc).await {
                         error!("Web server error: {}", e);
                     }
                 });

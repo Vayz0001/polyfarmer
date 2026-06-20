@@ -19,7 +19,6 @@ use super::state::WebState;
 #[template(path = "setup.html")]
 struct SetupTemplate {
     csrf_token: String,
-    must_change: bool,
     has_wallet: bool,
     notice: Option<String>,
     error: Option<String>,
@@ -117,7 +116,6 @@ async fn render(
 ) -> Html<String> {
     let tpl = SetupTemplate {
         csrf_token: csrf_token(session).await,
-        must_change: state.store.must_change_password().unwrap_or(false),
         has_wallet: state.store.has_wallet(),
         notice,
         error,

@@ -62,10 +62,73 @@ pub async fn is_authenticated(session: &Session) -> bool {
 
 // ── handlers ──────────────────────────────────────────────────────────────────
 
-pub async fn login_form(session: Session) -> Html<String> {
-    // Already logged in? bounce home.
-    let token = csrf_token(&session).await;
-    render_login(token, None)
+pub async fn login_form(State(state): State<WebState>, session: Session) -> Response {
+    // No admin yet → first-run wizard.
+    if !state.store.is_initialized() {
+        return Redirect::to("/welcome").into_response();
+    }
+    render_login(csrf_token(&session).await, None).into_response()
+}
+
+// ── First-run setup wizard (create the admin password — nothing logged) ───────
+
+#[derive(Template)]
+#[template(path = "welcome.html")]
+struct WelcomeTemplate {
+    csrf_token: String,
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct WelcomeForm {
+    csrf: String,
+    password: String,
+    confirm: String,
+}
+
+pub async fn welcome_form(State(state): State<WebState>, session: Session) -> Response {
+    if state.store.is_initialized() {
+        return Redirect::to("/login").into_response();
+    }
+    render_welcome(csrf_token(&session).await, None).into_response()
+}
+
+pub async fn welcome_submit(
+    State(state): State<WebState>,
+    session: Session,
+    Form(form): Form<WelcomeForm>,
+) -> Response {
+    if state.store.is_initialized() {
+        return Redirect::to("/login").into_response();
+    }
+    if !verify_csrf(&session, &form.csrf).await {
+        return render_welcome(csrf_token(&session).await, Some("Invalid session — retry.".into()))
+            .into_response();
+    }
+    if form.password.len() < 8 {
+        return render_welcome(
+            csrf_token(&session).await,
+            Some("Password must be at least 8 characters.".into()),
+        )
+        .into_response();
+    }
+    if form.password != form.confirm {
+        return render_welcome(csrf_token(&session).await, Some("Passwords do not match.".into()))
+            .into_response();
+    }
+    if let Err(e) = state.store.set_password(&form.password) {
+        return render_welcome(csrf_token(&session).await, Some(format!("Failed to save: {e}")))
+            .into_response();
+    }
+    // Log them straight in, then on to wallet setup.
+    let _ = session.cycle_id().await;
+    let _ = session.insert(SESSION_AUTH, true).await;
+    Redirect::to("/setup").into_response()
+}
+
+fn render_welcome(csrf_token: String, error: Option<String>) -> Html<String> {
+    let tpl = WelcomeTemplate { csrf_token, error };
+    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
 }
 
 pub async fn login_submit(
@@ -110,9 +173,8 @@ pub async fn login_submit(
         let _ = session.cycle_id().await;
         let _ = session.insert(SESSION_AUTH, true).await;
 
-        // Force password change on the auto-generated first-run password.
-        let must_change = state.store.must_change_password().unwrap_or(false);
-        let dest = if must_change || !state.store.has_wallet() { "/setup" } else { "/" };
+        // Send to wallet setup if not configured yet, else to the dashboard.
+        let dest = if !state.store.has_wallet() { "/setup" } else { "/" };
         Redirect::to(dest).into_response()
     } else {
         // Scope the guard so it is dropped before the `.await` below.
@@ -134,8 +196,16 @@ pub async fn logout(session: Session) -> Redirect {
     Redirect::to("/login")
 }
 
-/// Route guard: redirect unauthenticated requests to /login.
-pub async fn require_auth(session: Session, req: Request, next: Next) -> Response {
+/// Route guard: first-run → /welcome, unauthenticated → /login, else proceed.
+pub async fn require_auth(
+    State(state): State<WebState>,
+    session: Session,
+    req: Request,
+    next: Next,
+) -> Response {
+    if !state.store.is_initialized() {
+        return Redirect::to("/welcome").into_response();
+    }
     if is_authenticated(&session).await {
         next.run(req).await
     } else {

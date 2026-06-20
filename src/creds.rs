@@ -19,9 +19,8 @@ use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce};
 use eyre::{eyre, Result};
-use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
-use rand::{Rng, RngCore};
+use rand::RngCore;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
@@ -85,8 +84,6 @@ pub fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Vec<u8>> {
 #[derive(Serialize, Deserialize)]
 struct AdminRecord {
     password_hash: String,
-    /// True until the operator changes the auto-generated first-run password.
-    must_change: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -142,24 +139,9 @@ impl CredentialStore {
 
     // ── admin password ────────────────────────────────────────────────────────
 
+    /// Whether the admin password has been set (first-run wizard completed).
     pub fn is_initialized(&self) -> bool {
         self.admin_path().exists()
-    }
-
-    /// First-run: generate a random admin password, store its hash (with the
-    /// must-change flag), and return the plaintext so it can be printed once.
-    pub fn init_admin(&self) -> Result<String> {
-        let password: String = OsRng
-            .sample_iter(&Alphanumeric)
-            .take(24)
-            .map(char::from)
-            .collect();
-        let rec = AdminRecord {
-            password_hash: hash_password(&password)?,
-            must_change: true,
-        };
-        write_secret(&self.admin_path(), serde_json::to_string_pretty(&rec)?.as_bytes())?;
-        Ok(password)
     }
 
     fn read_admin(&self) -> Result<AdminRecord> {
@@ -171,15 +153,10 @@ impl CredentialStore {
         Ok(verify_password(password, &self.read_admin()?.password_hash))
     }
 
-    pub fn must_change_password(&self) -> Result<bool> {
-        Ok(self.read_admin()?.must_change)
-    }
-
-    /// Set a new admin password and clear the must-change flag.
+    /// Set (or change) the admin password.
     pub fn set_password(&self, password: &str) -> Result<()> {
         let rec = AdminRecord {
             password_hash: hash_password(password)?,
-            must_change: false,
         };
         write_secret(&self.admin_path(), serde_json::to_string_pretty(&rec)?.as_bytes())
     }
@@ -282,16 +259,13 @@ mod tests {
         let store = CredentialStore::open(&dir).unwrap();
 
         assert!(!store.is_initialized());
-        let pw = store.init_admin().unwrap();
+        store.set_password("first-pass").unwrap(); // first-run wizard sets it
         assert!(store.is_initialized());
-        assert_eq!(pw.len(), 24);
-        assert!(store.verify_login(&pw).unwrap());
+        assert!(store.verify_login("first-pass").unwrap());
         assert!(!store.verify_login("nope").unwrap());
-        assert!(store.must_change_password().unwrap());
 
         store.set_password("new-strong-pass").unwrap();
         assert!(store.verify_login("new-strong-pass").unwrap());
-        assert!(!store.must_change_password().unwrap());
 
         assert!(!store.has_wallet());
         store.set_wallet("0xprivkey", "0xWalletAddr").unwrap();
