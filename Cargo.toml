@@ -1,0 +1,39 @@
+[package]
+name = "polyfarmer"
+version = "0.1.0"
+edition = "2021"
+description = "Self-hosted bot that farms LP rewards on Polymarket. Your keys never leave your machine."
+license = "MIT"
+repository = "https://github.com/Vayz0001/polyfarmer"
+
+# Binaries are auto-discovered: src/main.rs -> `polyfarmer`, src/bin/*.rs -> smoke tools.
+
+[dependencies]
+# ── Polymarket V2 CLOB SDK (official) ─────────────────────────────────────────
+# V2 cutover (Apr 28 2026) made V1 SDKs dead. `clob` feature required (default = []).
+# alloy/reqwest are PINNED to the versions this SDK expects — do NOT bump majors.
+polymarket_client_sdk_v2 = { version = "0.5.1", features = ["clob"] }
+
+# ── Async runtime + networking ────────────────────────────────────────────────
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }            # pinned by SDK
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = "0.3"
+
+# ── Ethereum signing ──────────────────────────────────────────────────────────
+alloy = { version = "1.0", features = ["signer-local"] }       # pinned by SDK
+
+# ── Numbers, time, serde ──────────────────────────────────────────────────────
+rust_decimal = { version = "1.36", features = ["serde"] }
+rust_decimal_macros = "1.36"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ── Config, secrets, errors, logging ──────────────────────────────────────────
+dotenvy = "0.15"
+secrecy = "0.10"
+eyre = "0.6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }

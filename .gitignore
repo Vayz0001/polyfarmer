@@ -1,0 +1,28 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+
+# Rust build artifacts
+/target/
+
+# NOTE: Cargo.lock IS committed (binary app — reproducible builds + advisory matching)
+
+# Runtime state (gitignored): markets, alerts, encrypted creds, sessions
+/data/
+markets.json
+alerts.json
+
+# Node (Discord notifier)
+node_modules/
+
+# IDE / OS
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
