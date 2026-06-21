@@ -19,18 +19,24 @@ fn unique_dir() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("pf-web-test-{pid}-{n}"))
 }
 
+fn empty_engine() -> Arc<tokio::sync::RwLock<polyfarmer::engine::ws_manager::AppState>> {
+    Arc::new(tokio::sync::RwLock::new(
+        polyfarmer::engine::ws_manager::AppState::new("markets.json".into()),
+    ))
+}
+
 /// Router backed by an *initialized* store (password set); returns it + password.
 fn test_app() -> (Router, String) {
     let store = CredentialStore::open(unique_dir()).unwrap();
     let pw = "test-password-123".to_string();
     store.set_password(&pw).unwrap();
-    (router(WebState::new(Arc::new(store))), pw)
+    (router(WebState::new(Arc::new(store), empty_engine())), pw)
 }
 
 /// Router backed by a fresh, *uninitialized* store (first-run state).
 fn test_app_uninit() -> Router {
     let store = CredentialStore::open(unique_dir()).unwrap();
-    router(WebState::new(Arc::new(store)))
+    router(WebState::new(Arc::new(store), empty_engine()))
 }
 
 async fn body_string(res: axum::response::Response) -> String {

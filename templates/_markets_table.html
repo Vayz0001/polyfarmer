@@ -1,0 +1,28 @@
+<div class="panel-head">
+  <h2>Tracked markets</h2>
+  <span class="hint">{{ rows.len() }} configured &middot; auto-refreshing</span>
+</div>
+<table>
+  <thead>
+    <tr><th>Market</th><th>Side</th><th>Distance</th><th>Size</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td class="mkt">{{ row.label }}<small>{{ row.url }}</small></td>
+      <td><span class="{{ row.side }}">{{ row.side_label }}</span> &middot; BUY</td>
+      <td class="num">{{ row.distance }}</td>
+      <td class="num">{{ row.size }}</td>
+      <td>
+        <span class="pill {{ row.status_class }}">
+          {% if row.status_class == "live" %}<span class="dot live"></span>{% endif %}
+          {{ row.status_label }}{% if let Some(p) = row.price %} &middot; {{ p }}{% endif %}
+        </span>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if rows.is_empty() %}
+    <tr><td colspan="5"><div class="empty">No markets configured yet. Add one from the dashboard once that's wired up.</div></td></tr>
+    {% endif %}
+  </tbody>
+</table>

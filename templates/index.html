@@ -3,28 +3,69 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>polyfarmer</title>
+  <title>polyfarmer · overview</title>
   <link rel="stylesheet" href="/assets/app.css" />
   <script src="/assets/htmx.min.js" defer></script>
 </head>
 <body>
-  <main class="wrap">
-    <div class="card">
-      <div class="brand"><span class="logo">▲</span> polyfarmer <span class="v">v{{ version }}</span></div>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">P</span> polyfarmer</div>
+      <nav class="nav">
+        <a href="/" class="active"><span class="ic">&#9676;</span> Overview</a>
+        <a href="/markets"><span class="ic">&#8801;</span> Markets</a>
+        <a href="/setup"><span class="ic">&#9881;</span> Setup</a>
+      </nav>
+      <div class="spacer"></div>
+      <div class="side-foot">
+        self-hosted &middot; keys never leave your machine
+        <form method="post" action="/logout" style="margin-top:10px">
+          <button class="btn ghost sm" type="submit">Log out</button>
+        </form>
+      </div>
+    </aside>
 
-      {% if !has_wallet %}
-        <div class="warn">No wallet configured — <a href="/setup">add it to start trading</a></div>
-      {% else %}
-        <div class="status"><span class="dot"></span> wallet configured</div>
-      {% endif %}
+    <div class="main">
+      <header class="topbar">
+        <h1>Overview</h1>
+        {% if engine_running %}
+          <span class="pill live"><span class="dot live"></span> Engine running</span>
+        {% else %}
+          <span class="pill idle"><span class="dot off"></span> Engine idle</span>
+        {% endif %}
+      </header>
 
-      <p class="muted">self-hosted · keys never leave your machine</p>
+      <div class="content">
+        {% if !has_wallet %}
+          <div class="warn">No wallet configured — <a href="/setup">add it in Setup</a> to start trading.</div>
+        {% endif %}
 
-      <div class="row">
-        <a class="btn ghost" href="/setup">Settings</a>
-        <form method="post" action="/logout"><button class="btn ghost" type="submit">Log out</button></form>
+        <section class="stats" style="margin-top:18px">
+          <div class="stat">
+            <div class="k">Active markets</div>
+            <div class="val num">{{ active_markets }}<span style="font-size:15px;color:var(--faint)"> / {{ total_markets }}</span></div>
+            <div class="sub">{{ paused_markets }} paused</div>
+          </div>
+          <div class="stat">
+            <div class="k">Live orders</div>
+            <div class="val num">{{ live_orders }}</div>
+            <div class="sub">resting near midpoint</div>
+          </div>
+          <div class="stat">
+            <div class="k">Wallet</div>
+            <div class="val">{% if has_wallet %}Configured{% else %}Not set{% endif %}</div>
+            <div class="sub">encrypted at rest</div>
+          </div>
+          <div class="stat">
+            <div class="k">Rewards today</div>
+            <div class="val num">&mdash;</div>
+            <div class="sub">coming soon</div>
+          </div>
+        </section>
+
+        <p class="muted">Manage which markets you're farming on the <a href="/markets">Markets</a> page.</p>
       </div>
     </div>
-  </main>
+  </div>
 </body>
 </html>

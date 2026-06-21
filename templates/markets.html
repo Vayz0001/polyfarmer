@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>polyfarmer · markets</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+  <script src="/assets/htmx.min.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">P</span> polyfarmer</div>
+      <nav class="nav">
+        <a href="/"><span class="ic">&#9676;</span> Overview</a>
+        <a href="/markets" class="active"><span class="ic">&#8801;</span> Markets</a>
+        <a href="/setup"><span class="ic">&#9881;</span> Setup</a>
+      </nav>
+      <div class="spacer"></div>
+      <div class="side-foot">
+        self-hosted &middot; keys never leave your machine
+        <form method="post" action="/logout" style="margin-top:10px">
+          <button class="btn ghost sm" type="submit">Log out</button>
+        </form>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <h1>Markets</h1>
+        <button class="btn" disabled title="coming soon">+ Add market</button>
+      </header>
+
+      <div class="content">
+        {% if !has_wallet %}
+          <div class="warn">No wallet configured — <a href="/setup">add it in Setup</a> to start trading.</div>
+        {% endif %}
+
+        <section class="panel" style="margin-top:18px"
+                  hx-get="/markets/table" hx-trigger="every 2s" hx-swap="innerHTML">
+          {% include "_markets_table.html" %}
+        </section>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

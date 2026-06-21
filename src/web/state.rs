@@ -1,9 +1,13 @@
-//! Shared web state: the credential store + a tiny in-memory login rate-limiter.
+//! Shared web state: credential store, live engine state, and a tiny in-memory
+//! login rate-limiter.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use tokio::sync::RwLock;
+
 use crate::creds::CredentialStore;
+use crate::engine::ws_manager::AppState;
 
 /// Lock the dashboard after this many consecutive failed logins.
 pub const MAX_LOGIN_FAILS: u32 = 5;
@@ -13,6 +17,9 @@ pub const LOCKOUT_SECS: u64 = 30;
 #[derive(Clone)]
 pub struct WebState {
     pub store: Arc<CredentialStore>,
+    /// Live engine state — shared with the trading engine. Populated by the
+    /// engine when running; readable by the dashboard at all times.
+    pub engine: Arc<RwLock<AppState>>,
     pub login_guard: Arc<Mutex<LoginGuard>>,
 }
 
@@ -23,9 +30,10 @@ pub struct LoginGuard {
 }
 
 impl WebState {
-    pub fn new(store: Arc<CredentialStore>) -> Self {
+    pub fn new(store: Arc<CredentialStore>, engine: Arc<RwLock<AppState>>) -> Self {
         Self {
             store,
+            engine,
             login_guard: Arc::new(Mutex::new(LoginGuard::default())),
         }
     }

@@ -41,13 +41,27 @@ pub async fn run() -> Result<()> {
         info!("First run — open the dashboard to create your admin password.");
     }
 
+    // ── Shared engine state ────────────────────────────────────────────────────
+    // Created up-front and shared with the dashboard, so the UI can read live
+    // markets/orders even before the wallet is configured (engine idle until then).
+    let initial_configs = load_markets(&config.markets_file)?;
+    info!("Loaded {} market configs", initial_configs.len());
+    let state = Arc::new(RwLock::new({
+        let mut s = AppState::new(config.markets_file.clone());
+        for cfg in &initial_configs {
+            s.order_status.insert(cfg.id.clone(), OrderStatus::Idle);
+        }
+        s.configs = initial_configs;
+        s
+    }));
+
     // ── Spawn: web dashboard (reachable even before the wallet is configured) ──
     {
         let bind = config.dashboard_bind.clone();
         match tokio::net::TcpListener::bind(&bind).await {
             Ok(listener) => {
                 info!("Dashboard on http://{}", bind);
-                let web_state = crate::web::WebState::new(Arc::clone(&store));
+                let web_state = crate::web::WebState::new(Arc::clone(&store), Arc::clone(&state));
                 let svc = crate::web::router(web_state)
                     .into_make_service_with_connect_info::<std::net::SocketAddr>();
                 tokio::spawn(async move {
@@ -82,30 +96,20 @@ pub async fn run() -> Result<()> {
     let alerter = Arc::new(Alerter::new(&config.alerts_file));
     let executor = Arc::new(Executor::new(creds.expose_key(), proxy_wallet).await?);
 
-    // ── Load initial markets ──────────────────────────────────────────────────
-    let initial_configs = load_markets(&config.markets_file)?;
-    info!("Loaded {} market configs", initial_configs.len());
-
     // ── Startup: cancel any open orders on tracked markets ────────────────────
     {
-        let startup_tokens: Vec<String> = initial_configs.iter()
-            .map(|c| c.token_id.clone())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
+        let startup_tokens: Vec<String> = {
+            let s = state.read().await;
+            s.configs.iter()
+                .map(|c| c.token_id.clone())
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect()
+        };
         executor.cancel_orders_for_tokens(&startup_tokens).await.map_err(|e| {
             eyre::eyre!("Startup cancel failed — refusing to start with potentially open orders: {}", e)
         })?;
     }
-
-    let state = Arc::new(RwLock::new({
-        let mut s = AppState::new(config.markets_file.clone());
-        for cfg in &initial_configs {
-            s.order_status.insert(cfg.id.clone(), OrderStatus::Idle);
-        }
-        s.configs = initial_configs;
-        s
-    }));
 
     // ── Channels ──────────────────────────────────────────────────────────────
     let (ws_cmd_tx, ws_cmd_rx) = mpsc::channel::<WsCommand>(20);

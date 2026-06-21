@@ -1,61 +1,111 @@
-/* polyfarmer — quant-terminal base (segment 2 scaffold) */
-:root{
-  --bg:#0a0b0d; --tile:#0e0f12; --line:#1c1e23; --line-2:#26282f;
-  --text:#e7e8ea; --dim:#878d98; --faint:#565b66;
-  --accent:#3ce0a0; --accent-dim:#0f2b22;
-  --mono: ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{
-  background:radial-gradient(circle at 1px 1px, rgba(255,255,255,.035) 1px, transparent 0) 0 0/22px 22px, var(--bg);
-  color:var(--text); font-family:var(--mono); font-size:13px; line-height:1.55;
-  -webkit-font-smoothing:antialiased; min-height:100vh;
-}
-.wrap{min-height:100vh;display:grid;place-items:center;padding:24px}
-.card{
-  border:1px solid var(--line); border-radius:14px; background:var(--tile);
-  padding:28px 32px; text-align:center; max-width:440px;
-  box-shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.35);
-}
-.brand{display:flex;align-items:center;justify-content:center;gap:10px;font-weight:600;letter-spacing:.02em;font-size:18px}
-.brand .logo{width:26px;height:26px;border:1px solid var(--accent);color:var(--accent);
-  border-radius:7px;display:grid;place-items:center;font-size:13px}
-.brand .v{color:var(--faint);font-weight:400;font-size:12px}
-.status{margin-top:18px;display:inline-flex;align-items:center;gap:9px;color:var(--accent);
-  border:1px solid var(--accent-dim);background:color-mix(in srgb,var(--accent-dim) 55%,transparent);
-  padding:6px 13px;border-radius:999px;font-size:12.5px}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;
-  box-shadow:0 0 0 0 var(--accent);animation:pulse 2s infinite}
-@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(60,224,160,.5)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}
-.muted{margin-top:16px;color:var(--faint);font-size:11.5px}
+/* polyfarmer — light/cream editorial theme (Geist) */
 
-/* forms */
-.card{max-width:520px}
-.card.setup{text-align:left;max-width:560px}
-.stack{display:flex;flex-direction:column;gap:10px;text-align:left}
-.section{padding:16px 0;border-top:1px solid var(--line);margin-top:8px}
-.section:first-of-type{border-top:none}
-.h{font-size:13px;font-weight:600;letter-spacing:.02em}
-.lbl{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em}
-.inp{
-  width:100%;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;
-  border:1px solid var(--line-2);border-radius:8px;padding:9px 11px;outline:none;
+@font-face {
+  font-family: 'Geist';
+  src: url('/assets/fonts/Geist.woff2') format('woff2');
+  font-weight: 100 900; font-display: swap; font-style: normal;
 }
-.inp:focus{border-color:var(--accent)}
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:7px;
-  background:var(--accent);color:#06210f;border:1px solid var(--accent);border-radius:8px;
-  padding:9px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:filter .15s,transform .05s;
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/assets/fonts/GeistMono.woff2') format('woff2');
+  font-weight: 100 900; font-display: swap; font-style: normal;
 }
-.btn:hover{filter:brightness(1.08)} .btn:active{transform:translateY(1px)}
-.btn.ghost{background:transparent;color:var(--text);border-color:var(--line-2);font-weight:500}
-.btn.ghost:hover{background:var(--tile)}
-.row{display:flex;gap:10px;align-items:center;margin-top:18px}
-.err{color:var(--bg);background:#ff6b6b;border-radius:8px;padding:8px 11px;font-size:12px}
-.ok{color:#06210f;background:var(--accent);border-radius:8px;padding:8px 11px;font-size:12px}
-.ok-inline{color:var(--accent);font-size:11px;font-weight:500}
-.warn{color:var(--warn,#f5b94a);border:1px solid color-mix(in srgb,#f5b94a 35%,transparent);
-  border-radius:8px;padding:8px 11px;font-size:12.5px;margin-top:14px}
-.warn a{color:var(--accent)}
-.warn-inline{color:#f5b94a;font-size:11px;font-weight:500}
+
+:root{
+  --bg:#f7f4ed;        /* cream page */
+  --surface:#fcfbf8;   /* cards */
+  --surface-2:#f2efe7; /* subtle fill */
+  --fg:#1c1c1c;
+  --muted:#5f5f5d;
+  --faint:#8a8782;
+  --border:#eceae4;
+  --border-2:#e2dfd7;
+  --accent:#3b82f6;
+  --accent-fg:#ffffff;
+  --green:#15803d;     /* bids / positive */
+  --green-bg:#dcefe1;
+  --red:#dc2626;       /* asks / negative */
+  --red-bg:#fde0e0;
+  --amber:#b45309;
+  --radius:12px;
+  --shadow:0 1px 2px rgba(28,28,28,.04), 0 8px 24px rgba(28,28,28,.05);
+  --sans:'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono:'Geist Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
 a{color:var(--accent);text-decoration:none}
+.num,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ── Centered card pages (login / welcome / setup) ───────────────────────── */
+.wrap{min-height:100vh;display:grid;place-items:center;padding:24px}
+.card{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);padding:26px 30px;box-shadow:var(--shadow);max-width:520px;width:100%}
+.card.setup{max-width:560px;text-align:left}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.01em;font-size:17px}
+.brand .logo{width:26px;height:26px;border-radius:7px;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700}
+.brand .v{color:var(--faint);font-weight:400;font-size:12px}
+.muted{color:var(--muted);font-size:12.5px;margin-top:14px}
+.stack{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.section{padding:16px 0;border-top:1px solid var(--border);margin-top:8px}
+.section:first-of-type{border-top:none}
+.h{font-size:13px;font-weight:600}
+.lbl{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em}
+
+/* ── Forms ───────────────────────────────────────────────────────────────── */
+.inp{width:100%;background:#fff;color:var(--fg);font-family:var(--sans);font-size:13.5px;border:1px solid var(--border-2);border-radius:9px;padding:10px 12px;outline:none}
+.inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--accent);color:var(--accent-fg);border:1px solid var(--accent);border-radius:9px;padding:9px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;transition:filter .15s,transform .05s}
+.btn:hover{filter:brightness(1.05)} .btn:active{transform:translateY(1px)}
+.btn.ghost{background:transparent;color:var(--fg);border-color:var(--border-2);font-weight:500}
+.btn.ghost:hover{background:var(--surface-2)}
+.btn.sm{padding:5px 10px;font-size:12px;border-radius:7px}
+.row{display:flex;gap:10px;align-items:center;margin-top:18px}
+.err{color:#fff;background:var(--red);border-radius:8px;padding:8px 11px;font-size:12.5px}
+.ok{color:#0a3d1c;background:var(--green-bg);border-radius:8px;padding:8px 11px;font-size:12.5px}
+.ok-inline{color:var(--green);font-size:11px;font-weight:500}
+.warn{color:var(--amber);background:#fbf1df;border:1px solid #f0e0c0;border-radius:8px;padding:8px 11px;font-size:12.5px;margin-top:14px}
+.warn-inline{color:var(--amber);font-size:11px;font-weight:500}
+
+/* ── App shell (sidebar + main) ──────────────────────────────────────────── */
+.app{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:18px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.sidebar .brand{padding:6px 8px 20px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;color:var(--muted);font-weight:500;transition:background .15s,color .15s}
+.nav a:hover{background:var(--surface-2);color:var(--fg)}
+.nav a.active{background:var(--surface-2);color:var(--fg)}
+.nav a .ic{width:16px;text-align:center;color:var(--faint)}
+.nav a.active .ic{color:var(--accent)}
+.sidebar .spacer{flex:1}
+.side-foot{border-top:1px solid var(--border);padding-top:12px;font-size:12px;color:var(--faint)}
+
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--border)}
+.topbar h1{font-size:18px;font-weight:650;letter-spacing:-.02em}
+.content{padding:24px 28px 48px;max-width:1180px;width:100%}
+
+/* stat cards */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.stat{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);padding:16px;box-shadow:var(--shadow)}
+.stat .k{color:var(--faint);font-size:11.5px;display:flex;align-items:center;gap:7px}
+.stat .val{font-size:26px;font-weight:650;letter-spacing:-.02em;margin-top:8px}
+.stat .sub{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* panel + table */
+.panel{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden;box-shadow:var(--shadow)}
+.panel-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border)}
+.panel-head h2{font-size:13.5px;font-weight:600}
+.panel-head .hint{font-size:12px;color:var(--faint)}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);padding:10px 16px}
+td{padding:12px 16px;border-top:1px solid var(--border);font-size:13px;vertical-align:middle}
+tbody tr{transition:background .12s} tbody tr:hover{background:var(--surface-2)}
+.mkt{font-weight:500} .mkt small{display:block;color:var(--faint);font-weight:400;font-size:11.5px;margin-top:2px}
+.yes{color:var(--green);font-weight:600} .no{color:var(--red);font-weight:600}
+.empty{padding:36px 16px;text-align:center;color:var(--faint);font-size:13px}
+
+@media(max-width:860px){
+  .app{grid-template-columns:1fr} .sidebar{display:none}
+  .stats{grid-template-columns:repeat(2,1fr)}
+}

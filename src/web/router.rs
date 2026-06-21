@@ -3,35 +3,19 @@
 
 use std::net::SocketAddr;
 
-use askama::Template;
 use axum::{
     extract::{ConnectInfo, Request, State},
     http::StatusCode,
     middleware::Next,
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
 use tower_sessions::cookie::SameSite;
-use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
+use tower_sessions::{MemoryStore, SessionManagerLayer};
 
 use super::state::WebState;
-use super::{assets, auth, setup};
-
-#[derive(Template)]
-#[template(path = "index.html")]
-struct IndexTemplate {
-    version: &'static str,
-    has_wallet: bool,
-}
-
-async fn index(State(state): State<WebState>, _session: Session) -> Html<String> {
-    let tpl = IndexTemplate {
-        version: env!("CARGO_PKG_VERSION"),
-        has_wallet: state.store.has_wallet(),
-    };
-    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
-}
+use super::{assets, auth, dashboard, setup};
 
 /// Until an admin password is set, only loopback clients may reach the dashboard
 /// — so the first-run setup window can't be hijacked even if bound to 0.0.0.0.
@@ -68,7 +52,9 @@ pub fn router(state: WebState) -> Router {
         .with_secure(false);
 
     let protected: Router<WebState> = Router::new()
-        .route("/", get(index))
+        .route("/", get(dashboard::overview))
+        .route("/markets", get(dashboard::markets))
+        .route("/markets/table", get(dashboard::markets_table))
         .route("/setup", get(setup::page))
         .route("/setup/password", post(setup::set_password))
         .route("/setup/wallet", post(setup::set_wallet))

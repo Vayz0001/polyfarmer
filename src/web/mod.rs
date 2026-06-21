@@ -6,6 +6,7 @@
 
 mod assets;
 mod auth;
+mod dashboard;
 mod router;
 mod setup;
 mod state;

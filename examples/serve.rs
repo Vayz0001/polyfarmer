@@ -8,7 +8,9 @@
 use std::sync::Arc;
 
 use polyfarmer::creds::CredentialStore;
+use polyfarmer::engine::ws_manager::AppState;
 use polyfarmer::web::{router, WebState};
+use tokio::sync::RwLock;
 
 #[tokio::main]
 async fn main() {
@@ -16,7 +18,9 @@ async fn main() {
     if !store.is_initialized() {
         println!("\n  first run — open the dashboard to create your admin password\n");
     }
-    let state = WebState::new(Arc::new(store));
+    // Empty engine state for the preview (no trading).
+    let engine = Arc::new(RwLock::new(AppState::new("data/markets.json".into())));
+    let state = WebState::new(Arc::new(store), engine);
 
     let bind = "127.0.0.1:8080";
     let listener = tokio::net::TcpListener::bind(bind).await.expect("bind");
