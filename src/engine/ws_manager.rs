@@ -41,6 +41,9 @@ pub struct AppState {
     /// Set by heartbeat after 3 consecutive failures + order cancel.
     /// Prevents new placements until heartbeat recovers.
     pub heartbeat_paused: bool,
+    /// Engine lifecycle phase — driven by the boot task, read by the dashboard
+    /// to show first-run auto-start progress without a manual restart.
+    pub engine_phase: crate::types::EnginePhase,
 }
 
 impl AppState {
@@ -53,6 +56,7 @@ impl AppState {
             place_failures: HashMap::new(),
             markets_file,
             heartbeat_paused: false,
+            engine_phase: crate::types::EnginePhase::AwaitingWallet,
         }
     }
 }

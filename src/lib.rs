@@ -9,4 +9,5 @@ pub mod creds;
 pub mod engine;
 pub mod storage;
 pub mod types;
+pub mod wallet_detect;
 pub mod web;

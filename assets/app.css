@@ -31,17 +31,34 @@
   --shadow:0 1px 2px rgba(28,28,28,.04), 0 8px 24px rgba(28,28,28,.05);
   --sans:'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono:'Geist Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace;
+
+  /* One motion language, reused everywhere — physical, slightly springy,
+     never linear. This single curve is what makes transitions feel
+     considered rather than abrupt or default. */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;-webkit-text-stroke:0.2px currentColor;min-height:100vh}
 a{color:var(--accent);text-decoration:none}
 .num,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ── Shared entrance animations — applied to anything that appears ───────── */
+@keyframes pf-rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pf-collapse{from{opacity:1;max-height:60px;margin-top:10px}to{opacity:0;max-height:0;margin-top:0}}
+@keyframes pf-expand{from{opacity:0;max-height:0;margin-top:0;transform:translateY(-3px)}to{opacity:1;max-height:96px;margin-top:10px;transform:translateY(0)}}
+.pf-rise{animation:pf-rise .32s var(--ease-spring) both}
 
 /* ── Centered card pages (login / welcome / setup) ───────────────────────── */
 .wrap{min-height:100vh;display:grid;place-items:center;padding:24px}
 .card{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);padding:26px 30px;box-shadow:var(--shadow);max-width:520px;width:100%}
 .card.setup{max-width:560px;text-align:left}
+.setup-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.icon-btn{display:grid;place-items:center;width:34px;height:34px;padding:0;border:1px solid var(--border-2);background:transparent;color:var(--muted);border-radius:9px;cursor:pointer;transition:color .12s ease,background-color .12s ease,border-color .12s ease}
+.icon-btn:hover{color:var(--fg);background:var(--surface-2)}
+.icon-btn:active{background:var(--border)}
+.icon-btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(28,28,28,.08)}
+.icon-btn svg{width:17px;height:17px;display:block}
 .brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.01em;font-size:17px}
 .brand .logo{width:26px;height:26px;border-radius:7px;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700}
 .brand .v{color:var(--faint);font-weight:400;font-size:12px}
@@ -51,15 +68,46 @@ a{color:var(--accent);text-decoration:none}
 .section:first-of-type{border-top:none}
 .h{font-size:13px;font-weight:600}
 .lbl{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em}
+.lbl-row{display:flex;align-items:baseline;justify-content:space-between}
 
 /* ── Forms ───────────────────────────────────────────────────────────────── */
-.inp{width:100%;background:#fff;color:var(--fg);font-family:var(--sans);font-size:13.5px;border:1px solid var(--border-2);border-radius:9px;padding:10px 12px;outline:none}
+.inp{width:100%;background:#fff;color:var(--fg);font-family:var(--sans);font-size:13.5px;border:1px solid var(--border-2);border-radius:9px;padding:10px 12px;outline:none;transition:border-color .18s var(--ease-spring), box-shadow .18s var(--ease-spring)}
 .inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:var(--accent);color:var(--accent-fg);border:1px solid var(--accent);border-radius:9px;padding:9px 15px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;transition:filter .15s,transform .05s}
-.btn:hover{filter:brightness(1.05)} .btn:active{transform:translateY(1px)}
+.inp-wrap{position:relative}
+/* Borderless affordance inside a field — quiet, no lift/shadow (it's not a .btn) */
+.inp-action{position:absolute;right:7px;top:50%;transform:translateY(-50%);
+  display:grid;place-items:center;width:30px;height:30px;padding:0;
+  border:none;background:transparent;color:var(--faint);cursor:pointer;border-radius:7px;
+  transition:color .12s ease, background-color .12s ease}
+.inp-action:hover{color:var(--fg);background:var(--surface-2)}
+.inp-action:active{background:var(--border)}
+.inp-action:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+.inp-action svg{width:16px;height:16px;display:block}
+.inp-action .ico-eye-off{display:none}
+.inp-action.is-shown .ico-eye{display:none}
+.inp-action.is-shown .ico-eye-off{display:block}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  background:var(--accent);color:var(--accent-fg);border:1px solid var(--accent);
+  border-radius:9px;padding:9px 15px;font:inherit;font-size:13.5px;font-weight:600;
+  cursor:pointer;
+  transition:transform .18s var(--ease-spring), box-shadow .18s var(--ease-spring), filter .12s ease, background-color .12s ease;
+}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(59,130,246,.25);filter:brightness(1.04)}
+.btn:active{transform:translateY(0);box-shadow:0 1px 3px rgba(59,130,246,.2);filter:brightness(.98)}
+.btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(59,130,246,.3)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+
 .btn.ghost{background:transparent;color:var(--fg);border-color:var(--border-2);font-weight:500}
-.btn.ghost:hover{background:var(--surface-2)}
+.btn.ghost:hover{background:var(--surface-2);box-shadow:0 2px 8px rgba(28,28,28,.06);filter:none}
+.btn.ghost:active{background:var(--border);box-shadow:none}
+.btn.ghost:focus-visible{box-shadow:0 0 0 3px rgba(28,28,28,.08)}
+
 .btn.sm{padding:5px 10px;font-size:12px;border-radius:7px}
+/* Calm post-save confirmation — the button settles into this in place */
+.btn.btn-ok{background:var(--green-bg);border-color:var(--green-bg);color:var(--green);box-shadow:none;cursor:default;pointer-events:none}
+/* Keeps the submit button full-width (it's no longer a direct .stack child) */
+#save-region{display:flex;flex-direction:column;gap:10px}
 .row{display:flex;gap:10px;align-items:center;margin-top:18px}
 .err{color:#fff;background:var(--red);border-radius:8px;padding:8px 11px;font-size:12.5px}
 .ok{color:#0a3d1c;background:var(--green-bg);border-radius:8px;padding:8px 11px;font-size:12.5px}
@@ -67,13 +115,24 @@ a{color:var(--accent);text-decoration:none}
 .warn{color:var(--amber);background:#fbf1df;border:1px solid #f0e0c0;border-radius:8px;padding:8px 11px;font-size:12.5px;margin-top:14px}
 .warn-inline{color:var(--amber);font-size:11px;font-weight:500}
 
+/* htmx loading indicator — hidden by default, faded in during a request */
+.htmx-indicator{opacity:0;font-size:11.5px;transition:opacity .15s ease}
+.htmx-request.htmx-indicator,.htmx-request .htmx-indicator{opacity:1}
+
+/* wallet address reveal/collapse — transition for same-node JS toggles,
+   animation for the OOB-swapped server response (a fresh node each time) */
+#wallet-field-wrap{overflow:hidden;max-height:96px;opacity:1;margin-top:10px;display:flex;flex-direction:column;gap:6px;
+  transition:max-height .28s var(--ease-spring), opacity .2s ease, margin-top .28s var(--ease-spring)}
+#wallet-field-wrap.pf-collapse{max-height:0;opacity:0;margin-top:0;pointer-events:none}
+#wallet-field-wrap.pf-expand{animation:pf-expand .34s var(--ease-spring) both}
+
 /* ── App shell (sidebar + main) ──────────────────────────────────────────── */
 .app{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
 .sidebar{background:var(--surface);border-right:1px solid var(--border);padding:18px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
 .sidebar .brand{padding:6px 8px 20px}
 .nav{display:flex;flex-direction:column;gap:2px}
-.nav a{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;color:var(--muted);font-weight:500;transition:background .15s,color .15s}
-.nav a:hover{background:var(--surface-2);color:var(--fg)}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;color:var(--muted);font-weight:500;transition:background-color .12s ease,color .12s ease,transform .12s ease}
+.nav a:hover{background:var(--surface-2);color:var(--fg);transform:translateX(1px)}
 .nav a.active{background:var(--surface-2);color:var(--fg)}
 .nav a .ic{width:16px;text-align:center;color:var(--faint)}
 .nav a.active .ic{color:var(--accent)}

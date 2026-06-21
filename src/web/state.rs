@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 
 use crate::creds::CredentialStore;
 use crate::engine::ws_manager::AppState;
@@ -21,6 +21,13 @@ pub struct WebState {
     /// engine when running; readable by the dashboard at all times.
     pub engine: Arc<RwLock<AppState>>,
     pub login_guard: Arc<Mutex<LoginGuard>>,
+    /// Optional custom Polygon RPC for on-chain wallet detection (see
+    /// `wallet_detect`). `None` means use the public fallback list.
+    pub polygon_rpc_url: Option<String>,
+    /// Pinged by `set_wallet` so the boot task can start the engine the moment
+    /// a wallet is first configured — no restart. Carries no data (the boot
+    /// task re-reads the encrypted file itself), so no secret crosses it.
+    pub wallet_ready: Arc<Notify>,
 }
 
 #[derive(Default)]
@@ -31,10 +38,20 @@ pub struct LoginGuard {
 
 impl WebState {
     pub fn new(store: Arc<CredentialStore>, engine: Arc<RwLock<AppState>>) -> Self {
+        Self::with_rpc(store, engine, None)
+    }
+
+    pub fn with_rpc(
+        store: Arc<CredentialStore>,
+        engine: Arc<RwLock<AppState>>,
+        polygon_rpc_url: Option<String>,
+    ) -> Self {
         Self {
             store,
             engine,
             login_guard: Arc::new(Mutex::new(LoginGuard::default())),
+            polygon_rpc_url,
+            wallet_ready: Arc::new(Notify::new()),
         }
     }
 }

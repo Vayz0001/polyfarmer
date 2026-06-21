@@ -1,0 +1,14 @@
+{% if saved %}
+<button class="btn btn-ok pf-rise" type="button" aria-disabled="true">✓ Saved</button>
+{% if first_time %}
+<div id="engine-status" class="pf-rise" hx-get="/setup/engine-status" hx-trigger="load delay:400ms" hx-swap="outerHTML">
+  <p class="muted" style="margin-top:0">Starting the bot…</p>
+</div>
+{% else %}
+<p class="muted pf-rise" style="margin-top:0">Restart the bot to switch wallets.</p>
+{% endif %}
+<span id="key-badge" hx-swap-oob="true"><span class="ok-inline">✓ configured</span></span>
+{% else %}
+<div class="err pf-rise">{{ message }}</div>
+<button class="btn" type="submit">Save</button>
+{% endif %}

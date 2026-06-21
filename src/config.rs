@@ -18,6 +18,9 @@ pub struct Config {
     pub alerts_file: PathBuf,
     /// Dashboard bind address (default localhost; override for tunnels/containers).
     pub dashboard_bind: String,
+    /// Optional custom Polygon RPC for on-chain wallet detection during setup.
+    /// Falls back to a public-RPC list if unset — see `wallet_detect`.
+    pub polygon_rpc_url: Option<String>,
 }
 
 impl Config {
@@ -34,7 +37,8 @@ impl Config {
         );
         let dashboard_bind =
             env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+        let polygon_rpc_url = env::var("POLYGON_RPC_URL").ok();
 
-        Ok(Config { data_dir, markets_file, alerts_file, dashboard_bind })
+        Ok(Config { data_dir, markets_file, alerts_file, dashboard_bind, polygon_rpc_url })
     }
 }

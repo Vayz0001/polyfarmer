@@ -58,6 +58,8 @@ pub fn router(state: WebState) -> Router {
         .route("/setup", get(setup::page))
         .route("/setup/password", post(setup::set_password))
         .route("/setup/wallet", post(setup::set_wallet))
+        .route("/setup/wallet/detect", post(setup::detect_wallet))
+        .route("/setup/engine-status", get(setup::engine_status))
         .route("/logout", post(auth::logout))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

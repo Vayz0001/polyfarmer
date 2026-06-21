@@ -5,6 +5,7 @@ edition = "2021"
 description = "Self-hosted bot that farms LP rewards on Polymarket. Your keys never leave your machine."
 license = "MIT"
 repository = "https://github.com/Vayz0001/polyfarmer"
+default-run = "polyfarmer"
 
 # Binaries are auto-discovered: src/main.rs -> `polyfarmer`, src/bin/*.rs -> smoke tools.
 
@@ -29,6 +30,7 @@ rust_decimal_macros = "1.36"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+hex = "0.4"
 
 # ── Web dashboard (axum + askama + embedded assets) ───────────────────────────
 # Shares hyper 1 / http 1 / tower 0.5 with the SDK tree — no version conflict.

@@ -3220,6 +3220,7 @@ dependencies = [
  "dotenvy",
  "eyre",
  "futures-util",
+ "hex",
  "mime_guess",
  "polymarket_client_sdk_v2",
  "rand 0.8.6",

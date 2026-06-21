@@ -8,13 +8,13 @@ use crate::engine::quoter::QuoteAction;
 use crate::engine::{heartbeat, quoter, ws_manager};
 use crate::engine::ws_manager::{AppState, MAX_PLACE_FAILURES};
 use crate::storage::{load_markets, save_markets};
-use crate::types::{MarketConfig, OrderStatus, WsCommand};
+use crate::types::{EnginePhase, MarketConfig, OrderStatus, WsCommand};
 
 use eyre::Result;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, watch, RwLock};
+use tokio::sync::{mpsc, watch, Notify, RwLock};
 use tracing::{error, info, warn};
 
 const MARKETS_POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -55,13 +55,22 @@ pub async fn run() -> Result<()> {
         s
     }));
 
+    let alerter = Arc::new(Alerter::new(&config.alerts_file));
+
     // ── Spawn: web dashboard (reachable even before the wallet is configured) ──
-    {
+    // Returns a handle the boot task awaits, so configuring a wallet in the
+    // dashboard starts the engine immediately — no restart on first run.
+    let wallet_ready = {
         let bind = config.dashboard_bind.clone();
         match tokio::net::TcpListener::bind(&bind).await {
             Ok(listener) => {
                 info!("Dashboard on http://{}", bind);
-                let web_state = crate::web::WebState::new(Arc::clone(&store), Arc::clone(&state));
+                let web_state = crate::web::WebState::with_rpc(
+                    Arc::clone(&store),
+                    Arc::clone(&state),
+                    config.polygon_rpc_url.clone(),
+                );
+                let ready = Arc::clone(&web_state.wallet_ready);
                 let svc = crate::web::router(web_state)
                     .into_make_service_with_connect_info::<std::net::SocketAddr>();
                 tokio::spawn(async move {
@@ -69,35 +78,61 @@ pub async fn run() -> Result<()> {
                         error!("Web server error: {}", e);
                     }
                 });
+                ready
             }
-            Err(e) => error!("Failed to bind dashboard on {}: {}", bind, e),
-        }
-    }
-
-    // ── Wallet credentials (entered via dashboard, encrypted at rest) ──────────
-    let creds = match store.load_wallet()? {
-        Some(c) => c,
-        None => {
-            warn!(
-                "No wallet configured — open the dashboard at http://{} to set it up, \
-                 then restart to begin trading.",
-                config.dashboard_bind
-            );
-            tokio::signal::ctrl_c().await?;
-            info!("Shutdown complete");
-            return Ok(());
+            // No dashboard means no way to configure a wallet at runtime; the
+            // wait-loop below falls back to its periodic re-check of the file.
+            Err(e) => {
+                error!("Failed to bind dashboard on {}: {}", bind, e);
+                Arc::new(tokio::sync::Notify::new())
+            }
         }
     };
-    let proxy_wallet: alloy::primitives::Address = creds
-        .proxy_wallet
-        .parse()
-        .map_err(|_| eyre::eyre!("stored proxy wallet is not a valid address"))?;
 
-    let alerter = Arc::new(Alerter::new(&config.alerts_file));
-    let executor = Arc::new(Executor::new(creds.expose_key(), proxy_wallet).await?);
+    // ── Wallet credentials: wait until one is configured, then build the
+    //    executor. Each leg can fail without killing the process — on failure
+    //    we set EnginePhase::Error and loop back to waiting, so re-saving the
+    //    wallet in the dashboard retries. This is the first-run auto-start path.
+    let executor = loop {
+        let creds = match store.load_wallet() {
+            Ok(Some(c)) => c,
+            Ok(None) => {
+                set_phase(&state, EnginePhase::AwaitingWallet).await;
+                info!("No wallet configured — waiting (configure at http://{})", config.dashboard_bind);
+                if wait_or_exit(&wallet_ready).await { return Ok(()); }
+                continue;
+            }
+            Err(e) => {
+                // A store read error (e.g. corrupt master.key) is not something
+                // the user can fix from the dashboard — fail loudly.
+                return Err(eyre::eyre!("Failed to read wallet store: {}", e));
+            }
+        };
 
-    // ── Startup: cancel any open orders on tracked markets ────────────────────
-    {
+        let proxy_wallet: alloy::primitives::Address = match creds.proxy_wallet.parse() {
+            Ok(a) => a,
+            Err(_) => {
+                error!("Stored proxy wallet is not a valid address — re-enter it in the dashboard");
+                set_phase(&state, EnginePhase::Error).await;
+                if wait_or_exit(&wallet_ready).await { return Ok(()); }
+                continue;
+            }
+        };
+
+        set_phase(&state, EnginePhase::Starting).await;
+
+        let executor = match Executor::new(creds.expose_key(), proxy_wallet).await {
+            Ok(e) => Arc::new(e),
+            Err(e) => {
+                error!("Could not authenticate with Polymarket: {}", e);
+                alerter.error("Wallet saved, but the engine couldn't start (Polymarket auth/network). Check logs and re-save to retry.");
+                set_phase(&state, EnginePhase::Error).await;
+                if wait_or_exit(&wallet_ready).await { return Ok(()); }
+                continue;
+            }
+        };
+
+        // ── Startup safety: cancel any open orders on tracked markets ─────────
         let startup_tokens: Vec<String> = {
             let s = state.read().await;
             s.configs.iter()
@@ -106,10 +141,18 @@ pub async fn run() -> Result<()> {
                 .into_iter()
                 .collect()
         };
-        executor.cancel_orders_for_tokens(&startup_tokens).await.map_err(|e| {
-            eyre::eyre!("Startup cancel failed — refusing to start with potentially open orders: {}", e)
-        })?;
-    }
+        if let Err(e) = executor.cancel_orders_for_tokens(&startup_tokens).await {
+            error!("Startup cancel failed — refusing to trade with potentially open orders: {}", e);
+            alerter.error("Engine start aborted: could not clear existing orders. Check logs and re-save to retry.");
+            set_phase(&state, EnginePhase::Error).await;
+            if wait_or_exit(&wallet_ready).await { return Ok(()); }
+            continue;
+        }
+
+        break executor;
+    };
+
+    set_phase(&state, EnginePhase::Running).await;
 
     // ── Channels ──────────────────────────────────────────────────────────────
     let (ws_cmd_tx, ws_cmd_rx) = mpsc::channel::<WsCommand>(20);
@@ -235,6 +278,30 @@ pub async fn run() -> Result<()> {
 
     info!("Shutdown complete");
     Ok(())
+}
+
+// ── Boot helpers ────────────────────────────────────────────────────────────
+
+/// Set the engine phase on shared state (brief write lock, released at once).
+async fn set_phase(state: &Arc<RwLock<AppState>>, phase: EnginePhase) {
+    state.write().await.engine_phase = phase;
+}
+
+/// Park until the wallet is (re)configured, a periodic re-check fires, or the
+/// process is asked to shut down. Returns `true` when we should exit now.
+///
+/// The `notified()` arm is the fast path (fires the instant `set_wallet` pings
+/// it); the 3s sleep is belt-and-suspenders so a missed notify still self-heals
+/// — the caller re-reads the file each loop, so the bot can't silently hang.
+async fn wait_or_exit(wallet_ready: &Notify) -> bool {
+    tokio::select! {
+        _ = wallet_ready.notified() => false,
+        _ = tokio::time::sleep(Duration::from_secs(3)) => false,
+        _ = tokio::signal::ctrl_c() => {
+            info!("Shutdown requested before a wallet was configured");
+            true
+        }
+    }
 }
 
 // ── Markets watcher ───────────────────────────────────────────────────────────

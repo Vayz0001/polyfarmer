@@ -147,7 +147,7 @@ async fn full_login_grants_access() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    assert!(body_string(res).await.contains("Wallet"));
+    assert!(body_string(res).await.contains("Private Key"));
 }
 
 #[tokio::test]

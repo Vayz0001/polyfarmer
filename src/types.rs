@@ -102,6 +102,24 @@ impl Default for OrderStatus {
     }
 }
 
+// ── Engine lifecycle phase (in-memory only) ───────────────────────────────────
+// Surfaced to the dashboard so the UI can show the truth during first-run
+// auto-start (no manual restart). Set by the boot task in `app.rs`.
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum EnginePhase {
+    /// No wallet configured yet — boot task is parked waiting for one.
+    #[default]
+    AwaitingWallet,
+    /// Wallet found; authenticating with Polymarket / cancelling stale orders.
+    Starting,
+    /// Engine tasks spawned and trading.
+    Running,
+    /// Auto-start failed (auth/network/startup-cancel). Boot task is back to
+    /// waiting, so re-saving the wallet retries. Detail is logged, not shown.
+    Error,
+}
+
 // ── Alert (appended to alerts.json by Rust, read+DM'd by TS Discord bot) ──────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
