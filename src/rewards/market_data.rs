@@ -112,8 +112,11 @@ pub struct PlacementEval {
     pub qualifies: bool,
     /// Distance below the midpoint, in cents (negative if at/above midpoint).
     pub cents_from_mid: Decimal,
-    /// Size that actually rests on this side ( = order_size, or /2 if both_sides).
+    /// USD that actually rests on this side ( = order_size, or /2 if both_sides).
     pub per_side_size: Decimal,
+    /// Shares that rest on this side ( = per-side USD / price). The reward
+    /// minimum is a SHARE count, so this is what `per_side_meets_min` checks.
+    pub per_side_shares: Decimal,
     pub per_side_meets_min: bool,
     pub fill_risk: FillRisk,
 }
@@ -129,7 +132,16 @@ pub fn evaluate_placement(
 ) -> PlacementEval {
     let cents_from_mid = (midpoint - your_price) * dec!(100);
     let per_side_size = if both_sides { order_size / dec!(2) } else { order_size };
-    let per_side_meets_min = per_side_size >= min_size;
+
+    // The reward minimum is a SHARE count, not USD — compare shares
+    // (per-side USD / price), not the dollar amount. (Was a units bug: e.g. at
+    // 50c, "$200" is 400 shares, but comparing 200 >= 200 mis-qualified.)
+    let per_side_shares = if your_price > dec!(0) {
+        (per_side_size / your_price).round_dp(2)
+    } else {
+        dec!(0)
+    };
+    let per_side_meets_min = per_side_shares >= min_size;
 
     // Reward-qualifying: within max_spread of the midpoint (we farm the bid
     // side, so the order sits at or below the midpoint) AND each resting order
@@ -141,7 +153,9 @@ pub fn evaluate_placement(
         qualifies,
         cents_from_mid,
         per_side_size,
+        per_side_shares,
         per_side_meets_min,
+        // Fill risk compares USDC depth-ahead to USD size, so it stays in USD.
         fill_risk: fill_risk(book, your_price, per_side_size),
     }
 }
@@ -491,9 +505,11 @@ mod tests {
     #[test]
     fn both_sides_halves_size_and_can_break_min() {
         let b = book(dec!(0.40), &[(dec!(0.40), dec!(1000))]);
-        // $30 split → $15/side < $20 min → does not qualify even though in band.
-        let e = evaluate_placement(&b, dec!(0.42), dec!(3), dec!(20), dec!(0.40), dec!(30), true);
-        assert_eq!(e.per_side_size, dec!(15));
+        // Min is a SHARE count (20). $12 split → $6/side; at 0.40 that's only
+        // 15 shares/side < 20 → does not qualify even though it's in band.
+        let e = evaluate_placement(&b, dec!(0.42), dec!(3), dec!(20), dec!(0.40), dec!(12), true);
+        assert_eq!(e.per_side_size, dec!(6));
+        assert_eq!(e.per_side_shares, dec!(15));
         assert!(!e.per_side_meets_min);
         assert!(!e.qualifies);
     }

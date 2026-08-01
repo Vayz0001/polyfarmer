@@ -261,9 +261,23 @@ tbody tr{transition:background .12s} tbody tr:hover{background:var(--surface-2)}
 .book-row.in-band:hover{background:rgba(255,77,141,.08)}
 .key-band{display:inline-block;width:3px;height:11px;background:var(--accent);border-radius:1px;vertical-align:-1px;margin-right:4px}
 /* your resting price */
-.book-row.is-yours{box-shadow:inset 0 0 0 1.5px var(--accent);border-radius:5px;background:var(--accent-soft)}
+/* "your order" = a PREVIEW of where your order would rest (not a held position),
+   so it's a dashed ghost outline rather than a solid filled badge. */
+.book-row.is-yours{box-shadow:inset 0 0 0 1px var(--accent);border-radius:5px;background:transparent}
 .you-tag{margin-left:6px;font-family:var(--sans);font-size:9px;font-weight:700;text-transform:uppercase;
-  letter-spacing:.03em;color:var(--accent-fg);background:var(--accent);border-radius:4px;padding:1px 5px}
+  letter-spacing:.03em;color:var(--accent);background:transparent;border:1px dashed var(--accent);border-radius:4px;padding:0 5px}
+
+/* Order size: linked USD <-> shares inputs + instant qualify pill */
+.dual-size{display:flex;align-items:center;gap:8px}
+.dual-field{position:relative;flex:1;display:flex;align-items:center}
+.dual-field .inp{padding-right:50px}
+#order_size{padding-left:20px}
+.dual-pre{position:absolute;left:10px;color:var(--muted);font-size:13px;pointer-events:none}
+.dual-suf{position:absolute;right:10px;color:var(--faint);font-size:11px;pointer-events:none}
+.dual-eq{flex:none;color:var(--faint);font-size:13px}
+.qualify-pill{margin-top:8px;font-size:12px;font-weight:600;border-radius:7px;padding:6px 10px;line-height:1.35}
+.qualify-pill.ok{color:#1f7a3d;background:rgba(31,122,61,.10)}
+.qualify-pill.bad{color:#9a5b00;background:rgba(154,91,0,.10)}
 
 /* spread block — Best Bid / Midpoint / Best Ask (rewards measured at midpoint) */
 .book-spread{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:13px 16px;margin:5px 0;

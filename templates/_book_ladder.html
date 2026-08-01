@@ -7,9 +7,9 @@
 <div class="book-ladder">
   <div class="book-side asks">
     {% for r in ladder.asks %}
-    <div class="book-row {{ r.side }}{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}{% if r.is_yours %} is-yours{% endif %}">
+    <div class="book-row {{ r.side }}{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}" data-price="{{ r.price_raw }}">
       <span class="book-bar" style="width:{{ r.depth_pct }}%"></span>
-      <span class="book-price num">{% if r.is_yours %}<span class="you-tag">you</span>{% endif %}{{ r.price_cents }}&cent;</span>
+      <span class="book-price num">{{ r.price_cents }}&cent;</span>
       <span class="book-size num">{{ r.size }}</span>
       <span class="book-total num">{{ r.total }}</span>
     </div>
@@ -37,10 +37,10 @@
 
   <div class="book-side bids">
     {% for r in ladder.bids %}
-    <div class="book-row {{ r.side }}{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}{% if r.is_yours %} is-yours{% endif %}"
-         onclick="pfSetPrice('{{ r.price_raw }}')">
+    <div class="book-row {{ r.side }}{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}"
+         data-price="{{ r.price_raw }}" onclick="pfSetPrice('{{ r.price_raw }}')">
       <span class="book-bar" style="width:{{ r.depth_pct }}%"></span>
-      <span class="book-price num">{% if r.is_yours %}<span class="you-tag">you</span>{% endif %}{{ r.price_cents }}&cent;</span>
+      <span class="book-price num">{{ r.price_cents }}&cent;</span>
       <span class="book-size num">{{ r.size }}</span>
       <span class="book-total num">{{ r.total }}</span>
     </div>

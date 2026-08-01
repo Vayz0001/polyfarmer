@@ -132,6 +132,11 @@ struct MarketViewTemplate {
     price_tick: String,
     /// Highest valid price = 1 - tick (e.g. "0.99").
     price_max: String,
+    /// Reward minimum in SHARES (raw number, "" if no rewards) — feeds the
+    /// instant client-side qualify calc.
+    reward_min_shares: String,
+    /// Reward max-spread in cents (raw number, "0" if none) — qualify calc.
+    reward_max_spread_cents: String,
 }
 
 #[derive(Template)]
@@ -221,7 +226,7 @@ pub async fn market_view(session: Session, Query(p): Query<ViewParams>) -> Respo
         image: mr.image.clone(),
         group_item_title: mr.group_item_title.clone().filter(|g| !g.is_empty()),
         has_rewards: mr.has_rewards(),
-        reward_min: mr.rewards_min_size.map(|s| format!("${s}")).unwrap_or_else(|| "—".to_string()),
+        reward_min: mr.rewards_min_size.map(|s| format!("{s} shares")).unwrap_or_else(|| "—".to_string()),
         reward_max_spread: mr.rewards_max_spread.map(|s| format!("{s}c")).unwrap_or_else(|| "—".to_string()),
         volume_24hr: mr.volume_24hr.filter(|v| *v > dec!(0)).map(market_data::fmt_usd),
         liquidity,
@@ -239,6 +244,8 @@ pub async fn market_view(session: Session, Query(p): Query<ViewParams>) -> Respo
         default_size: DEFAULT_ORDER_SIZE.to_string(),
         price_tick: mr.tick_size.normalize().to_string(),
         price_max: (dec!(1) - mr.tick_size).normalize().to_string(),
+        reward_min_shares: mr.rewards_min_size.map(|s| s.normalize().to_string()).unwrap_or_default(),
+        reward_max_spread_cents: mr.rewards_max_spread.map(|s| s.normalize().to_string()).unwrap_or_else(|| "0".to_string()),
     };
     Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>"))).into_response()
 }
@@ -428,11 +435,11 @@ pub struct PlacementPreviewForm {
 #[template(path = "_placement_preview.html")]
 struct PlacementPreviewTemplate {
     has_rewards: bool,
-    qualifies: bool,
     cents_from_mid: String,
-    per_side_size: String,
+    per_side_size: String,   // USD, "$X.XX"
+    per_side_shares: String, // share count, "N"
     per_side_meets_min: bool,
-    min_size: String,
+    min_size: String,        // reward minimum, in shares
     fill_risk: &'static str,
     error: Option<String>,
 }
@@ -441,9 +448,9 @@ impl PlacementPreviewTemplate {
     fn error(message: impl Into<String>) -> Self {
         Self {
             has_rewards: true,
-            qualifies: false,
             cents_from_mid: String::new(),
             per_side_size: String::new(),
+            per_side_shares: String::new(),
             per_side_meets_min: true,
             min_size: String::new(),
             fill_risk: "high",
@@ -454,9 +461,9 @@ impl PlacementPreviewTemplate {
     fn no_rewards() -> Self {
         Self {
             has_rewards: false,
-            qualifies: false,
             cents_from_mid: String::new(),
             per_side_size: String::new(),
+            per_side_shares: String::new(),
             per_side_meets_min: true,
             min_size: String::new(),
             fill_risk: "high",
@@ -508,11 +515,11 @@ pub async fn view_preview(Form(form): Form<PlacementPreviewForm>) -> Html<String
     let eval = market_data::evaluate_placement(&book, midpoint, max_spread_cents, min_size, price, order_size, both_sides);
     render(PlacementPreviewTemplate {
         has_rewards: true,
-        qualifies: eval.qualifies,
         cents_from_mid: format!("{:.1}", eval.cents_from_mid),
         per_side_size: format!("${:.2}", eval.per_side_size),
+        per_side_shares: format!("{:.0}", eval.per_side_shares),
         per_side_meets_min: eval.per_side_meets_min,
-        min_size: format!("{min_size}"),
+        min_size: min_size.normalize().to_string(),
         fill_risk: eval.fill_risk.label(),
         error: None,
     })

@@ -123,18 +123,31 @@
                 </label>
                 <input class="inp" type="number" step="{{ price_tick }}" min="{{ price_tick }}" max="{{ price_max }}" name="price" id="price"
                        value="{% if let Some(sp) = selected_suggested %}{{ sp }}{% endif %}" required
-                       onchange="pfRefreshBook()"
+                       oninput="pfSyncFromUsd(); pfQualify(); pfMarkOrder()"
                        hx-post="/markets/view/preview" hx-trigger="input changed delay:250ms, load"
                        hx-include="closest form" hx-target="#placement-preview" hx-swap="innerHTML" />
                 <p class="form-help">Click a bid on the order book to set this instantly.</p>
               </div>
 
               <div class="form-grp">
-                <label class="form-lbl" for="order_size"><span>Order size (USD)<span id="split-note"{% if !sides_both %} hidden{% endif %}> &middot; split across both sides</span></span></label>
-                <input class="inp" type="number" step="1" min="1" name="order_size" id="order_size" value="{{ default_size }}" required
-                       oninput="pfUpdateBookMeta()"
-                       hx-post="/markets/view/preview" hx-trigger="input changed delay:250ms"
-                       hx-include="closest form" hx-target="#placement-preview" hx-swap="innerHTML" />
+                <label class="form-lbl"><span>Order size<span id="split-note"{% if !sides_both %} hidden{% endif %}> &middot; split across both sides</span></span></label>
+                <div class="dual-size">
+                  <div class="dual-field">
+                    <span class="dual-pre">$</span>
+                    <input class="inp" type="number" step="1" min="1" name="order_size" id="order_size" value="{{ default_size }}" required
+                           oninput="pfSyncFromUsd(); pfQualify()"
+                           hx-post="/markets/view/preview" hx-trigger="input changed delay:250ms"
+                           hx-include="closest form" hx-target="#placement-preview" hx-swap="innerHTML" />
+                    <span class="dual-suf">USD</span>
+                  </div>
+                  <span class="dual-eq">=</span>
+                  <div class="dual-field">
+                    <input class="inp" type="number" step="1" min="1" id="order_shares"
+                           oninput="pfSyncFromShares(); pfQualify()" />
+                    <span class="dual-suf">shares</span>
+                  </div>
+                </div>
+                <div id="qualify-pill" class="qualify-pill" hidden></div>
               </div>
 
               <div id="placement-preview"></div>
@@ -172,13 +185,90 @@
     var pfGroup = localStorage.getItem("pfGroup") || "";   // "" = server default (raw tick)
     var pfBookScroll = null;
 
+    // Reward-qualify inputs for the instant client-side pill.
+    var pfMinShares = parseFloat("{{ reward_min_shares }}") || 0;
+    var pfMaxSpreadC = parseFloat("{{ reward_max_spread_cents }}") || 0;
+    var pfMidC = 0;         // current side midpoint (cents); set on init + side change
+    var pfSyncing = false;  // guard so USD<->shares sync doesn't clobber
+
+    function pfPrice() { return parseFloat(document.getElementById("price").value) || 0; }
+
+    // USD <-> shares, linked by the current price. v1 is USD-backed: only USD is
+    // submitted/stored; the shares field is a live entry convenience.
+    function pfSyncFromUsd() {
+      if (pfSyncing) return;
+      var p = pfPrice(), usd = parseFloat(document.getElementById("order_size").value);
+      document.getElementById("order_shares").value = (p > 0 && usd > 0) ? Math.round(usd / p) : "";
+    }
+    function pfSyncFromShares() {
+      var p = pfPrice(), sh = parseFloat(document.getElementById("order_shares").value);
+      var usd = document.getElementById("order_size");
+      if (p > 0 && sh > 0) {
+        usd.value = (sh * p).toFixed(2);
+        pfSyncing = true;                                      // don't overwrite shares
+        usd.dispatchEvent(new Event("input", { bubbles: true })); // refresh server preview
+        pfSyncing = false;
+      }
+    }
+
+    // Instant client-side reward-qualify pill — no server round-trip.
+    function pfQualify() {
+      var pill = document.getElementById("qualify-pill");
+      if (!pill) return;
+      var p = pfPrice(), usd = parseFloat(document.getElementById("order_size").value);
+      if (pfMinShares <= 0 || !(p > 0) || !(usd > 0)) { pill.hidden = true; return; }
+      var both = document.getElementById("f-sides").value === "both";
+      var perSideShares = (both ? usd / 2 : usd) / p;
+      var centsFromMid = pfMidC - p * 100;
+      var inBand = centsFromMid >= -0.0001 && centsFromMid <= pfMaxSpreadC + 0.0001;
+      var meetsMin = perSideShares >= pfMinShares;
+      pill.hidden = false;
+      if (inBand && meetsMin) {
+        pill.className = "qualify-pill ok";
+        pill.textContent = "✓ Qualifies for rewards";
+      } else {
+        pill.className = "qualify-pill bad";
+        var why = [];
+        if (!meetsMin) why.push("need ≥ " + pfMinShares + " shares/side (have " + Math.floor(perSideShares) + ")");
+        if (!inBand) why.push(centsFromMid < 0 ? "above midpoint" : "outside reward zone");
+        pill.textContent = "✗ " + why.join(" · ");
+      }
+    }
+
     function pfBookUrl() {
-      var price = document.getElementById("price").value;
+      // Book levels don't depend on your price — the "your order" marker is
+      // drawn client-side (pfMarkOrder), so we never refetch on price change.
       return "/markets/view/book?slug=" + encodeURIComponent(pfSlug) + "&side=" + pfSide
-           + (price ? "&price=" + encodeURIComponent(price) : "")
            + (pfGroup ? "&group=" + encodeURIComponent(pfGroup) : "");
     }
     function pfRefreshBook() { if (window.htmx) htmx.ajax("GET", pfBookUrl(), "#book"); }
+
+    // Draw the "your order" preview marker on the book row matching the current
+    // price — instant, no server round-trip. Re-run after each book refresh.
+    function pfMarkOrder() {
+      var price = pfPrice();
+      document.querySelectorAll("#book .book-row.is-yours").forEach(function (r) {
+        r.classList.remove("is-yours");
+        var t = r.querySelector(".you-tag");
+        if (t) t.remove();
+      });
+      if (!(price > 0)) return;
+      var rows = document.querySelectorAll("#book .book-row[data-price]");
+      for (var i = 0; i < rows.length; i++) {
+        if (Math.abs(parseFloat(rows[i].dataset.price) - price) < 1e-9) {
+          rows[i].classList.add("is-yours");
+          var pc = rows[i].querySelector(".book-price");
+          if (pc) {
+            var tag = document.createElement("span");
+            tag.className = "you-tag";
+            tag.title = "Preview: where your order would rest. Not a live position.";
+            tag.textContent = "your order";
+            pc.insertBefore(tag, pc.firstChild);
+          }
+          break;
+        }
+      }
+    }
 
     // Group the book into coarser price buckets (server-side); persisted.
     function pfSetGroup(g) {
@@ -220,8 +310,7 @@
 
     function pfSetPrice(raw) {
       document.getElementById("price").value = raw;
-      htmx.trigger("#price", "input");
-      pfRefreshBook();
+      htmx.trigger("#price", "input"); // runs sync + qualify + marker (all instant)
     }
     function pfUseSuggested() { pfSetPrice(document.getElementById("suggest-val").textContent.trim()); }
 
@@ -229,6 +318,7 @@
       pfSide = i;
       document.querySelectorAll("#side-toggle .seg-btn").forEach(function (t) { t.classList.toggle("selected", +t.dataset.side === i); });
       var tab = document.querySelector('#side-toggle .seg-btn[data-side="' + i + '"]');
+      pfMidC = parseFloat(tab.dataset.mid) || 0;
       pfShowChart();
       document.getElementById("chart-title").textContent = tab.dataset.label;
       document.getElementById("chart-mid").textContent = tab.dataset.mid + "¢";
@@ -261,6 +351,7 @@
       if (e.target.id === "book") {
         if (pfBookScroll != null) e.target.scrollTop = pfBookScroll; else pfCenterBook();
         pfUpdateBookMeta();
+        pfMarkOrder();   // re-apply the client-side marker after the book re-renders
       }
     });
 
@@ -274,6 +365,12 @@
     }
     pfUpdateBookMeta();
     pfCenterBook();
+    // Seed the midpoint + shares field + qualify pill from the initial state.
+    var pfSelTab = document.querySelector('#side-toggle .seg-btn.selected');
+    pfMidC = pfSelTab ? (parseFloat(pfSelTab.dataset.mid) || 0) : 0;
+    pfSyncFromUsd();
+    pfQualify();
+    pfMarkOrder();
     setInterval(pfRefreshBook, 2000);
   </script>
 </body>
