@@ -1,10 +1,17 @@
 use alloy::primitives::{Address, U256};
 use alloy::signers::Signer as _;
 use alloy::signers::local::PrivateKeySigner;
+use chrono::NaiveDate;
 use eyre::Result;
+use std::collections::HashMap;
 use std::str::FromStr;
 use polymarket_client_sdk_v2::auth::state::Authenticated;
 use polymarket_client_sdk_v2::auth::Normal;
+use polymarket_client_sdk_v2::clob::types::request::UserRewardsEarningRequest;
+use polymarket_client_sdk_v2::clob::types::response::{
+    CurrentRewardResponse, MarketRewardResponse, TotalUserEarningResponse, UserEarningResponse,
+    UserRewardsEarningResponse,
+};
 use polymarket_client_sdk_v2::clob::types::SignatureType;
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal::Decimal;
@@ -26,21 +33,47 @@ pub struct Executor {
 
 impl Executor {
     /// Authenticate with the Polymarket V2 CLOB using decrypted wallet creds.
-    pub async fn new(private_key: &str, proxy_wallet: Address) -> Result<Self> {
+    ///
+    /// The order's `signatureType` must match how the funder wallet was created,
+    /// or the CLOB rejects it. We pick it from the funder address:
+    ///   * `funder == EOA`            → `Eoa` (trade directly, no funder)
+    ///   * on-chain Deposit Wallet    → `Poly1271` (EIP-1271 / ERC-7739; the
+    ///     current Polymarket default, handled natively by SDK >= 0.7)
+    ///   * derived Magic/proxy wallet → `Proxy`
+    ///   * otherwise                  → `GnosisSafe` (browser-wallet Safe)
+    ///
+    /// `rpc_url` is the Polygon RPC used only to classify the funder (one
+    /// `eth_call`); `None` uses the public fallback list.
+    pub async fn new(private_key: &str, proxy_wallet: Address, rpc_url: Option<&str>) -> Result<Self> {
+        use polymarket_client_sdk_v2::{derive_proxy_wallet, POLYGON};
+
         let signer: PrivateKeySigner = private_key.parse()?;
         let signer = signer.with_chain_id(Some(POLYGON_CHAIN_ID));
+        let eoa = signer.address();
+        info!("Signer address: {eoa}");
 
-        info!("Signer address: {}", signer.address());
+        let sig_type = if proxy_wallet == eoa {
+            SignatureType::Eoa
+        } else if crate::wallet_detect::is_deposit_wallet(proxy_wallet, rpc_url).await {
+            SignatureType::Poly1271
+        } else if Some(proxy_wallet) == derive_proxy_wallet(eoa, POLYGON) {
+            SignatureType::Proxy
+        } else {
+            SignatureType::GnosisSafe
+        };
+        info!("Order maker {proxy_wallet} → signatureType {sig_type:?}");
 
-        let client = Client::new(CLOB_URL, ClobConfig::default())?
-            .authentication_builder(&signer)
-            .funder(proxy_wallet)
-            .signature_type(SignatureType::GnosisSafe)
-            .authenticate()
-            .await?;
+        // A funder with an EOA signature type is rejected by the SDK, so an EOA
+        // wallet trades directly (no funder); every managed wallet funds via the
+        // proxy / safe / deposit-wallet flow.
+        let auth = Client::new(CLOB_URL, ClobConfig::default())?.authentication_builder(&signer);
+        let auth = match sig_type {
+            SignatureType::Eoa => auth.signature_type(SignatureType::Eoa),
+            other => auth.funder(proxy_wallet).signature_type(other),
+        };
+        let client = auth.authenticate().await?;
 
-        info!("Authenticated with Polymarket CLOB");
-
+        info!("Authenticated with Polymarket CLOB ({sig_type:?})");
         Ok(Self { client, signer })
     }
 
@@ -284,5 +317,121 @@ impl Executor {
     pub async fn send_heartbeat(&self) -> Result<()> {
         self.client.api_keys().await?;
         Ok(())
+    }
+
+    // ── Reward data (read-only, display) ────────────────────────────────────
+    // No retry/backoff here, unlike the order-management methods above — these
+    // back dashboard reads, not money-moving actions. A transient failure just
+    // propagates to the caller (web handler shows "try again" / the daily
+    // poller retries on its next tick).
+
+    /// Live, real (not estimated) % share of each market's reward pool you're
+    /// currently earning, keyed by condition_id.
+    pub async fn reward_percentages(&self) -> Result<HashMap<String, Decimal>> {
+        Ok(self.client.reward_percentages().await?)
+    }
+
+    /// Whether a single resting order is currently scoring for rewards.
+    pub async fn is_order_scoring(&self, order_id: &str) -> Result<bool> {
+        Ok(self.client.is_order_scoring(order_id).await?.scoring)
+    }
+
+    /// Batch scoring check — one call for the whole markets table instead of
+    /// one per row.
+    pub async fn are_orders_scoring(&self, order_ids: &[&str]) -> Result<HashMap<String, bool>> {
+        Ok(self.client.are_orders_scoring(order_ids).await?)
+    }
+
+    /// Total reward earnings (by asset) for a single UTC date.
+    pub async fn total_earnings_for_user_for_day(
+        &self,
+        date: NaiveDate,
+    ) -> Result<Vec<TotalUserEarningResponse>> {
+        Ok(self.client.total_earnings_for_user_for_day(date).await?)
+    }
+
+    /// Per-market, per-order earnings breakdown for a single UTC date.
+    /// Paginated by the API — collected here into one flat Vec (same pattern
+    /// as `fetch_open_order_ids`).
+    pub async fn earnings_for_user_for_day(&self, date: NaiveDate) -> Result<Vec<UserEarningResponse>> {
+        let mut all = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = self.client.earnings_for_user_for_day(date, cursor.clone()).await?;
+            all.extend(page.data);
+            if page.next_cursor == TERMINAL_CURSOR {
+                break;
+            }
+            cursor = Some(page.next_cursor);
+        }
+        Ok(all)
+    }
+
+    /// Your reward-eligible markets with both the market's reward config and
+    /// your own earning_percentage/earnings for the given date.
+    ///
+    /// Unfiltered, this endpoint returns *every* reward-eligible market on
+    /// the platform (500+) with your (mostly-zero) percentage attached — the
+    /// SDK's typed request doesn't expose an only-my-markets filter the way
+    /// the raw HTTP API does. Walking all of it fully paginated is what
+    /// caused this to time out against the live API. Mitigated two ways:
+    /// sort by `earning_percentage` descending so markets you actually have
+    /// a stake in land on the first page(s), and cap how many pages we walk
+    /// so a cold/empty wallet can't hang on an exhaustive walk. Filtering to
+    /// "markets I'm actually tracking" is still done by the caller against
+    /// `AppState.configs`.
+    pub async fn user_earnings_and_markets_config(
+        &self,
+        date: NaiveDate,
+    ) -> Result<Vec<UserRewardsEarningResponse>> {
+        const MAX_PAGES: u32 = 5;
+        let request = UserRewardsEarningRequest::builder()
+            .date(date)
+            .order_by("earning_percentage")
+            .position("DESC")
+            .build();
+        let mut all = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..MAX_PAGES {
+            let page = self.client.user_earnings_and_markets_config(&request, cursor.clone()).await?;
+            all.extend(page.data);
+            if page.next_cursor == TERMINAL_CURSOR {
+                break;
+            }
+            cursor = Some(page.next_cursor);
+        }
+        Ok(all)
+    }
+
+    /// All currently-active reward programs across every market (not just
+    /// ours) — used to cross-reference whether a tracked market is still
+    /// rewarding. Paginated (500+ markets at any time); collected in full.
+    pub async fn current_rewards(&self) -> Result<Vec<CurrentRewardResponse>> {
+        let mut all = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = self.client.current_rewards(cursor.clone()).await?;
+            all.extend(page.data);
+            if page.next_cursor == TERMINAL_CURSOR {
+                break;
+            }
+            cursor = Some(page.next_cursor);
+        }
+        Ok(all)
+    }
+
+    /// Present and future reward configurations for one market.
+    pub async fn raw_rewards_for_market(&self, condition_id: &str) -> Result<Vec<MarketRewardResponse>> {
+        let mut all = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = self.client.raw_rewards_for_market(condition_id, cursor.clone()).await?;
+            all.extend(page.data);
+            if page.next_cursor == TERMINAL_CURSOR {
+                break;
+            }
+            cursor = Some(page.next_cursor);
+        }
+        Ok(all)
     }
 }

@@ -192,6 +192,28 @@ pub async fn detect_wallets(eoa: Address, configured_rpc: Option<&str>) -> Resul
     }
 }
 
+/// Best-effort check: is `addr` a Polymarket **Deposit Wallet**? Reads the
+/// on-chain EIP-712 domain (`eip712Domain()`); a deposit wallet reports
+/// `name = "DepositWallet"`. A deposit wallet must be traded via the EIP-1271
+/// (`Poly1271`) flow, not the classic Gnosis-Safe signature.
+///
+/// Any RPC/parse failure returns `false` so the caller falls back to the
+/// classic path — a wrong guess here only affects the signature type, which the
+/// CLOB validates anyway.
+pub async fn is_deposit_wallet(addr: Address, configured_rpc: Option<&str>) -> bool {
+    // selector for eip712Domain()  (ERC-5267)
+    const EIP712_DOMAIN_SELECTOR: [u8; 4] = [0x84, 0xb0, 0x19, 0x6e];
+    // "DepositWallet" as lowercase hex — searched for in the ABI-encoded return,
+    // avoiding a full tuple decode.
+    const DEPOSIT_WALLET_HEX: &str = "4465706f73697457616c6c6574";
+
+    let Ok(rpc) = Rpc::connect(configured_rpc).await else { return false };
+    match rpc.eth_call(addr, &EIP712_DOMAIN_SELECTOR).await {
+        Ok(hex) => hex.to_lowercase().contains(DEPOSIT_WALLET_HEX),
+        Err(_) => false,
+    }
+}
+
 async fn detect_wallets_inner(eoa: Address, configured_rpc: Option<&str>) -> Result<Vec<WalletCandidate>> {
     let rpc = Rpc::connect(configured_rpc).await?;
     let wallet_id = left_pad_32(eoa);
@@ -218,6 +240,13 @@ async fn detect_wallets_inner(eoa: Address, configured_rpc: Option<&str>) -> Res
     if let Some(addr) = derive_proxy_wallet(eoa, POLYGON) {
         raw_candidates.push((addr, WalletKind::ProxyWallet));
     }
+
+    // Deduplicate by address: the two Deposit Wallet clone shapes (legacy UUPS +
+    // current Beacon) frequently predict the SAME address, and a derived
+    // Safe/Proxy can coincide too. Keep the first (highest-priority) kind so the
+    // picker never shows the same address twice.
+    let mut seen = std::collections::HashSet::new();
+    raw_candidates.retain(|(addr, _)| seen.insert(*addr));
 
     // Likewise, check all candidates' on-chain code concurrently.
     let code_futs = raw_candidates.iter().map(|&(address, kind)| {

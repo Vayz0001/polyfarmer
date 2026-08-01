@@ -1,0 +1,26 @@
+{% if show %}
+<section class="panel position-panel pf-rise" style="margin-bottom:16px">
+  <div class="panel-head">
+    <h2>Your position</h2>
+    {% if scoring_any %}
+    <span class="pill live"><span class="dot live"></span> scoring</span>
+    {% else %}
+    <span class="pill idle">not scoring</span>
+    {% endif %}
+  </div>
+  <div class="position-body">
+    {% if let Some(p) = reward_pct %}
+    <div class="sum-row"><span class="label">Your reward share</span><span class="value">{{ p }}</span></div>
+    {% endif %}
+    {% if let Some(e) = earnings_today %}
+    <div class="sum-row"><span class="label">Earned today</span><span class="value">{{ e }}</span></div>
+    {% endif %}
+    {% for leg in legs %}
+    <div class="sum-row">
+      <span class="label">{{ leg.label }}</span>
+      <span class="value">{{ leg.status }}{% if let Some(s) = leg.scoring %} {% if s %}<span class="ok-inline">&check;</span>{% else %}<span class="warn-inline">&times;</span>{% endif %}{% endif %}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

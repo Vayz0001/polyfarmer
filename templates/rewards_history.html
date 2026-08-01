@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>polyfarmer · reward history</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+  <script src="/assets/htmx.min.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">P</span> polyfarmer</div>
+      <nav class="nav">
+        <a href="/"><span class="ic">&#9676;</span> Overview</a>
+        <a href="/markets"><span class="ic">&#8801;</span> Markets</a>
+        <a href="/rewards" class="active"><span class="ic">&#9733;</span> Rewards</a>
+        <a href="/setup"><span class="ic">&#9881;</span> Setup</a>
+      </nav>
+      <div class="spacer"></div>
+      <div class="side-foot">
+        self-hosted &middot; keys never leave your machine
+        <form method="post" action="/logout" style="margin-top:10px">
+          <button class="btn ghost sm" type="submit">Log out</button>
+        </form>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <h1>Reward history</h1>
+        <a class="btn ghost" href="/rewards">&larr; Rewards</a>
+      </header>
+
+      <div class="content">
+        <p class="muted" style="margin-top:0">
+          Polymarket doesn't provide historical reward data via its API, so this
+          builds up one entry per day, captured shortly after each day's payout settles.
+        </p>
+        <section class="panel" style="margin-top:14px">
+          {% include "_reward_history_table.html" %}
+        </section>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

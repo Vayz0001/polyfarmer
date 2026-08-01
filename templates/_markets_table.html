@@ -4,25 +4,51 @@
 </div>
 <table>
   <thead>
-    <tr><th>Market</th><th>Side</th><th>Distance</th><th>Size</th><th>Status</th></tr>
+    <tr><th>Market</th><th>Side</th><th>Distance</th><th>Size</th><th>Status</th><th></th></tr>
   </thead>
   <tbody>
     {% for row in rows %}
     <tr>
       <td class="mkt">{{ row.label }}<small>{{ row.url }}</small></td>
-      <td><span class="{{ row.side }}">{{ row.side_label }}</span> &middot; BUY</td>
-      <td class="num">{{ row.distance }}</td>
-      <td class="num">{{ row.size }}</td>
       <td>
-        <span class="pill {{ row.status_class }}">
-          {% if row.status_class == "live" %}<span class="dot live"></span>{% endif %}
-          {{ row.status_label }}{% if let Some(p) = row.price %} &middot; {{ p }}{% endif %}
-        </span>
+        {% for leg in row.legs %}
+        <div class="leg-line"><span class="side-{{ leg.side_class }}">{{ leg.side_label }}</span> &middot; BUY</div>
+        {% endfor %}
+      </td>
+      <td class="num">
+        {% for leg in row.legs %}<div class="leg-line">{{ leg.distance }}</div>{% endfor %}
+      </td>
+      <td class="num">
+        {% for leg in row.legs %}<div class="leg-line">{{ leg.size }}</div>{% endfor %}
+      </td>
+      <td>
+        {% for leg in row.legs %}
+        <div class="leg-line">
+          <span class="pill {{ leg.status_class }}">
+            {% if leg.status_class == "live" %}<span class="dot live"></span>{% endif %}
+            {{ leg.status_label }}{% if let Some(p) = leg.price %} &middot; {{ p }}{% endif %}
+          </span>
+          {% if let Some(scoring) = leg.scoring %}
+          <span class="pill sm {% if scoring %}live{% else %}paused{% endif %}" style="margin-left:6px">
+            {% if scoring %}Scoring{% else %}Not scoring{% endif %}
+          </span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </td>
+      <td class="row-actions">
+        {% if row.paused %}
+        <button class="btn ghost sm" hx-post="/markets/{{ row.condition_id }}/resume" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none">Resume</button>
+        {% else %}
+        <button class="btn ghost sm" hx-post="/markets/{{ row.condition_id }}/pause" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none">Pause</button>
+        {% endif %}
+        <button class="btn ghost sm" hx-post="/markets/{{ row.condition_id }}/remove" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none"
+                hx-confirm="Remove {{ row.label }}? Any resting order(s) will be cancelled.">Remove</button>
       </td>
     </tr>
     {% endfor %}
     {% if rows.is_empty() %}
-    <tr><td colspan="5"><div class="empty">No markets configured yet. Add one from the dashboard once that's wired up.</div></td></tr>
+    <tr><td colspan="6"><div class="empty">No markets configured yet. <a href="/markets/browse">Browse reward-eligible markets</a> or <a href="/markets/add">add one by URL</a>.</div></td></tr>
     {% endif %}
   </tbody>
 </table>

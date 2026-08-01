@@ -1,4 +1,4 @@
-use crate::types::{Alert, MarketConfig};
+use crate::types::{Alert, MarketConfig, RewardHistoryFile};
 use eyre::Result;
 use std::fs;
 use std::path::Path;
@@ -46,6 +46,31 @@ fn load_markets_inner(path: &Path) -> Result<Vec<MarketConfig>> {
 pub fn save_markets(path: &Path, configs: &[MarketConfig]) -> Result<()> {
     let tmp = path.with_extension("json.tmp");
     let data = serde_json::to_string_pretty(configs)? + "\n";
+    fs::write(&tmp, data)?;
+    fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+// ── reward_history.json ────────────────────────────────────────────────────────
+// No Polymarket endpoint provides historical/range earnings (only single-day
+// queries) — this is built by polling once daily and appending here.
+
+/// Load reward history. Returns an empty file if it doesn't exist yet (day one).
+pub fn load_reward_history(path: &Path) -> Result<RewardHistoryFile> {
+    if !path.exists() {
+        return Ok(RewardHistoryFile::default());
+    }
+    let raw = fs::read_to_string(path)?;
+    if raw.trim().is_empty() {
+        return Ok(RewardHistoryFile::default());
+    }
+    Ok(serde_json::from_str(&raw)?)
+}
+
+/// Write reward history back to disk atomically (temp + rename).
+pub fn save_reward_history(path: &Path, history: &RewardHistoryFile) -> Result<()> {
+    let tmp = path.with_extension("json.tmp");
+    let data = serde_json::to_string_pretty(history)? + "\n";
     fs::write(&tmp, data)?;
     fs::rename(&tmp, path)?;
     Ok(())

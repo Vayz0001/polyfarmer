@@ -6,7 +6,7 @@ use alloy::signers::local::PrivateKeySigner;
 use askama::Template;
 use axum::{
     extract::State,
-    http::HeaderMap,
+    http::{HeaderMap, HeaderValue},
     response::{Html, IntoResponse, Redirect, Response},
     Form,
 };
@@ -51,17 +51,17 @@ pub struct DetectForm {
 struct WalletSaveResultTemplate {
     saved: bool,
     message: String,
-    /// First-time setup → the engine auto-starts (poll for status). A change to
-    /// an already-running engine still needs a restart to switch wallets.
-    first_time: bool,
 }
 
 #[derive(Template)]
 #[template(path = "_engine_status.html")]
 struct EngineStatusTemplate {
-    running: bool,
     failed: bool,
 }
+
+#[derive(Template)]
+#[template(path = "launching.html")]
+struct LaunchingTemplate {}
 
 #[derive(Template)]
 #[template(path = "_wallet_detect.html")]
@@ -129,7 +129,7 @@ pub async fn set_wallet(
     };
 
     if !verify_csrf(&session, &form.csrf).await {
-        return save_result(&state, &session, htmx, false, first_time, "Invalid session — retry.".into()).await;
+        return save_result(&state, &session, htmx, false, "Invalid session — retry.".into()).await;
     }
     // Format-only validation — typos are still caught immediately. We do NOT
     // cross-check the address against a locally-derived CREATE2 address:
@@ -149,53 +149,69 @@ pub async fn set_wallet(
         } else {
             ""
         };
-        return save_result(&state, &session, htmx, first_time, false, format!("Private key is not valid.{hint}")).await;
+        return save_result(&state, &session, htmx, false, format!("Private key is not valid.{hint}")).await;
     }
     if wallet.parse::<Address>().is_err() {
-        return save_result(&state, &session, htmx, first_time, false, "Wallet address is not valid.".into()).await;
+        return save_result(&state, &session, htmx, false, "Wallet address is not valid.".into()).await;
     }
 
     match state.store.set_wallet(key, wallet) {
         Ok(_) => {
-            // Wake the boot task — on first run this starts the engine now.
-            // (No-op if the engine is already past its wait-loop.)
             if first_time {
+                // Wake the parked boot task so it starts the engine now, and
+                // hand off to the launch screen, which polls the engine up and
+                // flows straight into the dashboard — no restart.
                 state.wallet_ready.notify_one();
+                return if htmx {
+                    hx_redirect("/launching")
+                } else {
+                    Redirect::to("/launching").into_response()
+                };
             }
-            save_result(
-                &state,
-                &session,
-                htmx,
-                first_time,
-                true,
-                "Wallet saved (encrypted).".into(),
-            )
-            .await
+            // Wallet change on an already-running engine — switching trading
+            // wallets safely needs a restart (avoids orphaning open orders).
+            save_result(&state, &session, htmx, true, "Wallet saved (encrypted).".into()).await
         }
-        Err(e) => save_result(&state, &session, htmx, first_time, false, format!("Failed to save: {e}")).await,
+        Err(e) => save_result(&state, &session, htmx, false, format!("Failed to save: {e}")).await,
     }
 }
 
-/// Tiny fragment polled by the setup page after a first-time save, so the user
-/// sees the engine come up live ("Starting…" → "Trading is live" / failure)
-/// without a manual restart.
-pub async fn engine_status(State(state): State<WebState>) -> Html<String> {
+/// Polled by the launch screen. On `Running` it returns an `HX-Redirect` so the
+/// browser flows into the dashboard; on `Error` it reveals an inline failure;
+/// otherwise it stays an invisible re-arming poller.
+pub async fn engine_status(State(state): State<WebState>) -> Response {
     let phase = state.engine.read().await.engine_phase.clone();
-    let tpl = EngineStatusTemplate {
-        running: phase == EnginePhase::Running,
-        failed: phase == EnginePhase::Error,
-    };
-    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
+    if phase == EnginePhase::Running {
+        return hx_redirect("/");
+    }
+    let tpl = EngineStatusTemplate { failed: phase == EnginePhase::Error };
+    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>"))).into_response()
 }
 
-/// Renders the outcome of a wallet save. For htmx requests this is the small
-/// inline fragment swapped into `#save-region` (plus an OOB badge update);
-/// otherwise it's a full-page re-render carrying the usual notice/error.
+/// The first-run launch screen — a calm branded interstitial that polls the
+/// engine up and redirects into the dashboard. Visiting it without a wallet
+/// (e.g. directly) just bounces back to setup.
+pub async fn launching(State(state): State<WebState>) -> Response {
+    if !state.store.has_wallet() {
+        return Redirect::to("/setup").into_response();
+    }
+    let tpl = LaunchingTemplate {};
+    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>"))).into_response()
+}
+
+/// Empty 200 carrying htmx's `HX-Redirect` header → client-side navigation.
+fn hx_redirect(to: &'static str) -> Response {
+    let mut resp = Html(String::new()).into_response();
+    resp.headers_mut().insert("HX-Redirect", HeaderValue::from_static(to));
+    resp
+}
+
+/// Renders the outcome of a wallet *change* (or an error) for the setup form.
+/// First-run saves never reach here — they redirect to the launch screen.
 async fn save_result(
     state: &WebState,
     session: &Session,
     htmx: bool,
-    first_time: bool,
     saved: bool,
     message: String,
 ) -> Response {
@@ -203,20 +219,15 @@ async fn save_result(
         let tpl = WalletSaveResultTemplate {
             saved,
             message: if saved { String::new() } else { message },
-            first_time,
         };
         return Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
             .into_response();
     }
-    // Non-htmx fallback (JS disabled) — full-page re-render with a notice that's
-    // honest about whether the engine auto-starts or needs a restart.
+    // Non-htmx fallback (JS disabled) — full-page re-render with the notice.
     if saved {
-        let notice = if first_time {
-            format!("{message} The bot is starting automatically.")
-        } else {
-            format!("{message} Restart the bot to switch wallets.")
-        };
-        render(state, session, Some(notice), None).await.into_response()
+        render(state, session, Some(format!("{message} Restart the bot to switch wallets.")), None)
+            .await
+            .into_response()
     } else {
         render(state, session, None, Some(message)).await.into_response()
     }

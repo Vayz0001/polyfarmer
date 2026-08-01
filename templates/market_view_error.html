@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>polyfarmer · markets</title>
+  <title>polyfarmer · market</title>
   <link rel="stylesheet" href="/assets/app.css" />
   <script src="/assets/htmx.min.js" defer></script>
 </head>
@@ -28,25 +28,13 @@
 
     <div class="main">
       <header class="topbar">
-        <h1>Markets</h1>
-        <div class="row" style="margin-top:0;gap:10px">
-          <a class="btn ghost" href="/markets/browse">Browse reward-eligible</a>
-          <form action="/markets/resolve" method="get" class="row" style="gap:8px;margin-top:0">
-            <input class="inp" type="text" name="url" placeholder="Paste a Polymarket URL&hellip;" style="width:280px" required />
-            <button class="btn" type="submit">Go</button>
-          </form>
-        </div>
+        <h1>Market</h1>
+        <a class="btn ghost" href="/markets">&larr; Markets</a>
       </header>
 
       <div class="content">
-        {% if !has_wallet %}
-          <div class="warn">No wallet configured. <a href="/setup">Add it in Setup</a> to start trading.</div>
-        {% endif %}
-
-        <section class="panel" style="margin-top:18px"
-                  hx-get="/markets/table" hx-trigger="every 2s" hx-swap="innerHTML">
-          {% include "_markets_table.html" %}
-        </section>
+        <div class="err pf-rise">{{ message }}</div>
+        <p class="muted">Try <a href="/markets/browse">browsing reward-eligible markets</a> or pasting the URL again.</p>
       </div>
     </div>
   </div>

@@ -1,0 +1,43 @@
+{% if let Some(e) = error %}
+<div class="err">{{ e }}</div>
+{% else %}
+<table>
+  <thead>
+    <tr><th>Market</th><th>Daily pool</th><th>Qualify</th><th>Spread now</th><th>24h volume</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td class="mkt">
+        {{ row.question }}
+        <small>
+          {% for (o, p) in row.outcomes.iter().zip(row.prices_cents.iter()) %}{{ o }} {{ p }}&cent;{% if !loop.last %} &middot; {% endif %}{% endfor %}
+        </small>
+      </td>
+      <td class="num">{{ row.daily_pool }}</td>
+      <td>
+        <span class="pill {% if row.qualifies_now %}live{% else %}paused{% endif %}">
+          {% if row.qualifies_now %}<span class="dot live"></span>{% endif %}
+          {{ row.min_size }} min &middot; {{ row.max_spread }} max
+        </span>
+      </td>
+      <td class="num">{{ row.spread_now }}</td>
+      <td class="num">{{ row.volume_24hr }}</td>
+      <td>
+        <a class="btn ghost sm" href="/markets/view?slug={{ row.market_slug }}">Configure &rarr;</a>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if rows.is_empty() %}
+    <tr><td colspan="6"><div class="empty">No reward-eligible markets matched.</div></td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% if has_more %}
+<div style="margin-top:12px">
+  <button class="btn ghost sm"
+          hx-get="/markets/browse/results?q={{ q }}&sort={{ sort }}&dir={{ dir }}&cursor={{ next_cursor }}"
+          hx-target="#browse-results" hx-swap="innerHTML">Load more</button>
+</div>
+{% endif %}
+{% endif %}

@@ -1,13 +1,16 @@
 //! Shared web state: credential store, live engine state, and a tiny in-memory
 //! login rate-limiter.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{mpsc, Notify, RwLock};
 
 use crate::creds::CredentialStore;
+use crate::engine::executor::Executor;
 use crate::engine::ws_manager::AppState;
+use crate::types::WsCommand;
 
 /// Lock the dashboard after this many consecutive failed logins.
 pub const MAX_LOGIN_FAILS: u32 = 5;
@@ -28,6 +31,50 @@ pub struct WebState {
     /// a wallet is first configured — no restart. Carries no data (the boot
     /// task re-reads the encrypted file itself), so no secret crosses it.
     pub wallet_ready: Arc<Notify>,
+    /// Reaches the running engine's authenticated SDK client + WS command
+    /// channel from request handlers (market add/remove/pause, reward reads).
+    /// `None` until `EnginePhase::Running`.
+    pub engine_handle: EngineHandle,
+    /// Path to the self-built daily reward-history log (see `rewards::history`
+    /// — Polymarket has no range/history endpoint, only single-day queries).
+    pub reward_history_file: PathBuf,
+}
+
+/// Bundles the authenticated [`Executor`] and the WS command sender as one
+/// unit — handlers always need both together (e.g. add-market both writes
+/// `AppState` and may need to send `WsCommand::Subscribe`), and they only
+/// exist from the same moment (set once, right after the engine boots).
+#[derive(Clone, Default)]
+pub struct EngineHandle {
+    inner: Arc<RwLock<Option<EngineHandleInner>>>,
+}
+
+struct EngineHandleInner {
+    executor: Arc<Executor>,
+    ws_cmd_tx: mpsc::Sender<WsCommand>,
+}
+
+impl EngineHandle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Called once by the boot task, right after the executor and WS channel
+    /// exist (see `app.rs`).
+    pub async fn set(&self, executor: Arc<Executor>, ws_cmd_tx: mpsc::Sender<WsCommand>) {
+        *self.inner.write().await = Some(EngineHandleInner { executor, ws_cmd_tx });
+    }
+
+    /// Clones both handles out in one lock acquisition; the guard is dropped
+    /// before returning, so callers never hold it across an `.await`.
+    /// Returns `None` if the engine hasn't reached `Running` yet.
+    pub async fn get(&self) -> Option<(Arc<Executor>, mpsc::Sender<WsCommand>)> {
+        self.inner
+            .read()
+            .await
+            .as_ref()
+            .map(|h| (Arc::clone(&h.executor), h.ws_cmd_tx.clone()))
+    }
 }
 
 #[derive(Default)]
@@ -46,12 +93,23 @@ impl WebState {
         engine: Arc<RwLock<AppState>>,
         polygon_rpc_url: Option<String>,
     ) -> Self {
+        Self::with_config(store, engine, polygon_rpc_url, "data/reward_history.json".into())
+    }
+
+    pub fn with_config(
+        store: Arc<CredentialStore>,
+        engine: Arc<RwLock<AppState>>,
+        polygon_rpc_url: Option<String>,
+        reward_history_file: PathBuf,
+    ) -> Self {
         Self {
             store,
             engine,
             login_guard: Arc::new(Mutex::new(LoginGuard::default())),
             polygon_rpc_url,
             wallet_ready: Arc::new(Notify::new()),
+            engine_handle: EngineHandle::new(),
+            reward_history_file,
         }
     }
 }

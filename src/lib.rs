@@ -7,6 +7,7 @@ pub mod app;
 pub mod config;
 pub mod creds;
 pub mod engine;
+pub mod rewards;
 pub mod storage;
 pub mod types;
 pub mod wallet_detect;

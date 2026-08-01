@@ -149,6 +149,24 @@ impl Alert {
     }
 }
 
+// ── Reward history (no Polymarket history endpoint — we build our own) ────────
+// One entry per UTC day, appended by `rewards::history`'s daily poller.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RewardSnapshot {
+    /// The UTC date the earnings were *for* (the poller runs the day after).
+    pub date: chrono::NaiveDate,
+    pub total_earnings: Decimal,
+    pub captured_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct RewardHistoryFile {
+    /// Oldest first. The poller checks this for the idempotency guard
+    /// (has `date` already been captured?) so no separate marker file exists.
+    pub snapshots: Vec<RewardSnapshot>,
+}
+
 // ── WS message types (mirror exact API shape) ─────────────────────────────────
 
 /// One price level from the API — price and size are strings

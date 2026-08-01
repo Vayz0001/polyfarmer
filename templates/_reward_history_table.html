@@ -1,0 +1,20 @@
+{% if let Some(e) = error %}
+<div class="err" style="margin:16px">{{ e }}</div>
+{% else %}
+<table>
+  <thead>
+    <tr><th>Date (UTC)</th><th>Total earned</th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td class="mkt">{{ row.date }}</td>
+      <td class="num">{{ row.total }}</td>
+    </tr>
+    {% endfor %}
+    {% if rows.is_empty() %}
+    <tr><td colspan="2"><div class="empty">No history yet. The first snapshot is captured the day after your first reward-eligible order goes live.</div></td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endif %}

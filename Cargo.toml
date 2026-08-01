@@ -12,8 +12,10 @@ default-run = "polyfarmer"
 [dependencies]
 # ── Polymarket V2 CLOB SDK (official) ─────────────────────────────────────────
 # V2 cutover (Apr 28 2026) made V1 SDKs dead. `clob` feature required (default = []).
+# `gamma` adds the typed Gamma metadata client (market/event resolution by slug) —
+# used to resolve a pasted Polymarket URL without hand-rolled JSON parsing.
 # alloy/reqwest are PINNED to the versions this SDK expects — do NOT bump majors.
-polymarket_client_sdk_v2 = { version = "0.5.1", features = ["clob"] }
+polymarket_client_sdk_v2 = { version = "0.7.0", features = ["clob", "gamma"] }
 
 # ── Async runtime + networking ────────────────────────────────────────────────
 tokio = { version = "1", features = ["full"] }

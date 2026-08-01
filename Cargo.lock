@@ -3243,9 +3243,9 @@ dependencies = [
 
 [[package]]
 name = "polymarket_client_sdk_v2"
-version = "0.5.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "594de0bf0e129e266946f02acbf579253951afbbee92fc1564da3c9179303aea"
+checksum = "ba212e0641f178c274af266772de15962ac7e76da550a0f79f47b49349b1138a"
 dependencies = [
  "alloy",
  "async-stream",
@@ -3270,6 +3270,7 @@ dependencies = [
  "sha1",
  "sha2",
  "strum_macros 0.28.0",
+ "tokio",
  "url",
  "uuid",
 ]

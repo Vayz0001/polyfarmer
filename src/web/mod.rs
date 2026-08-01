@@ -7,9 +7,11 @@
 mod assets;
 mod auth;
 mod dashboard;
+mod markets;
+mod rewards;
 mod router;
 mod setup;
 mod state;
 
 pub use router::router;
-pub use state::WebState;
+pub use state::{EngineHandle, WebState};

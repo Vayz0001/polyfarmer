@@ -16,6 +16,9 @@ pub struct Config {
     pub markets_file: PathBuf,
     /// alerts.json — append-only alert log (read by the optional Discord notifier).
     pub alerts_file: PathBuf,
+    /// reward_history.json — daily reward-earnings snapshots (no Polymarket
+    /// history endpoint exists, so we build our own).
+    pub reward_history_file: PathBuf,
     /// Dashboard bind address (default localhost; override for tunnels/containers).
     pub dashboard_bind: String,
     /// Optional custom Polygon RPC for on-chain wallet detection during setup.
@@ -35,10 +38,20 @@ impl Config {
         let alerts_file = PathBuf::from(
             env::var("ALERTS_FILE").unwrap_or_else(|_| "data/alerts.json".to_string()),
         );
+        let reward_history_file = PathBuf::from(
+            env::var("REWARD_HISTORY_FILE").unwrap_or_else(|_| "data/reward_history.json".to_string()),
+        );
         let dashboard_bind =
             env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
         let polygon_rpc_url = env::var("POLYGON_RPC_URL").ok();
 
-        Ok(Config { data_dir, markets_file, alerts_file, dashboard_bind, polygon_rpc_url })
+        Ok(Config {
+            data_dir,
+            markets_file,
+            alerts_file,
+            reward_history_file,
+            dashboard_bind,
+            polygon_rpc_url,
+        })
     }
 }

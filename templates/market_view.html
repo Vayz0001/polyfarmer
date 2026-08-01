@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>polyfarmer · {{ question }}</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+  <script src="/assets/htmx.min.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">P</span> polyfarmer</div>
+      <nav class="nav">
+        <a href="/"><span class="ic">&#9676;</span> Overview</a>
+        <a href="/markets" class="active"><span class="ic">&#8801;</span> Markets</a>
+        <a href="/rewards"><span class="ic">&#9733;</span> Rewards</a>
+        <a href="/setup"><span class="ic">&#9881;</span> Setup</a>
+      </nav>
+      <div class="spacer"></div>
+      <div class="side-foot">
+        self-hosted &middot; keys never leave your machine
+        <form method="post" action="/logout" style="margin-top:10px">
+          <button class="btn ghost sm" type="submit">Log out</button>
+        </form>
+      </div>
+    </aside>
+
+    <div class="main">
+      <div class="content">
+        <a class="btn ghost sm" href="/markets" style="margin-bottom:16px">&larr; Markets</a>
+
+        <header class="market-header pf-rise">
+          {% if let Some(img) = image %}<img class="market-img" src="{{ img }}" alt="" />{% endif %}
+          <div>
+            <h1>{{ question }}</h1>
+            <div class="market-meta">
+              {% if has_rewards %}
+              <span class="badge">Reward-eligible</span>
+              <span>{{ reward_min }} min order &middot; stay within {{ reward_max_spread }} of midpoint</span>
+              {% else %}
+              <span class="badge idle">No active reward program</span>
+              {% endif %}
+              {% if let Some(g) = group_item_title %}<span>{{ g }}</span>{% endif %}
+            </div>
+            <div class="market-sub">
+              {% if let Some(r) = resolves %}<span>Resolves {{ r }}{% if let Some(c) = countdown %} &middot; {{ c }}{% endif %}</span>{% endif %}
+              {% if let Some(l) = liquidity %}<span>Liquidity {{ l }}</span>{% endif %}
+              {% if let Some(v) = volume_24hr %}<span>{{ v }} 24h vol</span>{% endif %}
+            </div>
+          </div>
+        </header>
+
+        <div class="content-grid pf-rise">
+          <!-- Order book (the focus) -->
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Order book</h2>
+              <div class="book-head-right">
+                <span class="hint"><span class="key-band"></span> reward zone <span id="band-bounds" class="num">{{ ladder.band_lo_cents }}&ndash;{{ ladder.band_hi_cents }}&cent;</span><span class="tip tip-right" tabindex="0" data-tip="Prices within the max spread of the midpoint earn rewards. Rest your order inside this range.">&#9432;</span></span>
+                <div class="seg seg-sm" id="group" title="Group price levels">
+                  {% for g in group_opts %}
+                  <button type="button" class="seg-btn {% if g.selected %}selected{% endif %}" data-group="{{ g.value }}" onclick="pfSetGroup('{{ g.value }}')">{{ g.label }}</button>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+            <div class="book-cols"><span>Price</span><span>Shares</span><span>Total</span></div>
+            <div class="inzone-line" id="inzone-line" hidden><span class="inzone-label">In-zone <span class="tip" tabindex="0" data-tip="Qualifying liquidity already resting in the reward zone. More here means more competition, so a smaller share of the pool per dollar.">&#9432;</span></span> <span id="inzone-val" class="num"></span></div>
+            <div id="book" hx-swap="innerHTML">{% include "_book_ladder.html" %}</div>
+
+            <div class="ob-chart">
+              <div class="ob-chart-head">
+                <span class="lbl"><span id="chart-title">{{ selected_label }}</span> price &middot; <span id="chart-mid">{{ selected_mid }}&cent;</span></span>
+                <div class="seg seg-sm" id="ranges">
+                  <button type="button" class="seg-btn" data-range="1d" onclick="pfSetRange('1d')">1D</button>
+                  <button type="button" class="seg-btn" data-range="1w" onclick="pfSetRange('1w')">1W</button>
+                  <button type="button" class="seg-btn selected" data-range="all" onclick="pfSetRange('all')">All</button>
+                </div>
+              </div>
+              <div class="ob-chart-sub" id="chart-cap">{{ selected_cap }}</div>
+              <div class="chart-body">
+                {% for s in sides %}
+                <div class="side-chart" data-side="{{ s.idx }}" data-range="1d" data-cap="{{ s.cap_1d }}" hidden>{{ s.chart_1d|safe }}</div>
+                <div class="side-chart" data-side="{{ s.idx }}" data-range="1w" data-cap="{{ s.cap_1w }}" hidden>{{ s.chart_1w|safe }}</div>
+                <div class="side-chart" data-side="{{ s.idx }}" data-range="all" data-cap="{{ s.cap_all }}"{% if !s.selected %} hidden{% endif %}>{{ s.chart_all|safe }}</div>
+                {% endfor %}
+              </div>
+            </div>
+          </section>
+
+          <!-- Trade column: your position (async) + order form -->
+          <div class="trade-col">
+            <div id="your-position" hx-get="/markets/view/position?cid={{ condition_id }}" hx-trigger="load" hx-swap="outerHTML"></div>
+            <section class="panel">
+            <div class="panel-head"><h2>Place a farming order</h2></div>
+            <form class="order-form" method="post" action="/markets/start"
+                  hx-post="/markets/start" hx-target="#start-result" hx-swap="innerHTML">
+              <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+              <input type="hidden" name="slug" value="{{ slug }}" />
+              <input type="hidden" name="side" id="f-side" value="{{ selected_idx }}" />
+              <input type="hidden" name="sides" id="f-sides" value="{% if sides_both %}both{% else %}one{% endif %}" />
+
+              <div class="seg full" id="side-toggle">
+                {% for s in sides %}
+                <button type="button" class="seg-btn {% if s.selected %}selected{% endif %}"
+                        data-side="{{ s.idx }}" data-label="{{ s.label }}" data-mid="{{ s.midpoint_cents }}"
+                        data-suggested="{% if let Some(sp) = s.suggested_price %}{{ sp }}{% endif %}"
+                        onclick="pfSelectSide({{ s.idx }})">{{ s.label }} <span class="num">{{ s.price_cents }}&cent;</span></button>
+                {% endfor %}
+              </div>
+
+              <div class="seg full" id="mode-toggle">
+                <button type="button" class="seg-btn {% if !sides_both %}selected{% endif %}" data-mode="one" onclick="pfSetSides('one')">One side</button>
+                <button type="button" class="seg-btn {% if sides_both %}selected{% endif %}" data-mode="both" onclick="pfSetSides('both')">Both sides</button>
+              </div>
+
+              <div class="form-grp">
+                <label class="form-lbl" for="price">
+                  <span>Your price (<span id="side-label">{{ selected_label }}</span>)</span>
+                  <a id="suggest-btn" onclick="pfUseSuggested()"{% if selected_suggested.is_none() %} hidden{% endif %}>Use suggested &middot;
+                    <span id="suggest-val">{% if let Some(sp) = selected_suggested %}{{ sp }}{% endif %}</span></a>
+                </label>
+                <input class="inp" type="number" step="{{ price_tick }}" min="{{ price_tick }}" max="{{ price_max }}" name="price" id="price"
+                       value="{% if let Some(sp) = selected_suggested %}{{ sp }}{% endif %}" required
+                       onchange="pfRefreshBook()"
+                       hx-post="/markets/view/preview" hx-trigger="input changed delay:250ms, load"
+                       hx-include="closest form" hx-target="#placement-preview" hx-swap="innerHTML" />
+                <p class="form-help">Click a bid on the order book to set this instantly.</p>
+              </div>
+
+              <div class="form-grp">
+                <label class="form-lbl" for="order_size"><span>Order size (USD)<span id="split-note"{% if !sides_both %} hidden{% endif %}> &middot; split across both sides</span></span></label>
+                <input class="inp" type="number" step="1" min="1" name="order_size" id="order_size" value="{{ default_size }}" required
+                       oninput="pfUpdateBookMeta()"
+                       hx-post="/markets/view/preview" hx-trigger="input changed delay:250ms"
+                       hx-include="closest form" hx-target="#placement-preview" hx-swap="innerHTML" />
+              </div>
+
+              <div id="placement-preview"></div>
+
+              <details class="advanced">
+                <summary>Advanced options</summary>
+                <div class="stack" style="margin-top:12px">
+                  <label class="form-lbl" style="cursor:pointer">
+                    <span>Auto-pause if price moves too much</span>
+                    <input type="checkbox" name="auto_pause" value="on" />
+                  </label>
+                  <input class="inp" type="text" name="max_volatility_cents" placeholder="Max move (cents), e.g. 5" />
+
+                  <label class="form-lbl" for="min_depth_cents"><span>Min depth between you and best bid (cents)</span></label>
+                  <input class="inp" type="text" name="min_depth_cents" id="min_depth_cents" placeholder="0" value="0" />
+
+                  <label class="form-lbl" for="expires_in"><span>Stop quoting after</span></label>
+                  <input class="inp" type="text" name="expires_in" id="expires_in" placeholder="7d (e.g. 30m, 4h, 7d)" value="7d" />
+                </div>
+              </details>
+
+              <div id="start-result"><button class="btn block" type="submit">Start farming</button></div>
+            </form>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var pfSlug = "{{ slug }}";
+    var pfSide = {{ selected_idx }};
+    var pfRange = "all";
+    var pfGroup = localStorage.getItem("pfGroup") || "";   // "" = server default (raw tick)
+    var pfBookScroll = null;
+
+    function pfBookUrl() {
+      var price = document.getElementById("price").value;
+      return "/markets/view/book?slug=" + encodeURIComponent(pfSlug) + "&side=" + pfSide
+           + (price ? "&price=" + encodeURIComponent(price) : "")
+           + (pfGroup ? "&group=" + encodeURIComponent(pfGroup) : "");
+    }
+    function pfRefreshBook() { if (window.htmx) htmx.ajax("GET", pfBookUrl(), "#book"); }
+
+    // Group the book into coarser price buckets (server-side); persisted.
+    function pfSetGroup(g) {
+      pfGroup = g;
+      localStorage.setItem("pfGroup", g);
+      document.querySelectorAll("#group .seg-btn").forEach(function (b) { b.classList.toggle("selected", b.dataset.group === g); });
+      pfRefreshBook();
+    }
+
+    // Reward-zone bounds + how crowded the zone is (in-zone depth). Your real
+    // share shows in the Your-position panel once you're farming.
+    function pfUpdateBookMeta() {
+      var d = document.getElementById("book-data");
+      var bounds = document.getElementById("band-bounds");
+      var line = document.getElementById("inzone-line");
+      var val = document.getElementById("inzone-val");
+      if (!d) { if (line) line.hidden = true; return; }
+      if (bounds) bounds.textContent = d.dataset.blo + "–" + d.dataset.bhi + "¢";
+      if (val) val.textContent = d.dataset.usdc;
+      if (line) line.hidden = false;
+    }
+
+    function pfCenterBook() {
+      var b = document.getElementById("book"), sp = b && b.querySelector(".book-spread");
+      if (b && sp) b.scrollTop = sp.offsetTop - (b.clientHeight - sp.offsetHeight) / 2;
+    }
+
+    // Show the chart for the selected side+range and mirror its caption.
+    function pfShowChart() {
+      var cap = "";
+      document.querySelectorAll(".side-chart").forEach(function (c) {
+        var show = (+c.dataset.side === pfSide && c.dataset.range === pfRange);
+        c.hidden = !show;
+        if (show) cap = c.dataset.cap;
+      });
+      var capEl = document.getElementById("chart-cap");
+      if (capEl) capEl.textContent = cap;
+    }
+
+    function pfSetPrice(raw) {
+      document.getElementById("price").value = raw;
+      htmx.trigger("#price", "input");
+      pfRefreshBook();
+    }
+    function pfUseSuggested() { pfSetPrice(document.getElementById("suggest-val").textContent.trim()); }
+
+    function pfSelectSide(i) {
+      pfSide = i;
+      document.querySelectorAll("#side-toggle .seg-btn").forEach(function (t) { t.classList.toggle("selected", +t.dataset.side === i); });
+      var tab = document.querySelector('#side-toggle .seg-btn[data-side="' + i + '"]');
+      pfShowChart();
+      document.getElementById("chart-title").textContent = tab.dataset.label;
+      document.getElementById("chart-mid").textContent = tab.dataset.mid + "¢";
+      document.getElementById("f-side").value = i;
+      document.getElementById("side-label").textContent = tab.dataset.label;
+      var sug = tab.dataset.suggested, sbtn = document.getElementById("suggest-btn");
+      if (sug) { document.getElementById("suggest-val").textContent = sug; sbtn.hidden = false; document.getElementById("price").value = sug; }
+      else { sbtn.hidden = true; }
+      htmx.trigger("#price", "input");
+      pfRefreshBook();
+    }
+
+    function pfSetRange(r) {
+      pfRange = r;
+      document.querySelectorAll("#ranges .seg-btn").forEach(function (b) { b.classList.toggle("selected", b.dataset.range === r); });
+      pfShowChart();
+    }
+
+    function pfSetSides(mode) {
+      document.querySelectorAll("#mode-toggle .seg-btn").forEach(function (b) { b.classList.toggle("selected", b.dataset.mode === mode); });
+      document.getElementById("f-sides").value = mode;
+      document.getElementById("split-note").hidden = (mode !== "both");
+      htmx.trigger("#price", "input");
+    }
+
+    // After each 2s book refresh: keep scroll position, refresh the zone/depth
+    // line. (First load: center the spread.)
+    document.body.addEventListener("htmx:beforeSwap", function (e) { if (e.target.id === "book") pfBookScroll = e.target.scrollTop; });
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+      if (e.target.id === "book") {
+        if (pfBookScroll != null) e.target.scrollTop = pfBookScroll; else pfCenterBook();
+        pfUpdateBookMeta();
+      }
+    });
+
+    // Re-apply a persisted grouping choice if it's valid for this market.
+    if (pfGroup) {
+      var gbtn = document.querySelector('#group .seg-btn[data-group="' + pfGroup + '"]');
+      if (gbtn) {
+        document.querySelectorAll("#group .seg-btn").forEach(function (b) { b.classList.toggle("selected", b === gbtn); });
+        pfRefreshBook();
+      } else { pfGroup = ""; }
+    }
+    pfUpdateBookMeta();
+    pfCenterBook();
+    setInterval(pfRefreshBook, 2000);
+  </script>
+</body>
+</html>

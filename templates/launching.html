@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>polyfarmer · launching</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+  <script src="/assets/htmx.min.js" defer></script>
+</head>
+<body>
+  <main class="wrap">
+    <div class="card launch-card">
+      <div class="launch">
+        <span class="logo">P</span>
+        <div class="spinner" aria-hidden="true"></div>
+        <p id="launch-msg" class="launch-msg" aria-live="polite">Planting your wallet…</p>
+        <a class="muted-link" href="/">Open dashboard now →</a>
+        <!-- Invisible poller: drives the truth. On Running it returns an
+             HX-Redirect to the dashboard; on failure it reveals an error. -->
+        <div id="engine-status" hx-get="/setup/engine-status"
+             hx-trigger="load delay:600ms" hx-swap="outerHTML" style="display:none"></div>
+      </div>
+    </div>
+  </main>
+  <script>
+    // Gentle rotating reassurance — pure delight, not progress. Truth (the
+    // redirect) is driven separately by the poller above. Disabled under
+    // reduced-motion; the poller still flows to the dashboard regardless.
+    (function () {
+      var msgs = [
+        'Planting your wallet…',
+        'Waking the farmer…',
+        'Warming up the plots…',
+        'Tending the markets…'
+      ];
+      var el = document.getElementById('launch-msg');
+      var i = 0;
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      window.__pfRot = setInterval(function () {
+        i = (i + 1) % msgs.length;
+        el.style.opacity = '0';
+        setTimeout(function () { el.textContent = msgs[i]; el.style.opacity = '1'; }, 220);
+      }, 1700);
+    })();
+  </script>
+</body>
+</html>

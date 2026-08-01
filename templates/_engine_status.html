@@ -1,9 +1,13 @@
-{% if running %}
-<div id="engine-status"><p class="ok-inline" style="margin-top:0">✓ Trading is live</p></div>
-{% else if failed %}
-<div id="engine-status"><p class="warn-inline" style="margin-top:0">Couldn't start automatically — check the logs, then re-save to retry.</p></div>
-{% else %}
-<div id="engine-status" hx-get="/setup/engine-status" hx-trigger="load delay:1000ms" hx-swap="outerHTML">
-  <p class="muted" style="margin-top:0">Starting the bot…</p>
+{% if failed %}
+<div id="engine-status">
+  <script>
+    if (window.__pfRot) { clearInterval(window.__pfRot); }
+    var l = document.querySelector('.launch'); if (l) { l.classList.add('failed'); }
+  </script>
+  <p class="warn-inline" style="margin-top:14px">Couldn't start automatically. Check the logs.</p>
+  <a class="btn ghost sm" href="/setup" style="margin-top:12px">Try again</a>
 </div>
+{% else %}
+<div id="engine-status" hx-get="/setup/engine-status"
+     hx-trigger="load delay:1000ms" hx-swap="outerHTML" style="display:none"></div>
 {% endif %}

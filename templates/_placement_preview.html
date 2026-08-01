@@ -1,0 +1,24 @@
+{% if let Some(e) = error %}
+<div class="err pf-rise">{{ e }}</div>
+{% else if !has_rewards %}
+<div class="warn pf-rise">No active reward program right now. You can still place the order, it just won't earn rewards.</div>
+{% else %}
+<div class="order-summary pf-rise">
+  <div class="sum-row {% if qualifies %}ok{% else %}bad{% endif %}">
+    <span class="label">Qualifies for rewards <span class="tip" tabindex="0" data-tip="Whether this order would earn rewards: it must rest within the reward zone and meet the minimum size.">&#9432;</span></span>
+    <span class="value">{% if qualifies %}&check; Yes{% else %}&times; No{% endif %}</span>
+  </div>
+  <div class="sum-row">
+    <span class="label">Distance from midpoint</span>
+    <span class="value">{{ cents_from_mid }}&cent;</span>
+  </div>
+  <div class="sum-row">
+    <span class="label">Fill risk <span class="tip" tabindex="0" data-tip="How likely your order gets taken. If filled, you hold the position instead of farming. Closer to the midpoint = more reward but higher fill risk.">&#9432;</span></span>
+    <span class="value risk-{{ fill_risk }}">{{ fill_risk }}</span>
+  </div>
+  <div class="sum-row {% if !per_side_meets_min %}warn{% endif %}">
+    <span class="label">Resting per side</span>
+    <span class="value">{{ per_side_size }}{% if !per_side_meets_min %} &middot; below ${{ min_size }} min{% endif %}</span>
+  </div>
+</div>
+{% endif %}

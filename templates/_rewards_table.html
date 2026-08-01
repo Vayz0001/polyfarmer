@@ -1,0 +1,30 @@
+<div class="panel-head">
+  <h2>Your reward-eligible markets</h2>
+  {% if let Some(t) = today_total %}
+  <span class="hint">Today so far: {{ t }} (still accruing, finalizes after midnight UTC)</span>
+  {% endif %}
+</div>
+{% if !engine_running %}
+<div class="empty">Engine is not running yet. Configure your wallet first.</div>
+{% else if let Some(e) = error %}
+<div class="err" style="margin:16px">{{ e }}</div>
+{% else %}
+<table>
+  <thead>
+    <tr><th>Market</th><th>Your share</th><th>Earned today</th><th>Qualify</th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td class="mkt">{{ row.label }}</td>
+      <td class="num">{{ row.percentage }}</td>
+      <td class="num">{{ row.earnings_today }}</td>
+      <td class="muted">{{ row.min_size }} min &middot; {{ row.max_spread }} max spread</td>
+    </tr>
+    {% endfor %}
+    {% if rows.is_empty() %}
+    <tr><td colspan="4"><div class="empty">No reward data yet. Add a reward-eligible market and place a resting order.</div></td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endif %}

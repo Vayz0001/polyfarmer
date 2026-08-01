@@ -8,18 +8,22 @@ use crate::engine::quoter::QuoteAction;
 use crate::engine::{heartbeat, quoter, ws_manager};
 use crate::engine::ws_manager::{AppState, MAX_PLACE_FAILURES};
 use crate::storage::{load_markets, save_markets};
-use crate::types::{EnginePhase, MarketConfig, OrderStatus, WsCommand};
+use crate::types::{EnginePhase, OrderStatus, WsCommand};
 
 use eyre::Result;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch, Notify, RwLock};
 use tracing::{error, info, warn};
 
-const MARKETS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 const QUOTE_TIMER_INTERVAL: Duration = Duration::from_secs(30);
 const HOURLY_SUMMARY_INTERVAL: Duration = Duration::from_secs(3600);
+/// How often the boot task re-checks for a newly-configured wallet (cheap,
+/// local file read — fine to be snappy).
+const WALLET_POLL: Duration = Duration::from_secs(3);
+/// Backoff between auto-retries after a failed engine start (auth/network).
+/// Longer than WALLET_POLL so a sustained outage doesn't hammer Polymarket.
+const START_RETRY: Duration = Duration::from_secs(10);
 
 pub async fn run() -> Result<()> {
     tracing_subscriber::fmt()
@@ -60,17 +64,19 @@ pub async fn run() -> Result<()> {
     // ── Spawn: web dashboard (reachable even before the wallet is configured) ──
     // Returns a handle the boot task awaits, so configuring a wallet in the
     // dashboard starts the engine immediately — no restart on first run.
-    let wallet_ready = {
+    let (wallet_ready, engine_handle) = {
         let bind = config.dashboard_bind.clone();
         match tokio::net::TcpListener::bind(&bind).await {
             Ok(listener) => {
                 info!("Dashboard on http://{}", bind);
-                let web_state = crate::web::WebState::with_rpc(
+                let web_state = crate::web::WebState::with_config(
                     Arc::clone(&store),
                     Arc::clone(&state),
                     config.polygon_rpc_url.clone(),
+                    config.reward_history_file.clone(),
                 );
                 let ready = Arc::clone(&web_state.wallet_ready);
+                let handle = web_state.engine_handle.clone();
                 let svc = crate::web::router(web_state)
                     .into_make_service_with_connect_info::<std::net::SocketAddr>();
                 tokio::spawn(async move {
@@ -78,13 +84,13 @@ pub async fn run() -> Result<()> {
                         error!("Web server error: {}", e);
                     }
                 });
-                ready
+                (ready, handle)
             }
             // No dashboard means no way to configure a wallet at runtime; the
             // wait-loop below falls back to its periodic re-check of the file.
             Err(e) => {
                 error!("Failed to bind dashboard on {}: {}", bind, e);
-                Arc::new(tokio::sync::Notify::new())
+                (Arc::new(tokio::sync::Notify::new()), crate::web::EngineHandle::new())
             }
         }
     };
@@ -93,13 +99,21 @@ pub async fn run() -> Result<()> {
     //    executor. Each leg can fail without killing the process — on failure
     //    we set EnginePhase::Error and loop back to waiting, so re-saving the
     //    wallet in the dashboard retries. This is the first-run auto-start path.
+    // Re-checks happen every few seconds; these flags keep us from flooding the
+    // log / external notifier while idle-waiting or during a sustained outage.
+    let mut waiting_logged = false;
+    let mut failure_alerted = false;
+
     let executor = loop {
         let creds = match store.load_wallet() {
             Ok(Some(c)) => c,
             Ok(None) => {
                 set_phase(&state, EnginePhase::AwaitingWallet).await;
-                info!("No wallet configured — waiting (configure at http://{})", config.dashboard_bind);
-                if wait_or_exit(&wallet_ready).await { return Ok(()); }
+                if !waiting_logged {
+                    info!("No wallet configured — waiting (configure at http://{})", config.dashboard_bind);
+                    waiting_logged = true;
+                }
+                if wait_or_exit(&wallet_ready, WALLET_POLL).await { return Ok(()); }
                 continue;
             }
             Err(e) => {
@@ -113,21 +127,28 @@ pub async fn run() -> Result<()> {
             Ok(a) => a,
             Err(_) => {
                 error!("Stored proxy wallet is not a valid address — re-enter it in the dashboard");
+                if !failure_alerted {
+                    alerter.error("Stored wallet address is invalid — re-enter it in the dashboard.");
+                    failure_alerted = true;
+                }
                 set_phase(&state, EnginePhase::Error).await;
-                if wait_or_exit(&wallet_ready).await { return Ok(()); }
+                if wait_or_exit(&wallet_ready, START_RETRY).await { return Ok(()); }
                 continue;
             }
         };
 
         set_phase(&state, EnginePhase::Starting).await;
 
-        let executor = match Executor::new(creds.expose_key(), proxy_wallet).await {
+        let executor = match Executor::new(creds.expose_key(), proxy_wallet, config.polygon_rpc_url.as_deref()).await {
             Ok(e) => Arc::new(e),
             Err(e) => {
                 error!("Could not authenticate with Polymarket: {}", e);
-                alerter.error("Wallet saved, but the engine couldn't start (Polymarket auth/network). Check logs and re-save to retry.");
+                if !failure_alerted {
+                    alerter.error("Wallet saved, but the engine couldn't start (Polymarket auth/network). It will keep retrying — check logs.");
+                    failure_alerted = true;
+                }
                 set_phase(&state, EnginePhase::Error).await;
-                if wait_or_exit(&wallet_ready).await { return Ok(()); }
+                if wait_or_exit(&wallet_ready, START_RETRY).await { return Ok(()); }
                 continue;
             }
         };
@@ -143,9 +164,12 @@ pub async fn run() -> Result<()> {
         };
         if let Err(e) = executor.cancel_orders_for_tokens(&startup_tokens).await {
             error!("Startup cancel failed — refusing to trade with potentially open orders: {}", e);
-            alerter.error("Engine start aborted: could not clear existing orders. Check logs and re-save to retry.");
+            if !failure_alerted {
+                alerter.error("Engine start aborted: could not clear existing orders. It will keep retrying — check logs.");
+                failure_alerted = true;
+            }
             set_phase(&state, EnginePhase::Error).await;
-            if wait_or_exit(&wallet_ready).await { return Ok(()); }
+            if wait_or_exit(&wallet_ready, START_RETRY).await { return Ok(()); }
             continue;
         }
 
@@ -157,6 +181,10 @@ pub async fn run() -> Result<()> {
     // ── Channels ──────────────────────────────────────────────────────────────
     let (ws_cmd_tx, ws_cmd_rx) = mpsc::channel::<WsCommand>(20);
     let (stop_tx, stop_rx) = watch::channel(false);
+
+    // Make the authenticated executor + WS command sender reachable from web
+    // handlers (market add/remove/pause, reward reads) — see web/state.rs.
+    engine_handle.set(Arc::clone(&executor), ws_cmd_tx.clone()).await;
 
     // ── Spawn: WebSocket manager ──────────────────────────────────────────────
     ws_manager::spawn(
@@ -175,29 +203,18 @@ pub async fn run() -> Result<()> {
         stop_rx.clone(),
     );
 
-    // ── Spawn: markets.json watcher ───────────────────────────────────────────
-    {
-        let state2    = Arc::clone(&state);
-        let alerter2  = Arc::clone(&alerter);
-        let executor2 = Arc::clone(&executor);
-        let config2   = Arc::clone(&config);
-        let cmd_tx    = ws_cmd_tx.clone();
-        let mut stop  = stop_rx.clone();
-
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(MARKETS_POLL_INTERVAL);
-            loop {
-                tokio::select! {
-                    _ = ticker.tick() => {
-                        poll_markets(&config2, &state2, &executor2, &alerter2, &cmd_tx).await;
-                    }
-                    _ = stop.changed() => {
-                        if *stop.borrow() { break; }
-                    }
-                }
-            }
-        });
-    }
+    // ── Spawn: daily reward-history snapshot ──────────────────────────────────
+    // markets.json no longer needs a poll loop — web handlers (Segment 5) own
+    // the only write path now and mutate `AppState` directly; ws_manager's
+    // connect loop always re-derives its subscription set fresh from
+    // `AppState.configs` on every (re)connect, so there's nothing left to
+    // reconcile from a periodic file diff.
+    crate::rewards::history::spawn(
+        Arc::clone(&executor),
+        Arc::clone(&alerter),
+        config.reward_history_file.clone(),
+        stop_rx.clone(),
+    );
 
     // ── Spawn: 30s quote timer (fallback re-evaluation) ───────────────────────
     {
@@ -293,126 +310,13 @@ async fn set_phase(state: &Arc<RwLock<AppState>>, phase: EnginePhase) {
 /// The `notified()` arm is the fast path (fires the instant `set_wallet` pings
 /// it); the 3s sleep is belt-and-suspenders so a missed notify still self-heals
 /// — the caller re-reads the file each loop, so the bot can't silently hang.
-async fn wait_or_exit(wallet_ready: &Notify) -> bool {
+async fn wait_or_exit(wallet_ready: &Notify, retry_after: Duration) -> bool {
     tokio::select! {
         _ = wallet_ready.notified() => false,
-        _ = tokio::time::sleep(Duration::from_secs(3)) => false,
+        _ = tokio::time::sleep(retry_after) => false,
         _ = tokio::signal::ctrl_c() => {
             info!("Shutdown requested before a wallet was configured");
             true
-        }
-    }
-}
-
-// ── Markets watcher ───────────────────────────────────────────────────────────
-
-async fn poll_markets(
-    config: &Config,
-    state: &Arc<RwLock<AppState>>,
-    executor: &Arc<Executor>,
-    alerter: &Arc<Alerter>,
-    cmd_tx: &mpsc::Sender<WsCommand>,
-) {
-    let new_configs = match load_markets(&config.markets_file) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("Failed to load markets.json: {}", e);
-            alerter.warn(format!("Failed to load markets.json — bot is not re-evaluating markets: {}", e));
-            return;
-        }
-    };
-
-    // Compute diffs and mutate state under the write lock, then release before
-    // sending channel commands (avoids holding the lock during an async send).
-    let (new_tokens, tokens_to_unsub, orders_to_cancel) = {
-        let mut s = state.write().await;
-
-        let old_ids: HashSet<String> = s.configs.iter().map(|c| c.id.clone()).collect();
-        let new_ids: HashSet<String> = new_configs.iter().map(|c| c.id.clone()).collect();
-
-        // Added configs
-        let added: Vec<&MarketConfig> = new_configs.iter()
-            .filter(|c| !old_ids.contains(&c.id))
-            .collect();
-
-        for cfg in &added {
-            s.order_status.insert(cfg.id.clone(), OrderStatus::Idle);
-            alerter.info(format!("Market added: {}", cfg.label));
-        }
-
-        // New token_ids to subscribe (deduplicated against already-subscribed)
-        let existing_tokens: HashSet<String> = s.configs.iter()
-            .map(|c| c.token_id.clone()).collect();
-        let new_tokens: Vec<String> = added.iter()
-            .filter(|c| !existing_tokens.contains(&c.token_id))
-            .map(|c| c.token_id.clone())
-            .collect();
-
-        // Removed configs
-        let removed: Vec<MarketConfig> = s.configs.iter()
-            .filter(|c| !new_ids.contains(&c.id))
-            .cloned()
-            .collect();
-
-        // Collect order IDs that need cancellation from removed markets.
-        // Include both Live and Cancelling — Cancelling may not have completed.
-        let mut orders_to_cancel: Vec<String> = Vec::new();
-        for cfg in &removed {
-            let order_id = match s.order_status.get(&cfg.id) {
-                Some(OrderStatus::Live { order_id, .. }) => {
-                    warn!("Market removed with live order — cancelling: {}", cfg.label);
-                    alerter.warn(format!("Market removed: {} (cancelling live order)", cfg.label));
-                    Some(order_id.clone())
-                }
-                Some(OrderStatus::Cancelling { order_id, .. }) => {
-                    warn!("Market removed while order cancel in-flight — re-cancelling: {}", cfg.label);
-                    alerter.warn(format!("Market removed: {} (re-cancelling in-flight order)", cfg.label));
-                    Some(order_id.clone())
-                }
-                _ => {
-                    alerter.info(format!("Market removed: {}", cfg.label));
-                    None
-                }
-            };
-            if let Some(oid) = order_id {
-                orders_to_cancel.push(oid);
-            }
-            s.order_status.remove(&cfg.id);
-            s.place_failures.remove(&cfg.id);
-        }
-
-        // Token_ids no longer referenced by any config
-        let remaining_tokens: HashSet<String> = new_configs.iter()
-            .map(|c| c.token_id.clone()).collect();
-        let tokens_to_unsub: Vec<String> = s.configs.iter()
-            .filter(|c| !remaining_tokens.contains(&c.token_id))
-            .map(|c| c.token_id.clone())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-
-        s.configs = new_configs;
-        (new_tokens, tokens_to_unsub, orders_to_cancel)
-    }; // write lock released here
-
-    // Send channel commands outside the lock — send().await blocks if the channel
-    // is full, so we must not hold the state lock while waiting.
-    if !new_tokens.is_empty() {
-        if cmd_tx.send(WsCommand::Subscribe(new_tokens)).await.is_err() {
-            warn!("WS command channel closed — subscribe dropped");
-        }
-    }
-    if !tokens_to_unsub.is_empty() {
-        if cmd_tx.send(WsCommand::Unsubscribe(tokens_to_unsub)).await.is_err() {
-            warn!("WS command channel closed — unsubscribe dropped");
-        }
-    }
-
-    // Cancel orders from removed markets outside the lock (network I/O).
-    if !orders_to_cancel.is_empty() {
-        if let Err(e) = executor.cancel_orders(&orders_to_cancel).await {
-            error!("Failed to cancel orders for removed markets: {}", e);
-            alerter.error(format!("Failed to cancel orders after market removal — manual check required: {}", e));
         }
     }
 }
