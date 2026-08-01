@@ -16,5 +16,11 @@
     <span class="label">Resting per side</span>
     <span class="value">{{ per_side_shares }} shares &middot; {{ per_side_size }}{% if !per_side_meets_min %} &middot; below {{ min_size }}-share min{% endif %}</span>
   </div>
+  {% if let Some(o) = other_leg %}
+  <div class="sum-row {% if o.qualifies %}ok{% else %}bad{% endif %}">
+    <span class="label">Other side · {{ o.label }} <span class="tip" tabindex="0" data-tip="You set one price; the other side mirrors the same distance below its own best bid. This is where it lands.">&#9432;</span></span>
+    <span class="value">rests {{ o.price_cents }}&cent; · {% if o.qualifies %}&check; qualifies{% else %}&times; {{ o.shares }} sh{% if !o.meets_min %} under min{% endif %}{% endif %}</span>
+  </div>
+  {% endif %}
 </div>
 {% endif %}

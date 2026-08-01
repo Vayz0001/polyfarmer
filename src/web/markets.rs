@@ -431,6 +431,17 @@ pub struct PlacementPreviewForm {
     order_size: String,
 }
 
+/// In both-sides mode, the DERIVED other leg: it rests at the same distance
+/// below *its* best bid, so its price/qualify are shown for transparency (the
+/// user only sets the selected side's price).
+struct OtherLeg {
+    label: String,
+    price_cents: String,
+    qualifies: bool,
+    meets_min: bool,
+    shares: String,
+}
+
 #[derive(Template)]
 #[template(path = "_placement_preview.html")]
 struct PlacementPreviewTemplate {
@@ -441,6 +452,7 @@ struct PlacementPreviewTemplate {
     per_side_meets_min: bool,
     min_size: String,        // reward minimum, in shares
     fill_risk: &'static str,
+    other_leg: Option<OtherLeg>,
     error: Option<String>,
 }
 
@@ -454,6 +466,7 @@ impl PlacementPreviewTemplate {
             per_side_meets_min: true,
             min_size: String::new(),
             fill_risk: "high",
+            other_leg: None,
             error: Some(message.into()),
         }
     }
@@ -467,6 +480,7 @@ impl PlacementPreviewTemplate {
             per_side_meets_min: true,
             min_size: String::new(),
             fill_risk: "high",
+            other_leg: None,
             error: None,
         }
     }
@@ -513,6 +527,37 @@ pub async fn view_preview(Form(form): Form<PlacementPreviewForm>) -> Html<String
     };
 
     let eval = market_data::evaluate_placement(&book, midpoint, max_spread_cents, min_size, price, order_size, both_sides);
+
+    // Both-sides transparency: the other leg is derived — it rests at the SAME
+    // distance below its own best bid, so surface its price + qualify rather
+    // than leaving it invisible. (One set of params, applied symmetrically.)
+    let other_leg = if both_sides {
+        let other = 1 - side;
+        let other_token = &mr.token_ids[other];
+        let distance = book.best_bid.map(|bb| bb - price);
+        let other_book = tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(other_token))
+            .await.ok().and_then(Result::ok);
+        let other_mid = tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_midpoint(other_token))
+            .await.ok().and_then(Result::ok)
+            .unwrap_or_else(|| mr.outcome_prices.get(other).copied().unwrap_or(dec!(0.5)));
+        match (distance, other_book) {
+            (Some(d), Some(ob)) if ob.best_bid.is_some() => {
+                let op = ob.best_bid.unwrap() - d;
+                let oe = market_data::evaluate_placement(&ob, other_mid, max_spread_cents, min_size, op, order_size, true);
+                Some(OtherLeg {
+                    label: mr.outcomes.get(other).cloned().unwrap_or_default(),
+                    price_cents: format!("{:.1}", op * dec!(100)),
+                    qualifies: oe.qualifies,
+                    meets_min: oe.per_side_meets_min,
+                    shares: format!("{:.0}", oe.per_side_shares),
+                })
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     render(PlacementPreviewTemplate {
         has_rewards: true,
         cents_from_mid: format!("{:.1}", eval.cents_from_mid),
@@ -521,6 +566,7 @@ pub async fn view_preview(Form(form): Form<PlacementPreviewForm>) -> Html<String
         per_side_meets_min: eval.per_side_meets_min,
         min_size: min_size.normalize().to_string(),
         fill_risk: eval.fill_risk.label(),
+        other_leg,
         error: None,
     })
 }
