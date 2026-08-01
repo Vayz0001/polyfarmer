@@ -584,7 +584,6 @@ pub struct StartFarmingForm {
     order_size: String,
     min_depth_cents: String,
     expires_in: String,
-    auto_pause: Option<String>,
     max_volatility_cents: String,
 }
 
@@ -623,13 +622,14 @@ pub async fn start_farming(
         Some(d) => d,
         None => return render_start_error("Min depth must be a number (in cents)."),
     };
-    let max_volatility = if form.auto_pause.is_some() {
-        match parse_cents(&form.max_volatility_cents) {
-            Some(v) => Some(v),
-            None => return render_start_error("Auto-pause threshold must be a number (in cents)."),
-        }
-    } else {
+    // Auto-pause is enabled by filling the threshold field; blank = disabled.
+    let max_volatility = if form.max_volatility_cents.trim().is_empty() {
         None
+    } else {
+        match parse_cents(&form.max_volatility_cents) {
+            Some(v) if v > dec!(0) => Some(v),
+            _ => return render_start_error("Auto-pause threshold must be a positive number (in cents)."),
+        }
     };
     let expires_at = match parse_expiry(&form.expires_in) {
         Ok(e) => e,
@@ -943,6 +943,11 @@ fn parse_cents(s: &str) -> Option<Decimal> {
 /// the original Discord bot used. Range: 1 minute .. 1 year. Empty -> 7 days.
 fn parse_expiry(s: &str) -> Result<chrono::DateTime<Utc>, String> {
     let s = s.trim();
+    // "never" = quote indefinitely — a far-future sentinel so the expiry check
+    // never fires (no schema change to MarketConfig's non-optional expires_at).
+    if s.eq_ignore_ascii_case("never") {
+        return Ok(Utc::now() + chrono::Duration::days(36500));
+    }
     let s = if s.is_empty() { "7d" } else { s };
     let (num_part, unit) = s.split_at(s.len() - 1);
     let n: i64 = num_part.parse().map_err(|_| format!("Invalid expiry '{s}' — use e.g. 7d, 4h, 30m."))?;

@@ -155,17 +155,19 @@
               <details class="advanced">
                 <summary>Advanced options</summary>
                 <div class="stack" style="margin-top:12px">
-                  <label class="form-lbl" style="cursor:pointer">
-                    <span>Auto-pause if price moves too much</span>
-                    <input type="checkbox" name="auto_pause" value="on" />
-                  </label>
-                  <input class="inp" type="text" name="max_volatility_cents" placeholder="Max move (cents), e.g. 5" />
+                  <label class="form-lbl" for="max_volatility_cents"><span>Auto-pause if best bid moves by (cents)</span></label>
+                  <input class="inp" type="text" name="max_volatility_cents" id="max_volatility_cents" placeholder="e.g. 5 · leave blank to disable" />
 
                   <label class="form-lbl" for="min_depth_cents"><span>Min depth between you and best bid (cents)</span></label>
                   <input class="inp" type="text" name="min_depth_cents" id="min_depth_cents" placeholder="0" value="0" />
 
                   <label class="form-lbl" for="expires_in"><span>Stop quoting after</span></label>
-                  <input class="inp" type="text" name="expires_in" id="expires_in" placeholder="7d (e.g. 30m, 4h, 7d)" value="7d" />
+                  <select class="inp" name="expires_in" id="expires_in">
+                    <option value="1d">1 day</option>
+                    <option value="3d">3 days</option>
+                    <option value="7d" selected>7 days</option>
+                    <option value="never">Never</option>
+                  </select>
                 </div>
               </details>
 
