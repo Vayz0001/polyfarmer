@@ -312,6 +312,15 @@ tbody tr{transition:background .12s} tbody tr:hover{background:var(--surface-2)}
 .toast-x{position:absolute;top:5px;right:6px;width:18px;height:18px;display:grid;place-items:center;border:none;background:transparent;color:var(--faint);font-size:16px;line-height:1;border-radius:4px;cursor:pointer}
 .toast-x:hover{color:var(--fg);background:var(--surface-2)}
 
+/* ── In-app confirm modal (replaces native window.confirm) ───────────────── */
+.modal-overlay{position:fixed;inset:0;z-index:1100;display:grid;place-items:center;background:rgba(28,28,28,.38);padding:20px}
+.modal-overlay[hidden]{display:none}
+.modal-card{background:var(--surface);border:1px solid var(--border-2);border-radius:14px;box-shadow:var(--shadow-pop);max-width:400px;width:100%;padding:20px}
+.modal-q{font-size:14px;color:var(--fg);line-height:1.45;margin:0 0 16px}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px}
+.btn.danger{background:#b42318;color:#fff;border-color:#b42318}
+.btn.danger:hover{opacity:.92}
+
 /* spread block — Best Bid / Midpoint / Best Ask (rewards measured at midpoint) */
 .book-spread{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:13px 16px;margin:5px 0;
   background:rgba(28,28,28,.02);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}

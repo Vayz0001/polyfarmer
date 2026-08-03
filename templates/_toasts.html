@@ -68,3 +68,39 @@
   setInterval(window.pfRelTime, 30000);
 })();
 </script>
+
+<!-- In-app confirm dialog: replaces htmx's native window.confirm for any
+     element with hx-confirm. Survives the 2s table refresh (the request
+     continuation is captured on click). -->
+<div id="pf-modal" class="modal-overlay" hidden>
+  <div class="modal-card" role="alertdialog" aria-modal="true">
+    <p class="modal-q" id="pf-modal-q"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost sm" id="pf-modal-cancel">Cancel</button>
+      <button type="button" class="btn danger sm" id="pf-modal-ok">Confirm</button>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  if (window.pfModalInit) return; window.pfModalInit = true;
+  var overlay = document.getElementById("pf-modal");
+  var q = document.getElementById("pf-modal-q");
+  var ok = document.getElementById("pf-modal-ok");
+  var cancel = document.getElementById("pf-modal-cancel");
+  var pending = null;
+  function close() { overlay.hidden = true; pending = null; }
+  document.addEventListener("htmx:confirm", function (e) {
+    if (!e.detail.question) return;      // no hx-confirm → let htmx proceed
+    e.preventDefault();                  // suppress the native window.confirm
+    q.textContent = e.detail.question;
+    pending = e.detail;
+    overlay.hidden = false;
+    ok.focus();
+  });
+  ok.onclick = function () { if (pending) { var d = pending; close(); d.issueRequest(true); } };
+  cancel.onclick = close;
+  overlay.onclick = function (e) { if (e.target === overlay) close(); };
+  document.addEventListener("keydown", function (e) { if (!overlay.hidden && e.key === "Escape") close(); });
+})();
+</script>
