@@ -978,12 +978,12 @@ pub struct MarketActionForm {
     csrf: String,
 }
 
-/// POST /markets/{cid}/remove — `cid` is a `condition_id`; removes every
-/// config sharing it (one-side = a group of one, both-sides = two legs).
+/// POST /markets/{id}/remove — `id` is a single config (leg) id; removes just
+/// that leg and cancels its resting order (Yes and No are managed separately).
 pub async fn remove_market(
     State(state): State<WebState>,
     session: Session,
-    Path(cid): Path<String>,
+    Path(id): Path<String>,
     Form(form): Form<MarketActionForm>,
 ) -> Response {
     if !verify_csrf(&session, &form.csrf).await {
@@ -992,7 +992,7 @@ pub async fn remove_market(
 
     let (configs_snapshot, removed, orders_to_cancel, tokens_to_unsubscribe, markets_file) = {
         let mut s = state.engine.write().await;
-        let removed: Vec<_> = s.configs.iter().filter(|c| c.condition_id == cid).cloned().collect();
+        let removed: Vec<_> = s.configs.iter().filter(|c| c.id == id).cloned().collect();
         if removed.is_empty() {
             return Html("").into_response(); // already gone — nothing to do
         }
@@ -1006,7 +1006,7 @@ pub async fn remove_market(
             s.order_status.remove(&c.id);
             s.place_failures.remove(&c.id);
         }
-        s.configs.retain(|c| c.condition_id != cid);
+        s.configs.retain(|c| c.id != id);
         let tokens_to_unsubscribe: Vec<String> = removed
             .iter()
             .map(|c| c.token_id.clone())
@@ -1035,18 +1035,18 @@ pub async fn remove_market(
     Html("").into_response()
 }
 
-/// POST /markets/{cid}/pause and /markets/{cid}/resume share this — `pausing`
-/// picks the direction. `cid` is a `condition_id`; flips every leg sharing it
-/// together, so a both-sides farm is always paused/resumed as one unit.
-async fn set_paused(state: &WebState, cid: &str, pausing: bool) -> Result<(), String> {
+/// POST /markets/{id}/pause and /markets/{id}/resume share this — `pausing`
+/// picks the direction. `id` is a single config (leg) id, so Yes and No are
+/// paused/resumed independently.
+async fn set_paused(state: &WebState, id: &str, pausing: bool) -> Result<(), String> {
     let (configs_snapshot, orders_to_cancel, markets_file) = {
         let mut s = state.engine.write().await;
         let ids: Vec<String> =
-            s.configs.iter().filter(|c| c.condition_id == cid).map(|c| c.id.clone()).collect();
+            s.configs.iter().filter(|c| c.id == id).map(|c| c.id.clone()).collect();
         if ids.is_empty() {
             return Ok(()); // already gone
         }
-        for c in s.configs.iter_mut().filter(|c| c.condition_id == cid) {
+        for c in s.configs.iter_mut().filter(|c| c.id == id) {
             c.paused = pausing;
         }
         let orders_to_cancel: Vec<(String, String)> = if pausing {
@@ -1065,7 +1065,7 @@ async fn set_paused(state: &WebState, cid: &str, pausing: bool) -> Result<(), St
     if let Err(e) = save_markets(&markets_file, &configs_snapshot) {
         // Roll back the flag flip.
         let mut s = state.engine.write().await;
-        for c in s.configs.iter_mut().filter(|c| c.condition_id == cid) {
+        for c in s.configs.iter_mut().filter(|c| c.id == id) {
             c.paused = !pausing;
         }
         return Err(format!("Failed to save: {e}"));
@@ -1105,13 +1105,13 @@ async fn set_paused(state: &WebState, cid: &str, pausing: bool) -> Result<(), St
 pub async fn pause_market(
     State(state): State<WebState>,
     session: Session,
-    Path(cid): Path<String>,
+    Path(id): Path<String>,
     Form(form): Form<MarketActionForm>,
 ) -> Response {
     if !verify_csrf(&session, &form.csrf).await {
         return Html("Invalid session — retry.").into_response();
     }
-    match set_paused(&state, &cid, true).await {
+    match set_paused(&state, &id, true).await {
         Ok(()) => Html("").into_response(),
         Err(e) => Html(e).into_response(),
     }
@@ -1120,13 +1120,13 @@ pub async fn pause_market(
 pub async fn resume_market(
     State(state): State<WebState>,
     session: Session,
-    Path(cid): Path<String>,
+    Path(id): Path<String>,
     Form(form): Form<MarketActionForm>,
 ) -> Response {
     if !verify_csrf(&session, &form.csrf).await {
         return Html("Invalid session — retry.").into_response();
     }
-    match set_paused(&state, &cid, false).await {
+    match set_paused(&state, &id, false).await {
         Ok(()) => Html("").into_response(),
         Err(e) => Html(e).into_response(),
     }

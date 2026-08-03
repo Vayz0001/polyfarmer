@@ -189,12 +189,12 @@ tbody tr{transition:background .12s} tbody tr:hover{background:var(--surface-2)}
 .mkt-ext:hover{color:var(--accent)}
 /* outcome-agnostic side coloring — "a"/"b" are token slots, not yes/no */
 .side-a{color:var(--accent);font-weight:600} .side-b{color:var(--amber);font-weight:600}
-.leg-line{display:flex;align-items:center;gap:6px;min-height:22px}
+.leg-line{display:flex;align-items:center;gap:6px;min-height:22px;white-space:nowrap}
 .leg-line + .leg-line{margin-top:6px;padding-top:6px;border-top:1px dashed var(--border-2)}
 .empty{padding:36px 16px;text-align:center;color:var(--faint);font-size:13px}
 
 /* ── Status pills (order status, engine status, reward-scoring) ──────────── */
-.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:99px;font-size:11.5px;font-weight:500;background:var(--surface-2);color:var(--muted)}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:99px;font-size:11.5px;font-weight:500;background:var(--surface-2);color:var(--muted);white-space:nowrap}
 .pill.sm{padding:2px 8px;font-size:10.5px}
 .pill.live{background:var(--green-bg);color:var(--green)}
 .pill.paused{background:#fbf1df;color:var(--amber)}
@@ -206,6 +206,7 @@ tbody tr{transition:background .12s} tbody tr:hover{background:var(--surface-2)}
 @media (prefers-reduced-motion: reduce){.dot.live{animation:none}}
 
 .row-actions{display:flex;gap:6px;justify-content:flex-end}
+.leg-actions{justify-content:flex-end;gap:6px}
 
 /* ── Market detail view (order book = the focus, form = right panel) ──────── */
 .spacer{flex:1}

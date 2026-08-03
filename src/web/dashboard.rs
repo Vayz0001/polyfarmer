@@ -74,6 +74,10 @@ pub async fn overview(State(state): State<WebState>) -> Html<String> {
 /// One outcome leg within a market row — one side of a one- or both-sides
 /// farming config.
 pub struct LegRow {
+    /// Config id for this leg — pause/resume/remove act on this single leg.
+    pub id: String,
+    /// Whether this leg is paused (drives its own Pause/Resume control).
+    pub paused: bool,
     pub side_label: String, // the market's real outcome name, e.g. "Yes", "France"
     /// "a" | "b" — which outcome slot this is (first/second token), purely
     /// for a stable, outcome-agnostic color split. Never matches on the
@@ -93,17 +97,15 @@ pub struct LegRow {
 /// One row in the markets table — one *market* (grouped by `condition_id`),
 /// holding one leg for one-side farming or two legs for both-sides.
 pub struct MarketRow {
-    /// `condition_id` — the group key; pause/remove/resume act on every leg
-    /// sharing it.
-    pub condition_id: String,
     pub label: String,
     /// Polymarket event URL (external link).
     pub url: String,
     /// Slug for the internal market-view link (`/markets/view?slug=`), derived
     /// from the URL's last path segment.
     pub slug: String,
+    /// Legs (1 for one-side, 2 for both-sides). Each carries its own id +
+    /// paused state — pause/resume/remove act per leg.
     pub legs: Vec<LegRow>,
-    pub paused: bool,
 }
 
 #[derive(Template)]
@@ -182,7 +184,6 @@ async fn build_rows(state: &WebState) -> Vec<MarketRow> {
             let url = legs_cfg.first().map(|c| c.url.clone()).unwrap_or_default();
             // Slug = last path segment of the event URL (…/event/{slug}).
             let slug = url.trim_end_matches('/').rsplit('/').next().unwrap_or_default().to_string();
-            let paused = legs_cfg.first().is_some_and(|c| c.paused);
             let legs = legs_cfg
                 .iter()
                 .enumerate()
@@ -208,6 +209,8 @@ async fn build_rows(state: &WebState) -> Vec<MarketRow> {
                         }
                     };
                     LegRow {
+                        id: c.id.clone(),
+                        paused: c.paused,
                         side_label: c.token_label.clone(),
                         side_class: if i == 0 { "a" } else { "b" },
                         distance: format!("{:.0}¢", c.distance * rust_decimal_macros::dec!(100)),
@@ -219,7 +222,7 @@ async fn build_rows(state: &WebState) -> Vec<MarketRow> {
                     }
                 })
                 .collect();
-            MarketRow { condition_id: cid, label, url, slug, legs, paused }
+            MarketRow { label, url, slug, legs }
         })
         .collect()
 }

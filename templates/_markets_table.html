@@ -41,14 +41,18 @@
         </div>
         {% endfor %}
       </td>
-      <td class="row-actions">
-        {% if row.paused %}
-        <button class="btn ghost sm" hx-post="/markets/{{ row.condition_id }}/resume" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none">Resume</button>
-        {% else %}
-        <button class="btn ghost sm" hx-post="/markets/{{ row.condition_id }}/pause" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none">Pause</button>
-        {% endif %}
-        <button class="btn ghost sm" hx-post="/markets/{{ row.condition_id }}/remove" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none"
-                hx-confirm="Remove {{ row.label }}? Any resting order(s) will be cancelled.">Remove</button>
+      <td>
+        {% for leg in row.legs %}
+        <div class="leg-line leg-actions">
+          {% if leg.paused %}
+          <button class="btn ghost sm" hx-post="/markets/{{ leg.id }}/resume" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none">Resume</button>
+          {% else %}
+          <button class="btn ghost sm" hx-post="/markets/{{ leg.id }}/pause" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none">Pause</button>
+          {% endif %}
+          <button class="btn ghost sm" hx-post="/markets/{{ leg.id }}/remove" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none"
+                  hx-confirm="Remove the {{ leg.side_label }} order on “{{ row.label }}”? Its resting order will be cancelled.">Remove</button>
+        </div>
+        {% endfor %}
       </td>
     </tr>
     {% endfor %}
