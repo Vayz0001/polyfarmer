@@ -59,7 +59,14 @@ pub async fn run() -> Result<()> {
         s
     }));
 
-    let alerter = Arc::new(Alerter::new(&config.alerts_file));
+    // Live alert fan-out: engine publishes here, the Activity feed's SSE
+    // endpoint subscribes. Buffered so a briefly-slow client doesn't block.
+    let (alert_tx, _) = tokio::sync::broadcast::channel::<crate::types::Alert>(256);
+    let alerter = Arc::new(Alerter::new(&config.alerts_file, alert_tx.clone()));
+
+    // Lets the dashboard poke the quote loop to re-evaluate immediately (e.g.
+    // right after a resume) instead of waiting for the next tick.
+    let quote_nudge = Arc::new(tokio::sync::Notify::new());
 
     // ── Spawn: web dashboard (reachable even before the wallet is configured) ──
     // Returns a handle the boot task awaits, so configuring a wallet in the
@@ -74,6 +81,9 @@ pub async fn run() -> Result<()> {
                     Arc::clone(&state),
                     config.polygon_rpc_url.clone(),
                     config.reward_history_file.clone(),
+                    alert_tx.clone(),
+                    config.alerts_file.clone(),
+                    Arc::clone(&quote_nudge),
                 );
                 let ready = Arc::clone(&web_state.wallet_ready);
                 let handle = web_state.engine_handle.clone();
@@ -221,6 +231,7 @@ pub async fn run() -> Result<()> {
         let state2   = Arc::clone(&state);
         let executor2 = Arc::clone(&executor);
         let alerter2  = Arc::clone(&alerter);
+        let nudge     = Arc::clone(&quote_nudge);
         let mut stop  = stop_rx.clone();
 
         tokio::spawn(async move {
@@ -228,6 +239,10 @@ pub async fn run() -> Result<()> {
             loop {
                 tokio::select! {
                     _ = ticker.tick() => {
+                        evaluate_all_markets(&state2, &executor2, &alerter2).await;
+                    }
+                    // Dashboard poke (e.g. resume): re-evaluate now, don't wait.
+                    _ = nudge.notified() => {
                         evaluate_all_markets(&state2, &executor2, &alerter2).await;
                     }
                     _ = stop.changed() => {

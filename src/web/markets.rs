@@ -1093,6 +1093,12 @@ async fn set_paused(state: &WebState, cid: &str, pausing: bool) -> Result<(), St
         }
     }
 
+    // On resume, poke the quote loop so it re-quotes right away instead of
+    // idling until the next price event / 30s fallback tick.
+    if !pausing {
+        state.quote_nudge.notify_one();
+    }
+
     Ok(())
 }
 

@@ -9,22 +9,7 @@
 </head>
 <body>
   <div class="app">
-    <aside class="sidebar">
-      <div class="brand"><span class="logo">P</span> polyfarmer</div>
-      <nav class="nav">
-        <a href="/"><span class="ic">&#9676;</span> Overview</a>
-        <a href="/markets" class="active"><span class="ic">&#8801;</span> Markets</a>
-        <a href="/rewards"><span class="ic">&#9733;</span> Rewards</a>
-        <a href="/setup"><span class="ic">&#9881;</span> Setup</a>
-      </nav>
-      <div class="spacer"></div>
-      <div class="side-foot">
-        self-hosted &middot; keys never leave your machine
-        <form method="post" action="/logout" style="margin-top:10px">
-          <button class="btn ghost sm" type="submit">Log out</button>
-        </form>
-      </div>
-    </aside>
+    {% include "_sidebar.html" %}
 
     <div class="main">
       <div class="content">
@@ -375,5 +360,6 @@
     pfMarkOrder();
     setInterval(pfRefreshBook, 2000);
   </script>
+  {% include "_toasts.html" %}
 </body>
 </html>

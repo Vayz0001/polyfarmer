@@ -4,6 +4,7 @@
 //! are baked into the executable. Auth is session-based (tower-sessions) with
 //! argon2 passwords; secrets live encrypted in [`crate::creds`].
 
+mod activity;
 mod assets;
 mod auth;
 mod dashboard;

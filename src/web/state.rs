@@ -5,12 +5,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use tokio::sync::{mpsc, Notify, RwLock};
+use tokio::sync::{broadcast, mpsc, Notify, RwLock};
 
 use crate::creds::CredentialStore;
 use crate::engine::executor::Executor;
 use crate::engine::ws_manager::AppState;
-use crate::types::WsCommand;
+use crate::types::{Alert, WsCommand};
 
 /// Lock the dashboard after this many consecutive failed logins.
 pub const MAX_LOGIN_FAILS: u32 = 5;
@@ -38,6 +38,14 @@ pub struct WebState {
     /// Path to the self-built daily reward-history log (see `rewards::history`
     /// — Polymarket has no range/history endpoint, only single-day queries).
     pub reward_history_file: PathBuf,
+    /// Live alert fan-out: the engine's `Alerter` publishes every alert here;
+    /// the `/activity/stream` SSE endpoint subscribes to push them to the UI.
+    pub alert_tx: broadcast::Sender<Alert>,
+    /// Path to `alerts.json` — read for the Activity feed's history on load.
+    pub alerts_file: PathBuf,
+    /// Poke the engine's quote loop to re-evaluate immediately instead of
+    /// waiting for the next price event / 30s timer (e.g. right after a resume).
+    pub quote_nudge: Arc<Notify>,
 }
 
 /// Bundles the authenticated [`Executor`] and the WS command sender as one
@@ -93,14 +101,27 @@ impl WebState {
         engine: Arc<RwLock<AppState>>,
         polygon_rpc_url: Option<String>,
     ) -> Self {
-        Self::with_config(store, engine, polygon_rpc_url, "data/reward_history.json".into())
+        let (alert_tx, _) = broadcast::channel(16);
+        Self::with_config(
+            store,
+            engine,
+            polygon_rpc_url,
+            "data/reward_history.json".into(),
+            alert_tx,
+            "data/alerts.json".into(),
+            Arc::new(Notify::new()),
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_config(
         store: Arc<CredentialStore>,
         engine: Arc<RwLock<AppState>>,
         polygon_rpc_url: Option<String>,
         reward_history_file: PathBuf,
+        alert_tx: broadcast::Sender<Alert>,
+        alerts_file: PathBuf,
+        quote_nudge: Arc<Notify>,
     ) -> Self {
         Self {
             store,
@@ -110,6 +131,9 @@ impl WebState {
             wallet_ready: Arc::new(Notify::new()),
             engine_handle: EngineHandle::new(),
             reward_history_file,
+            alert_tx,
+            alerts_file,
+            quote_nudge,
         }
     }
 }

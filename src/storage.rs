@@ -107,3 +107,22 @@ pub fn append_alert(path: &Path, alert: &Alert) -> Result<()> {
     file.write_all(line.as_bytes())?;
     Ok(())
 }
+
+/// Read up to `limit` most-recent alerts from alerts.json (newline-delimited
+/// JSON), returned **newest first**. Missing file → empty. Unparseable lines
+/// are skipped so one bad line never breaks the feed.
+pub fn read_recent_alerts(path: &Path, limit: usize) -> Vec<Alert> {
+    let raw = match fs::read_to_string(path) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut alerts: Vec<Alert> = raw
+        .lines()
+        .rev()
+        .filter_map(|l| serde_json::from_str::<Alert>(l.trim()).ok())
+        .take(limit)
+        .collect();
+    // `.rev()` already yields newest-first; keep that order.
+    alerts.truncate(limit);
+    alerts
+}

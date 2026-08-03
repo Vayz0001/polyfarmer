@@ -15,7 +15,7 @@ use tower_sessions::cookie::SameSite;
 use tower_sessions::{MemoryStore, SessionManagerLayer};
 
 use super::state::WebState;
-use super::{assets, auth, dashboard, markets, rewards, setup};
+use super::{activity, assets, auth, dashboard, markets, rewards, setup};
 
 /// Until an admin password is set, only loopback clients may reach the dashboard
 /// — so the first-run setup window can't be hijacked even if bound to 0.0.0.0.
@@ -66,6 +66,8 @@ pub fn router(state: WebState) -> Router {
         .route("/markets/{cid}/remove", post(markets::remove_market))
         .route("/markets/{cid}/pause", post(markets::pause_market))
         .route("/markets/{cid}/resume", post(markets::resume_market))
+        .route("/activity", get(activity::page))
+        .route("/activity/stream", get(activity::stream))
         .route("/rewards", get(rewards::page))
         .route("/rewards/table", get(rewards::table))
         .route("/rewards/history", get(rewards::history_page))

@@ -279,6 +279,39 @@ tbody tr{transition:background .12s} tbody tr:hover{background:var(--surface-2)}
 .qualify-pill.ok{color:#1f7a3d;background:rgba(31,122,61,.10)}
 .qualify-pill.bad{color:#9a5b00;background:rgba(154,91,0,.10)}
 
+/* ── Activity feed (event log) ───────────────────────────────────────────── */
+.act-filters{display:flex;gap:6px}
+.chip{font-size:12px;font-weight:600;color:var(--muted);background:transparent;border:1px solid var(--border-2);border-radius:20px;padding:4px 11px;cursor:pointer;transition:color .15s,background-color .15s,border-color .15s}
+.chip:hover{border-color:var(--fg)}
+.chip.selected{color:var(--accent-fg);background:var(--fg);border-color:var(--fg)}
+.activity-feed{display:flex;flex-direction:column;padding:4px 16px 16px}
+.act-day{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);padding:15px 0 7px;position:sticky;top:0;background:var(--surface);z-index:1}
+.act-row{display:grid;grid-template-columns:auto 1fr;gap:11px;padding:9px 0;border-top:1px solid var(--border)}
+.act-row + .act-row{border-top:1px solid var(--border)}
+.act-day + .act-row{border-top:none}
+.act-dot{width:9px;height:9px;border-radius:50%;margin-top:5px;background:#1f7a3d;flex:none}
+.act-row.tone-caution .act-dot{background:var(--amber)}
+.act-row.tone-err .act-dot{background:#b42318}
+.act-body{min-width:0}
+.act-top{display:flex;align-items:center;gap:8px}
+.act-cat{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 6px}
+.act-row.tone-caution .act-cat{color:var(--amber);background:rgba(180,83,9,.08);border-color:rgba(180,83,9,.22)}
+.act-row.tone-err .act-cat{color:#b42318;background:rgba(180,35,24,.08);border-color:rgba(180,35,24,.22)}
+.act-time{margin-left:auto;font-size:11.5px;color:var(--faint);white-space:nowrap}
+.act-msg{margin-top:3px;font-size:13px;color:var(--fg-2);white-space:pre-line;word-break:break-word}
+.act-empty{color:var(--muted);font-size:13.5px;padding:26px 4px}
+
+/* ── Toasts (live event pops, any page) ──────────────────────────────────── */
+.toast-wrap{position:fixed;top:16px;right:16px;z-index:1000;display:flex;flex-direction:column;gap:8px;max-width:340px}
+.toast{position:relative;display:flex;flex-direction:column;gap:2px;background:var(--surface);border:1px solid var(--border-2);border-left:3px solid #1f7a3d;border-radius:9px;padding:9px 30px 9px 12px;box-shadow:var(--shadow-pop);opacity:0;transform:translateX(12px);transition:opacity .22s var(--ease-spring),transform .22s var(--ease-spring);cursor:pointer}
+.toast.show{opacity:1;transform:none}
+.toast.tone-caution{border-left-color:var(--amber)}
+.toast.tone-err{border-left-color:#b42318}
+.toast-cat{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--faint)}
+.toast-msg{font-size:13px;color:var(--fg)}
+.toast-x{position:absolute;top:5px;right:6px;width:18px;height:18px;display:grid;place-items:center;border:none;background:transparent;color:var(--faint);font-size:16px;line-height:1;border-radius:4px;cursor:pointer}
+.toast-x:hover{color:var(--fg);background:var(--surface-2)}
+
 /* spread block — Best Bid / Midpoint / Best Ask (rewards measured at midpoint) */
 .book-spread{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:13px 16px;margin:5px 0;
   background:rgba(28,28,28,.02);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}

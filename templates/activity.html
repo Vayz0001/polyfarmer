@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>polyfarmer · activity</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+  <script src="/assets/htmx.min.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    {% include "_sidebar.html" %}
+
+    <div class="main">
+      <header class="topbar">
+        <h1>Activity</h1>
+        {% if engine_running %}
+          <span class="pill live"><span class="dot live"></span> Engine running</span>
+        {% else %}
+          <span class="pill idle"><span class="dot off"></span> Engine idle</span>
+        {% endif %}
+      </header>
+
+      <div class="content">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Event log</h2>
+            <div class="act-filters" id="act-filters">
+              <button type="button" class="chip selected" data-level="all" onclick="pfSetActFilter('all')">All</button>
+              <button type="button" class="chip" data-level="info" onclick="pfSetActFilter('info')">Info</button>
+              <button type="button" class="chip" data-level="warn" onclick="pfSetActFilter('warn')">Warnings</button>
+              <button type="button" class="chip" data-level="error" onclick="pfSetActFilter('error')">Errors</button>
+            </div>
+          </div>
+
+          <div id="activity-feed" class="activity-feed">
+            {% if !has_any %}
+            <div class="act-empty">No activity yet. Events show up here as the bot starts, places orders, pauses, or hits an issue &mdash; live.</div>
+            {% else %}
+            {% for g in groups %}
+            <div class="act-day" data-day="{{ g.label }}">{{ g.label }}</div>
+            {% for a in g.items %}
+            <div class="act-row {{ a.level }} tone-{{ a.tone }}" data-cat="{{ a.category }}">
+              <span class="act-dot"></span>
+              <div class="act-body">
+                <div class="act-top">
+                  <span class="act-cat">{{ a.category }}</span>
+                  <span class="act-time" data-ts="{{ a.ts_iso }}">{{ a.time_hm }}</span>
+                </div>
+                <div class="act-msg">{{ a.message }}</div>
+              </div>
+            </div>
+            {% endfor %}
+            {% endfor %}
+            {% endif %}
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  {% include "_toasts.html" %}
+  <script>
+    var pfActFilter = "all";
+    window.pfApplyActFilter = function () {
+      document.querySelectorAll("#activity-feed .act-row").forEach(function (r) {
+        r.style.display = (pfActFilter === "all" || r.classList.contains(pfActFilter)) ? "" : "none";
+      });
+    };
+    function pfSetActFilter(lv) {
+      pfActFilter = lv;
+      document.querySelectorAll("#act-filters .chip").forEach(function (c) {
+        c.classList.toggle("selected", c.dataset.level === lv);
+      });
+      window.pfApplyActFilter();
+    }
+    if (window.pfRelTime) window.pfRelTime();
+  </script>
+</body>
+</html>

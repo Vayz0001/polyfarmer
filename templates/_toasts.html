@@ -1,0 +1,70 @@
+<div id="pf-toasts" class="toast-wrap" aria-live="polite"></div>
+<script>
+(function () {
+  if (window.pfSSE) return; // init once per page
+  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : s; return d.innerHTML; }
+  function relTime(iso) {
+    var t = new Date(iso).getTime(); if (isNaN(t)) return "";
+    var s = Math.max(0, (Date.now() - t) / 1000);
+    if (s < 60) return Math.floor(s) + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+  }
+  window.pfRelTime = function () {
+    document.querySelectorAll(".act-time[data-ts]").forEach(function (el) {
+      var iso = el.getAttribute("data-ts");
+      el.textContent = relTime(iso);
+      el.title = new Date(iso).toLocaleString();
+    });
+  };
+  function dismiss(el) { el.classList.remove("show"); setTimeout(function () { el.remove(); }, 250); }
+  function toast(a) {
+    var wrap = document.getElementById("pf-toasts"); if (!wrap) return;
+    var el = document.createElement("div");
+    el.className = "toast tone-" + (a.tone || "pos");
+    el.innerHTML =
+      '<button class="toast-x" aria-label="Dismiss">&times;</button>' +
+      '<span class="toast-cat">' + esc(a.category) + '</span>' +
+      '<span class="toast-msg">' + esc((a.message || "").split("\n")[0]) + '</span>';
+    el.querySelector(".toast-x").onclick = function (e) { e.stopPropagation(); dismiss(el); };
+    el.onclick = function () { dismiss(el); };
+    wrap.appendChild(el);
+    requestAnimationFrame(function () { el.classList.add("show"); });
+    var ttl = a.level === "error" ? 12000 : 6000;
+    setTimeout(function () { dismiss(el); }, ttl);
+  }
+  function feedRow(a) {
+    var row = document.createElement("div");
+    row.className = "act-row " + a.level + " tone-" + (a.tone || "pos");
+    row.setAttribute("data-cat", a.category);
+    row.innerHTML =
+      '<span class="act-dot"></span>' +
+      '<div class="act-body"><div class="act-top">' +
+      '<span class="act-cat">' + esc(a.category) + '</span>' +
+      '<span class="act-time" data-ts="' + esc(a.ts) + '"></span></div>' +
+      '<div class="act-msg">' + esc(a.message) + '</div></div>';
+    return row;
+  }
+  function prependFeed(a) {
+    var feed = document.getElementById("activity-feed"); if (!feed) return;
+    var empty = feed.querySelector(".act-empty"); if (empty) empty.remove();
+    var first = feed.firstElementChild;
+    if (!first || !first.classList.contains("act-day") || first.getAttribute("data-day") !== "Today") {
+      var d = document.createElement("div");
+      d.className = "act-day"; d.setAttribute("data-day", "Today"); d.textContent = "Today";
+      feed.insertBefore(d, feed.firstChild);
+    }
+    feed.querySelector('.act-day[data-day="Today"]').insertAdjacentElement("afterend", feedRow(a));
+    if (window.pfApplyActFilter) window.pfApplyActFilter();
+  }
+  var es = new EventSource("/activity/stream");
+  window.pfSSE = es;
+  es.addEventListener("alert", function (e) {
+    var a; try { a = JSON.parse(e.data); } catch (_) { return; }
+    toast(a); prependFeed(a); window.pfRelTime();
+  });
+  window.pfRelTime();
+  setInterval(window.pfRelTime, 30000);
+})();
+</script>
