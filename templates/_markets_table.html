@@ -9,7 +9,12 @@
   <tbody>
     {% for row in rows %}
     <tr>
-      <td class="mkt">{{ row.label }}<small>{{ row.url }}</small></td>
+      <td class="mkt">
+        <a class="mkt-link" href="/markets/view?slug={{ row.slug }}">{{ row.label }}</a>
+        <a class="mkt-ext" href="{{ row.url }}" target="_blank" rel="noopener noreferrer" title="Open on Polymarket" aria-label="Open on Polymarket">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5h5v5"/><path d="M19 5l-8 8"/><path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4"/></svg>
+        </a>
+      </td>
       <td>
         {% for leg in row.legs %}
         <div class="leg-line"><span class="side-{{ leg.side_class }}">{{ leg.side_label }}</span> &middot; BUY</div>

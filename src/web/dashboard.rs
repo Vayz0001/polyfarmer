@@ -97,7 +97,11 @@ pub struct MarketRow {
     /// sharing it.
     pub condition_id: String,
     pub label: String,
+    /// Polymarket event URL (external link).
     pub url: String,
+    /// Slug for the internal market-view link (`/markets/view?slug=`), derived
+    /// from the URL's last path segment.
+    pub slug: String,
     pub legs: Vec<LegRow>,
     pub paused: bool,
 }
@@ -176,6 +180,8 @@ async fn build_rows(state: &WebState) -> Vec<MarketRow> {
             let legs_cfg = groups.remove(&cid).unwrap_or_default();
             let label = legs_cfg.first().map(|c| c.label.clone()).unwrap_or_default();
             let url = legs_cfg.first().map(|c| c.url.clone()).unwrap_or_default();
+            // Slug = last path segment of the event URL (…/event/{slug}).
+            let slug = url.trim_end_matches('/').rsplit('/').next().unwrap_or_default().to_string();
             let paused = legs_cfg.first().is_some_and(|c| c.paused);
             let legs = legs_cfg
                 .iter()
@@ -213,7 +219,7 @@ async fn build_rows(state: &WebState) -> Vec<MarketRow> {
                     }
                 })
                 .collect();
-            MarketRow { condition_id: cid, label, url, legs, paused }
+            MarketRow { condition_id: cid, label, url, slug, legs, paused }
         })
         .collect()
 }
