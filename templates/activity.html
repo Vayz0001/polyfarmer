@@ -33,26 +33,8 @@
             </div>
           </div>
 
-          <div id="activity-feed" class="activity-feed">
-            {% if !has_any %}
-            <div class="act-empty">No activity yet. Events show up here as the bot starts, places orders, pauses, or hits an issue &mdash; live.</div>
-            {% else %}
-            {% for g in groups %}
-            <div class="act-day" data-day="{{ g.label }}">{{ g.label }}</div>
-            {% for a in g.items %}
-            <div class="act-row {{ a.level }} tone-{{ a.tone }}" data-cat="{{ a.category }}">
-              <span class="act-dot"></span>
-              <div class="act-body">
-                <div class="act-top">
-                  <span class="act-cat">{{ a.category }}</span>
-                  <span class="act-time" data-ts="{{ a.ts_iso }}">{{ a.time_hm }}</span>
-                </div>
-                <div class="act-msg">{{ a.message }}</div>
-              </div>
-            </div>
-            {% endfor %}
-            {% endfor %}
-            {% endif %}
+          <div id="activity-feed" class="activity-feed pf-feed">
+            {% include "_activity_feed.html" %}
           </div>
         </section>
       </div>

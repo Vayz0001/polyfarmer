@@ -121,6 +121,23 @@ struct ActivityTemplate {
     has_any: bool,
 }
 
+/// Just the feed rows — for the floating Alerts window's initial load.
+#[derive(Template)]
+#[template(path = "_activity_feed.html")]
+struct ActivityFeedTemplate {
+    groups: Vec<DayGroup>,
+    has_any: bool,
+}
+
+/// GET /activity/recent — the rows fragment loaded by the floating Alerts
+/// window on open (live events are then pushed over SSE).
+pub async fn recent(State(state): State<WebState>) -> Html<String> {
+    let alerts = read_recent_alerts(&state.alerts_file, FEED_LIMIT);
+    let groups = group_by_day(alerts);
+    let tpl = ActivityFeedTemplate { has_any: !groups.is_empty(), groups };
+    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
+}
+
 /// GET /activity — the full event-log timeline.
 pub async fn page(State(state): State<WebState>) -> Html<String> {
     let alerts = read_recent_alerts(&state.alerts_file, FEED_LIMIT);

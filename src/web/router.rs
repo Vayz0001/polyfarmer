@@ -67,6 +67,7 @@ pub fn router(state: WebState) -> Router {
         .route("/markets/{id}/pause", post(markets::pause_market))
         .route("/markets/{id}/resume", post(markets::resume_market))
         .route("/activity", get(activity::page))
+        .route("/activity/recent", get(activity::recent))
         .route("/activity/stream", get(activity::stream))
         .route("/rewards", get(rewards::page))
         .route("/rewards/table", get(rewards::table))
