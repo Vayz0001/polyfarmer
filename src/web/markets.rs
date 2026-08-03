@@ -662,7 +662,7 @@ pub async fn start_farming(
 
     let mut new_configs = vec![MarketConfig {
         id: new_config_id(),
-        url: format!("https://polymarket.com/event/{}", mr.market_slug),
+        url: poly_event_url(&mr.event_slug, &mr.market_slug),
         label: mr.question.clone(),
         condition_id: mr.condition_id.clone(),
         token_id: mr.token_ids[side].clone(),
@@ -689,7 +689,7 @@ pub async fn start_farming(
         };
         new_configs.push(MarketConfig {
             id: new_config_id(),
-            url: format!("https://polymarket.com/event/{}", mr.market_slug),
+            url: poly_event_url(&mr.event_slug, &mr.market_slug),
             label: mr.question.clone(),
             condition_id: mr.condition_id.clone(),
             token_id: mr.token_ids[other].clone(),
@@ -941,6 +941,18 @@ fn parse_cents(s: &str) -> Option<Decimal> {
 
 /// Parses "<number><unit>" (s/m/h/d), e.g. "7d", "4h", "30m" — same format
 /// the original Discord bot used. Range: 1 minute .. 1 year. Empty -> 7 days.
+/// The canonical Polymarket URL for a market. Grouped markets live at
+/// `/event/{event_slug}/{market_slug}`; standalone binaries at
+/// `/event/{market_slug}`. Keeping the market slug as the final segment lets us
+/// still derive it for the internal view link.
+fn poly_event_url(event_slug: &str, market_slug: &str) -> String {
+    if event_slug.is_empty() || event_slug == market_slug {
+        format!("https://polymarket.com/event/{market_slug}")
+    } else {
+        format!("https://polymarket.com/event/{event_slug}/{market_slug}")
+    }
+}
+
 fn parse_expiry(s: &str) -> Result<chrono::DateTime<Utc>, String> {
     let s = s.trim();
     // "never" = quote indefinitely — a far-future sentinel so the expiry check

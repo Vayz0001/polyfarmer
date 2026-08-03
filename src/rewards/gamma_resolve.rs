@@ -29,6 +29,10 @@ pub struct MarketRef {
     /// Candidate name within a multi-market event (e.g. "France"), if any.
     pub group_item_title: Option<String>,
     pub market_slug: String,
+    /// Parent event's slug, when the market belongs to one. Polymarket URLs for
+    /// a grouped market are `/event/{event_slug}/{market_slug}`; standalone
+    /// binaries are just `/event/{market_slug}` (event_slug == market_slug).
+    pub event_slug: String,
     pub image: Option<String>,
     pub outcomes: Vec<String>,      // exactly 2
     pub token_ids: Vec<String>,     // exactly 2, aligned with `outcomes`
@@ -45,6 +49,12 @@ pub struct MarketRef {
 
 impl MarketRef {
     fn from_market(m: Market) -> Result<Self> {
+        let event_slug = m
+            .events
+            .as_ref()
+            .and_then(|evs| evs.first())
+            .and_then(|ev| ev.slug.clone())
+            .unwrap_or_default();
         let outcomes = m.outcomes.unwrap_or_default();
         let token_ids: Vec<String> =
             m.clob_token_ids.unwrap_or_default().iter().map(|t| t.to_string()).collect();
@@ -63,6 +73,7 @@ impl MarketRef {
             question: m.question.unwrap_or_default(),
             group_item_title: m.group_item_title,
             market_slug: m.slug.unwrap_or_default(),
+            event_slug,
             image: m.image,
             outcome_prices: m.outcome_prices.unwrap_or_default(),
             outcomes,
