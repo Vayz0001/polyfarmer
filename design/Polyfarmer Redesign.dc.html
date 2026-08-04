@@ -1,0 +1,1710 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:#0b0c0e;font-family:'Archivo',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:#4a80f0;text-decoration:none}
+  a:hover{color:#7ba3f7}
+  input,button,select{font-family:inherit}
+  i[class^="ph"]{line-height:1;display:inline-block;flex:none}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#23272d;border-radius:8px;border:3px solid #0b0c0e}
+  ::-webkit-scrollbar-thumb:hover{background:#2f353d}
+  ::-webkit-scrollbar-track{background:transparent}
+  @keyframes beat{0%,100%{opacity:1}50%{opacity:.4}}
+  @keyframes shimmer{0%{transform:translateX(-130%)}100%{transform:translateX(130%)}}
+  @keyframes gridfade{0%,100%{opacity:.5}50%{opacity:1}}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  @keyframes slidein{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+  @keyframes pop{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;display:flex;flex-direction:{{ shellDir }};background:#0b0c0e;color:#e8eaed">
+
+  <sc-if value="{{ hasSidebar }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:none;width:{{ sideW }};align-self:stretch;border-right:1px solid #1e2227;background:#101215;position:sticky;top:0;height:100vh;z-index:30;display:flex;flex-direction:column;padding:16px 10px 12px;transition:width .24s cubic-bezier(.16,1,.3,1);overflow:hidden">
+      <div style="display:flex;align-items:center;gap:6px;padding:2px 2px 18px">
+        <button onClick="{{ goOverview }}" style="min-width:0;flex:1;display:flex;align-items:center;gap:10px;background:none;border:none;cursor:pointer;padding:2px 4px;color:#e8eaed;white-space:nowrap">
+          <span style="width:24px;height:24px;border-radius:7px;background:{{ accent }};color:#08090b;display:grid;place-items:center;font-size:13px;font-weight:700;flex:none">P</span>
+          <span style="display:{{ sideLabels }};font-size:15px;font-weight:600;letter-spacing:-.015em">polyfarmer</span>
+        </button>
+        <button onClick="{{ toggleCollapse }}" title="{{ collapseTitle }}" aria-label="{{ collapseTitle }}" style="flex:none;display:grid;place-items:center;width:26px;height:26px;color:#8a939d;background:transparent;border:1px solid #23272d;border-radius:7px;cursor:pointer" style-hover="color:#e8eaed;background:#181b20"><i class="{{ collapseIcon }}" style="font-size:14px"></i></button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <sc-for list="{{ nav }}" as="n" hint-placeholder-count="5">
+          <button onClick="{{ n.go }}" title="{{ n.label }}" style="display:flex;align-items:center;gap:11px;font-size:13.5px;font-weight:{{ n.wt }};color:{{ n.fg }};background:{{ n.bg }};border:none;padding:9px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;text-align:left;transition:background .16s ease,color .16s ease" style-hover="color:#e8eaed;background:#181b20">
+            <i class="{{ n.icon }}" style="font-size:17px;color:{{ n.iconFg }}"></i><span style="display:{{ sideLabels }}">{{ n.label }}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{ showGauge }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:9px;margin:16px 0 0;padding:13px 0 0;border-top:1px solid #1e2227">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:0 4px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.11em;color:#8a939d">ZONE GAUGE</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:{{ gaugeCountFg }};white-space:nowrap">{{ gaugeCount }}</span>
+          </div>
+          <sc-for list="{{ gauge }}" as="g" hint-placeholder-count="4">
+            <button onClick="{{ g.open }}" onMouseEnter="{{ g.enter }}" onMouseLeave="{{ g.leave }}" style="display:flex;flex-direction:column;gap:5px;padding:7px 5px 8px;border:none;border-radius:7px;background:{{ g.bg }};cursor:pointer;text-align:left;transition:background .14s ease" style-hover="background:#181b20">
+              <span style="display:flex;align-items:center;gap:6px;min-width:0">
+                <span style="width:5px;height:5px;border-radius:50%;background:{{ g.dot }};flex:none"></span>
+                <span style="min-width:0;font-size:11.5px;font-weight:500;color:{{ g.fg }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ g.short }}</span>
+                <span style="flex:none;font-family:'IBM Plex Mono',monospace;font-size:10px;color:{{ g.dot }}">{{ g.badge }}</span>
+              </span>
+              <span style="position:relative;display:block;height:5px;border-radius:8px;background:#1c2026;overflow:hidden">
+                <span style="position:absolute;left:{{ g.bandLeft }};width:{{ g.bandWidth }};top:0;bottom:0;background:{{ g.bandColor }};border-radius:8px"></span>
+                <span style="position:absolute;left:{{ g.markLeft }};top:-2px;width:2px;height:9px;background:{{ g.dot }};border-radius:1px;transition:left .35s cubic-bezier(.16,1,.3,1)"></span>
+              </span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <div style="flex:1;min-height:12px"></div>
+
+      <div style="display:flex;flex-direction:column;gap:9px;padding-top:12px;border-top:1px solid #1e2227">
+        <div title="{{ connTitle }}" style="display:flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{ connFg }};white-space:nowrap;padding:0 4px">
+          <span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex:none;animation:{{ connBeat }}"></span><span style="display:{{ sideLabels }}">{{ connLabel }}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{ engineFg }};white-space:nowrap;padding:0 4px">
+          <i class="ph ph-cpu" style="font-size:14px"></i><span style="display:{{ sideLabels }}">{{ engineMsg }}</span>
+        </div>
+        <button onClick="{{ goSetup }}" title="{{ walletChip }}" style="display:flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9aa3ad;background:none;border:none;cursor:pointer;padding:0 4px;white-space:nowrap" style-hover="color:#e8eaed"><i class="ph ph-wallet" style="font-size:14px"></i><span style="display:{{ sideLabels }}">{{ walletChip }}</span></button>
+        <span title="{{ cacheTitle }}" style="display:flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a939d;white-space:nowrap;padding:0 4px"><i class="ph ph-lightning" style="font-size:14px"></i><span style="display:{{ sideLabels }}">{{ cacheLabel }}</span></span>
+        <button onClick="{{ askStopAll }}" title="Stop all farming" style="display:flex;align-items:center;justify-content:center;gap:7px;font-size:12.5px;font-weight:600;color:#f0787c;background:rgba(232,89,94,.09);border:1px solid rgba(232,89,94,.24);border-radius:8px;padding:8px;cursor:pointer;white-space:nowrap;margin-top:2px" style-hover="background:rgba(232,89,94,.18)"><i class="ph ph-stop-circle" style="font-size:15px"></i><span style="display:{{ sideLabels }}">Stop all</span></button>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ hasTopbar }}" hint-placeholder-val="{{ false }}">
+  <div style="flex:none;display:flex;align-items:center;gap:{{ barGap }};padding:{{ barPad }};border-bottom:1px solid #1e2227;background:#101215;position:sticky;top:0;z-index:30;flex-wrap:{{ barWrap }}">
+    <button onClick="{{ goOverview }}" style="display:flex;align-items:center;gap:9px;background:none;border:none;cursor:pointer;padding:0;color:#e8eaed;white-space:nowrap">
+      <span style="width:21px;height:21px;border-radius:6px;background:{{ accent }};color:#08090b;display:grid;place-items:center;font-size:12px;font-weight:700;flex:none">P</span>
+      <span style="font-size:14.5px;font-weight:600;letter-spacing:-.015em">polyfarmer</span>
+    </button>
+    <div style="display:flex;gap:1px;flex-wrap:wrap">
+      <sc-for list="{{ nav }}" as="n" hint-placeholder-count="5">
+        <button onClick="{{ n.go }}" title="{{ n.label }}" style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:{{ n.wt }};color:{{ n.fg }};background:{{ n.bg }};border:none;padding:{{ navPad }};border-radius:8px;cursor:pointer;white-space:nowrap;transition:background .16s ease,color .16s ease" style-hover="color:#e8eaed;background:#181b20">
+          <i class="{{ n.icon }}" style="font-size:15px;color:{{ n.iconFg }}"></i><span style="display:{{ navLabel }}">{{ n.label }}</span>
+        </button>
+      </sc-for>
+    </div>
+    <div style="flex:1;min-width:8px"></div>
+    <div style="display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:{{ engineFg }};white-space:nowrap">
+      <span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex:none;animation:{{ engineBeat }}"></span>{{ engineMsg }}
+    </div>
+    <button onClick="{{ goSetup }}" style="display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8c949e;background:none;border:none;cursor:pointer;padding:0;white-space:nowrap;display:{{ walletChipShow }}" style-hover="color:#e8eaed"><i class="ph ph-wallet" style="font-size:14px"></i>{{ walletChip }}</button>
+    <button onClick="{{ askStopAll }}" title="Stop all farming" style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:#f0787c;background:rgba(232,89,94,.09);border:1px solid rgba(232,89,94,.24);border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap" style-hover="background:rgba(232,89,94,.18)"><i class="ph ph-stop-circle" style="font-size:15px"></i><span style="display:{{ navLabel }}">Stop all</span></button>
+  </div>
+  </sc-if>
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+
+  <sc-if value="{{ pgOverview }}" hint-placeholder-val="{{ true }}">
+    <div style="position:relative;flex:1;min-width:0;padding:{{ pagePad }};display:flex;flex-direction:column;gap:{{ gap }};animation:rise .3s ease both">
+      <span style="position:absolute;inset:0;z-index:0;pointer-events:none;background-image:linear-gradient(to right,#171a1f 1px,transparent 1px),linear-gradient(to bottom,#171a1f 1px,transparent 1px);background-size:44px 44px;mask-image:radial-gradient(720px circle at 30% 0%,#000 10%,transparent 75%);-webkit-mask-image:radial-gradient(720px circle at 30% 0%,#000 10%,transparent 75%);animation:gridfade 9s ease-in-out infinite"></span>
+
+      <sc-if value="{{ noWallet }}" hint-placeholder-val="{{ false }}">
+        <div style="position:relative;z-index:1;display:flex;align-items:center;gap:11px;padding:12px 16px;border-radius:8px;background:rgba(217,160,58,.09);border:1px solid rgba(217,160,58,.26);flex-wrap:wrap">
+          <i class="ph-fill ph-warning" style="font-size:17px;color:#e6b45c"></i>
+          <span style="flex:1;min-width:180px;font-size:13px;color:#e6b45c;text-wrap:pretty">No wallet configured. Add it in Setup to start trading.</span>
+          <button onClick="{{ goSetup }}" style="flex:none;font-size:12.5px;font-weight:600;color:#0b0c0e;background:#e6b45c;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap">Open Setup</button>
+        </div>
+      </sc-if>
+
+      <div style="position:relative;z-index:1;display:grid;grid-template-columns:{{ topCols }};gap:{{ gap }};align-items:stretch">
+        <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;padding:20px 22px 18px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap">
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+              <span style="font-size:12.5px;color:#8c949e">Rewards accrued {{ earnScopeLabel }}</span>
+              <div style="display:flex;align-items:baseline;gap:11px;flex-wrap:wrap">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:{{ heroSize }};font-weight:600;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap">${{ ticker }}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;color:#35c08a;white-space:nowrap">{{ earnDelta }}</span>
+              </div>
+              <span style="font-size:12.5px;color:#9aa3ad;text-wrap:pretty">{{ earnSub }}</span>
+            </div>
+            <div style="display:inline-flex;gap:2px;background:#14171b;border-radius:8px;padding:2px;flex:none">
+              <sc-for list="{{ earnRanges }}" as="e" hint-placeholder-count="3">
+                <button onClick="{{ e.go }}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;background:{{ e.bg }};color:{{ e.fg }};white-space:nowrap">{{ e.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+          <div style="flex:1;min-height:120px;display:flex;align-items:flex-end">{{ bars }}</div>
+        </div>
+
+        <div style="min-width:0;display:grid;grid-template-columns:{{ kpiCols }};gap:{{ gap }}">
+          <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:12px;justify-content:space-between;transition:border-color .3s cubic-bezier(.16,1,.3,1),box-shadow .3s cubic-bezier(.16,1,.3,1),background .3s ease" style-hover="border-color:#2c3542;background:radial-gradient(420px circle at 85% 0%,rgba(74,128,240,.09),transparent 65%),#0f1216;box-shadow:0 16px 44px -20px rgba(74,128,240,.5)">
+            <span style="font-size:12.5px;color:#8c949e">Capital deployed</span>
+            <div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap"><span style="font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;letter-spacing:-.02em;white-space:nowrap">${{ deployed }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8c949e;white-space:nowrap">of $2,400 free</span></div>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="height:6px;border-radius:8px;background:#1c2026;overflow:hidden"><span style="display:block;width:{{ deployedPct }};height:100%;background:{{ accent }};border-radius:8px;transition:width .5s cubic-bezier(.16,1,.3,1)"></span></div>
+              <span style="font-size:12px;color:#9aa3ad;text-wrap:pretty">{{ deployedSub }}</span>
+            </div>
+          </div>
+          <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:12px;justify-content:space-between;transition:border-color .3s cubic-bezier(.16,1,.3,1),box-shadow .3s cubic-bezier(.16,1,.3,1),background .3s ease" style-hover="border-color:#2c3542;background:radial-gradient(420px circle at 85% 0%,rgba(74,128,240,.09),transparent 65%),#0f1216;box-shadow:0 16px 44px -20px rgba(74,128,240,.5)">
+            <span style="font-size:12.5px;color:#8c949e">Live orders</span>
+            <div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap"><span style="font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;letter-spacing:-.02em;white-space:nowrap">{{ liveOrders }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8c949e;white-space:nowrap">resting near midpoint</span></div>
+            <span style="font-size:12px;color:#9aa3ad;text-wrap:pretty">{{ liveOrdersSub }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="position:relative;z-index:1;display:grid;grid-template-columns:{{ bottomCols }};gap:{{ gap }};align-items:start">
+        <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid #1e2227">
+            <span style="font-size:13px;font-weight:600">Tracked markets</span>
+            <button onClick="{{ goMarkets }}" style="font-size:12.5px;color:#8c949e;background:none;border:none;cursor:pointer;padding:0;white-space:nowrap" style-hover="color:#4a80f0">All markets</button>
+          </div>
+          <div style="display:grid;grid-template-columns:{{ ovCols }};gap:12px;padding:9px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.11em;color:#8a939d">
+            <span>MARKET</span>
+            <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span>SIDE</span></sc-if>
+            <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="text-align:right">SIZE</span></sc-if>
+            <span style="text-align:right">TODAY</span><span style="text-align:right">STATUS</span>
+          </div>
+          <sc-for list="{{ overviewRows }}" as="t" hint-placeholder-count="5">
+            <div onClick="{{ t.open }}" onMouseEnter="{{ t.enter }}" onMouseLeave="{{ t.leave }}" style="display:grid;grid-template-columns:{{ ovCols }};gap:12px;align-items:center;padding:13px 18px;border-top:1px solid #171a1e;cursor:pointer;box-shadow:{{ t.warmEdge }};transition:background .14s ease,box-shadow .2s ease" style-hover="background:#131619">
+              <span style="min-width:0;display:flex;flex-direction:column;gap:3px">
+                <span style="font-size:13px;font-weight:500;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.q }}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9aa3ad;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.sub }}</span>
+              </span>
+              <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ t.legFg }};font-weight:500;white-space:nowrap">{{ t.leg }}</span></sc-if>
+              <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;white-space:nowrap">{{ t.size }}</span></sc-if>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;color:{{ t.pnlFg }};white-space:nowrap">{{ t.pnl }}</span>
+              <span style="justify-self:end;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:{{ t.stFg }};background:{{ t.stBg }};border-radius:4px;padding:3px 8px;white-space:nowrap">{{ t.st }}</span>
+            </div>
+          </sc-for>
+          <sc-if value="{{ marketsEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:36px 18px;text-align:center;font-size:13px;color:#9aa3ad;border-top:1px solid #171a1e;text-wrap:pretty">No markets configured yet. Browse reward-eligible markets or add one by URL.</div>
+          </sc-if>
+        </div>
+
+        <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid #1e2227">
+            <span style="font-size:13px;font-weight:600">Activity</span>
+            <button onClick="{{ goActivity }}" style="font-size:12.5px;color:#8c949e;background:none;border:none;cursor:pointer;padding:0;white-space:nowrap" style-hover="color:#4a80f0">Full log</button>
+          </div>
+          <div style="display:flex;flex-direction:column;padding:6px 18px 16px">
+            <sc-for list="{{ recentActs }}" as="a" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 0">
+                <i class="{{ a.icon }}" style="font-size:15px;color:{{ a.tone }};margin-top:1px"></i>
+                <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                  <span style="font-size:12.5px;color:#c4cad2;line-height:1.4;text-wrap:pretty">{{ a.msg }}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.06em;color:#8a939d">{{ a.cat }}</span>
+                </span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a939d;white-space:nowrap">{{ a.t }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ pgMarkets }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;min-width:0;padding:{{ pagePad }};display:flex;flex-direction:column;gap:{{ gap }};animation:rise .3s ease both">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <h1 style="font-size:19px;font-weight:600;letter-spacing:-.02em">Markets</h1>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#9aa3ad;white-space:nowrap">{{ marketCount }}</span>
+        <div style="flex:1;min-width:8px"></div>
+        <button onClick="{{ goBrowse }}" style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:#e8eaed;background:#191d23;border:1px solid #262b31;border-radius:8px;padding:8px 13px;cursor:pointer;white-space:nowrap" style-hover="background:#20252c"><i class="ph ph-magnifying-glass" style="font-size:14px"></i>Browse reward-eligible</button>
+        <div style="display:flex;gap:8px;flex:{{ addFlex }};min-width:200px">
+          <input name="url" value="{{ addUrl }}" onInput="{{ onAddUrl }}" placeholder="Paste a Polymarket URL" style="flex:1;min-width:0;font-size:12.5px;color:#e8eaed;background:#0e1013;border:1px solid #23272d;border-radius:8px;padding:8px 11px;outline:none" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)" />
+          <button onClick="{{ resolveUrl }}" style="font-size:12.5px;font-weight:600;color:#08090b;background:{{ accent }};border:none;border-radius:8px;padding:8px 16px;cursor:pointer;white-space:nowrap" style-hover="filter:brightness(1.08)">Go</button>
+        </div>
+      </div>
+
+      <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid #1e2227;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:600">Tracked markets</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3ad">{{ marketCount }} · auto-refreshing</span>
+        </div>
+        <div style="display:grid;grid-template-columns:{{ mkCols }};gap:12px;padding:9px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.11em;color:#8a939d">
+          <span>MARKET</span>
+          <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span>SIDE</span></sc-if>
+          <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="text-align:right">DISTANCE</span></sc-if>
+          <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="text-align:right">SIZE</span></sc-if>
+          <span>STATUS</span><span style="text-align:right"></span>
+        </div>
+        <sc-for list="{{ marketRows }}" as="m" hint-placeholder-count="6">
+          <div onMouseEnter="{{ m.enter }}" onMouseLeave="{{ m.leave }}" style="display:grid;grid-template-columns:{{ mkCols }};gap:12px;align-items:center;padding:13px 18px;border-top:1px solid #171a1e;box-shadow:{{ m.warmEdge }};transition:background .14s ease,box-shadow .2s ease" style-hover="background:#131619">
+            <span style="min-width:0;display:flex;align-items:center;gap:7px">
+              <button onClick="{{ m.open }}" style="min-width:0;text-align:left;font-size:13px;font-weight:500;line-height:1.3;color:#e8eaed;background:none;border:none;cursor:pointer;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" style-hover="color:#4a80f0">{{ m.q }}</button>
+              <i class="ph ph-arrow-square-out" style="font-size:13px;color:#8a939d"></i>
+            </span>
+            <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ m.legFg }};font-weight:500;white-space:nowrap">{{ m.leg }}</span></sc-if>
+            <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;color:#a2a9b3;white-space:nowrap">{{ m.distance }}</span></sc-if>
+            <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;white-space:nowrap">{{ m.size }}</span></sc-if>
+            <span style="min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:4px">
+              <span style="max-width:100%;display:inline-flex;align-items:center;gap:5px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:{{ m.stFg }};background:{{ m.stBg }};border-radius:4px;padding:3px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.st }}</span>
+              <span style="max-width:100%;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{ m.scoreFg }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.score }}</span>
+            </span>
+            <span style="justify-self:end;display:flex;gap:7px">
+              <button onClick="{{ m.toggle }}" title="{{ m.pauseLabel }}" style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:{{ m.pauseFg }};background:{{ m.pauseBg }};border:1px solid {{ m.pauseBd }};border-radius:8px;padding:6px 11px;cursor:pointer;white-space:nowrap" style-hover="filter:brightness(1.25)"><i class="{{ m.pauseIcon }}" style="font-size:13px"></i><span style="display:{{ navLabel }}">{{ m.pauseLabel }}</span></button>
+              <button onClick="{{ m.remove }}" title="Remove" style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#f0787c;background:rgba(232,89,94,.09);border:1px solid rgba(232,89,94,.24);border-radius:8px;padding:6px 11px;cursor:pointer;white-space:nowrap" style-hover="background:rgba(232,89,94,.18)"><i class="ph ph-trash" style="font-size:13px"></i><span style="display:{{ navLabel }}">Remove</span></button>
+            </span>
+          </div>
+        </sc-for>
+        <sc-if value="{{ marketsEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:52px 18px;border-top:1px solid #171a1e">
+            <i class="ph ph-plant" style="font-size:26px;color:#3a4149"></i>
+            <span style="font-size:13px;color:#8c949e;text-align:center;text-wrap:pretty">No markets configured yet.</span>
+            <button onClick="{{ goBrowse }}" style="font-size:12.5px;font-weight:600;color:#08090b;background:{{ accent }};border:none;border-radius:8px;padding:8px 14px;cursor:pointer">Browse reward-eligible markets</button>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ pgBrowse }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;min-width:0;padding:{{ pagePad }};display:flex;flex-direction:column;gap:{{ gap }};animation:rise .3s ease both">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <button onClick="{{ goMarkets }}" style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:#8c949e;background:none;border:none;cursor:pointer;padding:0;white-space:nowrap" style-hover="color:#e8eaed"><i class="ph ph-arrow-left" style="font-size:14px"></i>Markets</button>
+        <h1 style="font-size:19px;font-weight:600;letter-spacing:-.02em">Browse reward-eligible</h1>
+        <div style="flex:1;min-width:8px"></div>
+        <input value="{{ browseQuery }}" onInput="{{ onBrowseQuery }}" placeholder="Filter by question" style="flex:{{ addFlex }};min-width:180px;font-size:12.5px;color:#e8eaed;background:#0e1013;border:1px solid #23272d;border-radius:8px;padding:8px 11px;outline:none" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)" />
+        <div style="display:inline-flex;gap:2px;background:#14171b;border-radius:8px;padding:2px;flex:none">
+          <sc-for list="{{ browseSorts }}" as="s" hint-placeholder-count="3">
+            <button onClick="{{ s.go }}" style="font-size:11.5px;font-weight:600;border:none;border-radius:6px;padding:5px 11px;cursor:pointer;background:{{ s.bg }};color:{{ s.fg }};white-space:nowrap">{{ s.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;overflow:hidden">
+        <div style="display:grid;grid-template-columns:{{ brCols }};gap:12px;padding:11px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.11em;color:#8a939d;border-bottom:1px solid #1e2227">
+          <span>MARKET</span><span style="text-align:right">DAILY POOL</span>
+          <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span>QUALIFY</span></sc-if>
+          <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="text-align:right">SPREAD NOW</span></sc-if>
+          <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="text-align:right">24H VOLUME</span></sc-if>
+          <span></span>
+        </div>
+        <sc-for list="{{ browseRows }}" as="b" hint-placeholder-count="7">
+          <div style="display:grid;grid-template-columns:{{ brCols }};gap:12px;align-items:center;padding:13px 18px;border-top:1px solid #171a1e;transition:background .14s ease" style-hover="background:#131619">
+            <span style="min-width:0;display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:13px;font-weight:500;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ b.q }}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9aa3ad;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ b.outcomes }}</span>
+            </span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;color:#35c08a;white-space:nowrap">{{ b.pool }}</span>
+            <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}">
+              <span style="display:inline-flex;align-items:center;gap:5px;justify-self:start;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:{{ b.qFg }};background:{{ b.qBg }};border-radius:4px;padding:3px 8px;white-space:nowrap">{{ b.qualify }}</span>
+            </sc-if>
+            <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;white-space:nowrap">{{ b.spread }}</span></sc-if>
+            <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;color:#a2a9b3;white-space:nowrap">{{ b.vol }}</span></sc-if>
+            <button onClick="{{ b.configure }}" style="justify-self:end;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#e8eaed;background:#191d23;border:1px solid #262b31;border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap" style-hover="background:#20252c">Configure<i class="ph ph-arrow-right" style="font-size:12px"></i></button>
+          </div>
+        </sc-for>
+        <sc-if value="{{ browseEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:48px 18px;text-align:center;font-size:13px;color:#9aa3ad;border-top:1px solid #171a1e">No reward-eligible markets matched.</div>
+        </sc-if>
+      </div>
+      <button onClick="{{ loadMore }}" style="align-self:flex-start;font-size:12.5px;font-weight:600;color:#e8eaed;background:#191d23;border:1px solid #262b31;border-radius:8px;padding:8px 14px;cursor:pointer" style-hover="background:#20252c">{{ loadMoreLabel }}</button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ pgMarket }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;min-width:0;display:grid;grid-template-columns:{{ marketCols }};animation:rise .3s ease both">
+
+      <sc-if value="{{ showRail }}" hint-placeholder-val="{{ true }}">
+        <div style="min-width:0;border-right:1px solid #1e2227;background:#0e1013;display:flex;flex-direction:column">
+          <div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:13px 14px 11px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.11em;color:#9aa3ad">TRACKED</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8c949e;white-space:nowrap">{{ scoringCount }}</span>
+          </div>
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:3px">
+            <sc-for list="{{ tracked }}" as="m" hint-placeholder-count="6">
+              <button onClick="{{ m.open }}" style="text-align:left;padding:10px 11px;border:none;border-radius:8px;background:{{ m.bg }};box-shadow:{{ m.edge }};cursor:pointer;display:flex;flex-direction:column;gap:7px;transition:background .14s ease" style-hover="background:#161a1f">
+                <span style="font-size:12.5px;font-weight:500;line-height:1.35;color:{{ m.fg }};text-wrap:pretty">{{ m.q }}</span>
+                <span style="display:flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8c949e">
+                  <span style="color:{{ m.tone }};font-weight:500">{{ m.leg }}</span>{{ m.size }}
+                </span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="flex:none;padding:11px 12px;border-top:1px solid #1e2227;display:flex;flex-direction:column;gap:8px">
+            <button onClick="{{ goBrowse }}" style="display:flex;align-items:center;justify-content:center;gap:7px;width:100%;font-size:12.5px;font-weight:600;color:#e8eaed;background:#191d23;border:1px solid #262b31;border-radius:8px;padding:8px;cursor:pointer" style-hover="background:#20252c"><i class="ph ph-magnifying-glass" style="font-size:14px"></i>Browse</button>
+            <button onClick="{{ goMarkets }}" style="display:flex;align-items:center;justify-content:center;gap:7px;width:100%;font-size:12.5px;font-weight:500;color:#8c949e;background:none;border:none;padding:2px;cursor:pointer" style-hover="color:#e8eaed"><i class="ph ph-list-dashes" style="font-size:14px"></i>All markets</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <div style="min-width:0;display:flex;flex-direction:column;border-right:1px solid #1e2227">
+
+        <div style="flex:none;padding:15px 18px 14px;border-bottom:1px solid #1e2227;display:flex;gap:14px;align-items:flex-start">
+          <div style="width:40px;height:40px;flex:none;border-radius:8px;background:repeating-linear-gradient(135deg,#1a1e23 0 5px,#14171b 5px 10px);border:1px solid #23272d"></div>
+          <div style="min-width:0;flex:1">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <sc-if value="{{ narrow }}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{ goMarkets }}" style="flex:none;display:grid;place-items:center;width:26px;height:26px;color:#8c949e;background:#191d23;border:1px solid #262b31;border-radius:7px;cursor:pointer" style-hover="color:#e8eaed"><i class="ph ph-arrow-left" style="font-size:14px"></i></button>
+              </sc-if>
+              <h1 style="min-width:0;font-size:17px;font-weight:600;letter-spacing:-.02em;line-height:1.25;text-wrap:pretty">{{ viewQuestion }}</h1>
+              <i class="ph ph-arrow-square-out" style="font-size:15px;color:#8a939d"></i>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin-top:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8c949e">
+              <span style="font-family:'Archivo',sans-serif;font-size:11.5px;font-weight:600;color:{{ accent }};background:rgba(74,128,240,.13);border-radius:4px;padding:2px 8px;white-space:nowrap">Reward-eligible</span>
+              <span style="white-space:nowrap">100 sh min</span><span style="white-space:nowrap">3.0¢ max spread</span><span style="white-space:nowrap">$500 daily pool</span>
+              <span style="color:#9aa3ad;white-space:nowrap">{{ viewResolves }}</span><span style="color:#9aa3ad;white-space:nowrap">{{ viewLiq }} liq</span><span style="color:#9aa3ad;white-space:nowrap">{{ viewVol }} 24h vol</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:none;padding:16px 18px 18px;border-bottom:1px solid #1e2227">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+              <span style="font-size:13px;font-weight:600">Where your order sits</span>
+              <span style="font-size:12.5px;color:#8c949e;text-wrap:pretty">Bids resting within 3.0¢ below the midpoint accrue rewards.</span>
+            </div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:{{ zoneFg }};background:{{ zoneBg }};border-radius:8px;padding:5px 11px;white-space:nowrap">{{ zoneMsg }}</span>
+          </div>
+
+          <div style="position:relative;height:60px;margin:0 6px">
+            <div style="position:absolute;left:0;right:0;top:26px;height:6px;border-radius:8px;background:#1c2026"></div>
+            <div style="position:absolute;left:18%;width:46%;top:26px;height:6px;border-radius:8px;background:{{ zoneTrack }}"></div>
+            <div style="position:absolute;left:18%;top:20px;width:2px;height:18px;background:#2f353d"></div>
+            <div style="position:absolute;left:64%;top:20px;width:2px;height:18px;background:#2f353d"></div>
+            <div style="position:absolute;left:18%;top:42px;transform:translateX(-50%);font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9aa3ad">60.5¢</div>
+            <div style="position:absolute;left:64%;top:42px;transform:translateX(-50%);font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9aa3ad">66.5¢</div>
+            <div style="position:absolute;left:41%;top:42px;transform:translateX(-50%);font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8c949e;white-space:nowrap">mid 63.5¢</div>
+            <div style="position:absolute;left:41%;top:14px;width:1px;height:26px;background:#3a4149"></div>
+            <div style="position:absolute;left:{{ markerLeft }};top:0;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;transition:left .3s cubic-bezier(.16,1,.3,1)">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;color:#08090b;background:{{ markerColor }};border-radius:4px;padding:2px 7px;white-space:nowrap">you {{ price }}¢</span>
+              <span style="width:2px;height:14px;background:{{ markerColor }}"></span>
+              <span style="width:11px;height:11px;border-radius:50%;background:{{ markerColor }};box-shadow:0 0 0 3px #0b0c0e"></span>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:none;display:flex;align-items:center;gap:10px;padding:9px 18px;border-bottom:1px solid #1e2227;flex-wrap:wrap">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.11em;color:#9aa3ad;white-space:nowrap">ORDER BOOK · {{ sideLabel }}</span>
+          <div style="flex:1;min-width:8px"></div>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8c949e;white-space:nowrap">in-zone <span style="color:#e8eaed">$18,690</span> · your share <span style="color:#e8eaed">1.3%</span></span>
+          <div style="display:inline-flex;gap:2px;background:#14171b;border-radius:8px;padding:2px;flex:none">
+            <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+              <button onClick="{{ g.go }}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;border:none;border-radius:6px;padding:4px 9px;cursor:pointer;background:{{ g.bg }};color:{{ g.fg }};white-space:nowrap">{{ g.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="flex:none;display:grid;grid-template-columns:{{ bookCols }};align-items:center;gap:12px;padding:6px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.11em;color:#8a939d">
+          <span>PRICE</span><span>DEPTH</span><span style="text-align:right">SHARES</span><span style="text-align:right">CUM</span>
+        </div>
+
+        <div style="flex:1;min-height:220px;overflow-y:auto;padding:2px 0 8px">
+          <sc-for list="{{ book }}" as="r" hint-placeholder-count="12">
+            <div onClick="{{ r.pick }}" style="display:grid;grid-template-columns:{{ bookCols }};align-items:center;gap:12px;padding:5px 18px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;cursor:{{ r.cursor }};background:{{ r.rowBg }};box-shadow:{{ r.rowEdge }};transition:background .12s ease" style-hover="background:#181b20">
+              <span style="color:{{ r.priceFg }};font-weight:{{ r.priceWt }};white-space:nowrap">{{ r.price }}¢</span>
+              <span style="min-width:0;height:6px;border-radius:8px;background:{{ r.bar }}"></span>
+              <span style="text-align:right;color:#a2a9b3;white-space:nowrap">{{ r.shares }}</span>
+              <span style="text-align:right;color:{{ r.cumFg }};font-size:{{ r.cumSize }};font-weight:{{ r.cumWt }};white-space:nowrap">{{ r.cum }}</span>
+            </div>
+            <sc-if value="{{ r.showSpread }}" hint-placeholder-val="{{ false }}">
+              <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:6px 12px;padding:10px;background:#101317;border-top:1px solid #1e2227;border-bottom:1px solid #1e2227;border-radius:8px">
+                <span style="display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.1em;color:#8a939d">BEST BID</span><span style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:#35c08a">63.0¢</span></span>
+                <span style="display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.1em;color:#8a939d">MIDPOINT</span><span style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600">63.5¢</span></span>
+                <span style="display:flex;flex-direction:column;align-items:center;gap:2px"><span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.1em;color:#8a939d">BEST ASK</span><span style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:#e8595e">64.0¢</span></span>
+              </div>
+            </sc-if>
+          </sc-for>
+        </div>
+
+        <div style="flex:none;border-top:1px solid #1e2227;padding:11px 18px 14px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:7px;flex-wrap:wrap">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.11em;color:#9aa3ad;white-space:nowrap">{{ sideLabel }} PRICE</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#a2a9b3;white-space:nowrap">63.5¢ <span style="color:#35c08a">+2.5¢ 24h</span> <span style="color:#8a939d">{{ rangeCaption }}</span></span>
+            <div style="flex:1;min-width:8px"></div>
+            <div style="display:inline-flex;gap:2px;background:#14171b;border-radius:8px;padding:2px;flex:none">
+              <sc-for list="{{ ranges }}" as="r" hint-placeholder-count="3">
+                <button onClick="{{ r.go }}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;border:none;border-radius:6px;padding:4px 9px;cursor:pointer;background:{{ r.bg }};color:{{ r.fg }};white-space:nowrap">{{ r.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+          {{ chart }}
+        </div>
+      </div>
+
+      <div style="min-width:0;display:flex;flex-direction:column;background:#0e1013;border-top:{{ tradeTopBorder }}">
+
+        <sc-if value="{{ hasPosition }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:none;padding:14px 16px 16px;border-bottom:1px solid #1e2227">
+            <div style="display:flex;align-items:center;gap:9px;margin-bottom:11px;flex-wrap:wrap">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.11em;color:#9aa3ad">YOUR POSITION</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;color:{{ posStFg }};background:{{ posStBg }};border-radius:4px;padding:2px 7px;white-space:nowrap">{{ posSt }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:12.5px;color:#8c949e">Your reward share</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;white-space:nowrap">{{ posShare }}</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:12.5px;color:#8c949e">Earned today</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#35c08a;white-space:nowrap">{{ posEarned }}</span></div>
+              <sc-for list="{{ posLegs }}" as="l" hint-placeholder-count="1">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:9px;border-top:1px solid #171a1e">
+                  <span style="font-size:12.5px;color:#8c949e">{{ l.label }}</span>
+                  <span style="display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:13px;white-space:nowrap">{{ l.status }}<i class="{{ l.icon }}" style="font-size:14px;color:{{ l.iconFg }}"></i></span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button onClick="{{ togglePos }}" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:600;color:{{ posPauseFg }};background:{{ posPauseBg }};border:1px solid {{ posPauseBd }};border-radius:8px;padding:8px;cursor:pointer;white-space:nowrap" style-hover="filter:brightness(1.25)"><i class="{{ posPauseIcon }}" style="font-size:14px"></i>{{ posPauseLabel }}</button>
+              <button onClick="{{ askCancelPos }}" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:600;color:#f0787c;background:rgba(232,89,94,.09);border:1px solid rgba(232,89,94,.24);border-radius:8px;padding:8px;cursor:pointer;white-space:nowrap" style-hover="background:rgba(232,89,94,.18)"><i class="ph ph-x-circle" style="font-size:14px"></i>Remove</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <div style="flex:none;padding:14px 16px 20px;display:flex;flex-direction:column;gap:13px">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.11em;color:#9aa3ad">PLACE A FARMING ORDER</span>
+
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;background:#14171b;border-radius:8px;padding:2px">
+            <button onClick="{{ pickA }}" style="display:flex;flex-direction:column;align-items:center;gap:2px;border:none;border-radius:6px;padding:8px;cursor:pointer;background:{{ aBg }};color:{{ aFg }};transition:background .16s ease"><span style="font-size:12.5px;font-weight:600">Yes</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;opacity:.7">63.0¢</span></button>
+            <button onClick="{{ pickB }}" style="display:flex;flex-direction:column;align-items:center;gap:2px;border:none;border-radius:6px;padding:8px;cursor:pointer;background:{{ bBg }};color:{{ bFg }};transition:background .16s ease"><span style="font-size:12.5px;font-weight:600">No</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;opacity:.7">37.0¢</span></button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;background:#14171b;border-radius:8px;padding:2px">
+            <button onClick="{{ setOne }}" style="border:none;border-radius:6px;padding:7px;font-size:12px;font-weight:600;cursor:pointer;background:{{ oneBg }};color:{{ oneFg }};transition:background .16s ease">One side</button>
+            <button onClick="{{ setBoth }}" style="border:none;border-radius:6px;padding:7px;font-size:12px;font-weight:600;cursor:pointer;background:{{ bothBg }};color:{{ bothFg }};transition:background .16s ease">Both sides</button>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:7px">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap">
+              <label for="price" style="font-size:12.5px;color:#c4cad2">Your price ({{ sideLabel }})</label>
+              <button onClick="{{ useSuggested }}" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:{{ accent }};background:none;border:none;cursor:pointer;padding:0;white-space:nowrap" style-hover="text-decoration:underline">Use suggested · 62.0</button>
+            </div>
+            <div style="position:relative;display:flex;align-items:center">
+              <input id="price" name="price" value="{{ price }}" onInput="{{ onPrice }}" style="width:100%;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:14.5px;color:#e8eaed;background:#0b0c0e;border:1px solid #23272d;border-radius:8px;padding:10px 30px 10px 12px;outline:none" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)" />
+              <span style="position:absolute;right:12px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#9aa3ad;pointer-events:none">¢</span>
+            </div>
+            <span style="font-size:11.5px;color:#9aa3ad;text-wrap:pretty">Click a bid on the order book to set this instantly.</span>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:7px">
+            <label for="order_size" style="font-size:12.5px;color:#c4cad2">Order size{{ splitNote }}</label>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <div style="position:relative;flex:1;min-width:110px;display:flex;align-items:center">
+                <span style="position:absolute;left:12px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8c949e;pointer-events:none">$</span>
+                <input id="order_size" name="order_size" value="{{ size }}" onInput="{{ onSize }}" style="width:100%;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:14.5px;color:#e8eaed;background:#0b0c0e;border:1px solid #23272d;border-radius:8px;padding:10px 12px 10px 24px;outline:none" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)" />
+              </div>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8a939d;flex:none">=</span>
+              <div style="position:relative;flex:1;min-width:110px;display:flex;align-items:center">
+                <input id="order_shares" value="{{ shares }}" onInput="{{ onShares }}" style="width:100%;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:14.5px;color:#e8eaed;background:#0b0c0e;border:1px solid #23272d;border-radius:8px;padding:10px 52px 10px 12px;outline:none" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)" />
+                <span style="position:absolute;right:12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3ad;pointer-events:none">shares</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:flex-start;gap:10px;border-radius:8px;padding:11px 12px;background:{{ qualBg }};box-shadow:{{ qualEdge }}">
+            {{ qualIcon }}
+            <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+              <span style="font-size:12.5px;font-weight:600;color:{{ qualFg }}">{{ qualTitle }}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8c949e;line-height:1.5;text-wrap:pretty">{{ qualDetail }}</span>
+            </span>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid #1e2227;padding-top:12px">
+            <button onClick="{{ toggleAdvanced }}" style="display:flex;align-items:center;gap:7px;align-self:flex-start;font-size:12.5px;font-weight:600;color:#8c949e;background:none;border:none;cursor:pointer;padding:0" style-hover="color:#e8eaed"><i class="{{ advIcon }}" style="font-size:13px"></i>Advanced options</button>
+
+            <sc-if value="{{ advanced }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:11px;animation:rise .22s ease both">
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <label for="max_volatility_cents" style="font-size:12.5px;color:#c4cad2;text-wrap:pretty">Auto-pause if best bid moves by (cents)</label>
+                  <input id="max_volatility_cents" name="max_volatility_cents" value="{{ vol }}" onInput="{{ onVol }}" placeholder="e.g. 5 · leave blank to disable" style="width:100%;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:13.5px;color:#e8eaed;background:#0b0c0e;border:1px solid #23272d;border-radius:8px;padding:9px 12px;outline:none" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)" />
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <label for="min_depth_cents" style="font-size:12.5px;color:#c4cad2;text-wrap:pretty">Min depth between you and best bid (cents)</label>
+                  <input id="min_depth_cents" name="min_depth_cents" value="{{ minDepth }}" onInput="{{ onMinDepth }}" style="width:100%;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:13.5px;color:#e8eaed;background:#0b0c0e;border:1px solid #23272d;border-radius:8px;padding:9px 12px;outline:none" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)" />
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <label for="expires_in" style="font-size:12.5px;color:#c4cad2">Stop quoting after</label>
+                  <select id="expires_in" name="expires_in" value="{{ expires }}" onChange="{{ onExpires }}" style="width:100%;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:13.5px;color:#e8eaed;background:#0b0c0e;border:1px solid #23272d;border-radius:8px;padding:9px 12px;outline:none;cursor:pointer" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)">
+                    <option value="1d">1 day</option>
+                    <option value="3d">3 days</option>
+                    <option value="7d">7 days</option>
+                    <option value="never">Never</option>
+                  </select>
+                </div>
+              </div>
+            </sc-if>
+
+            <div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px"><span style="color:#8c949e">Fill risk</span><span style="font-family:'IBM Plex Mono',monospace;color:{{ riskFg }};white-space:nowrap">{{ riskLabel }}</span></div>
+          </div>
+
+          <button onClick="{{ startFarming }}" style="position:relative;overflow:hidden;width:100%;font-size:14px;font-weight:600;color:#08090b;background:{{ accent }};border:none;border-radius:8px;padding:12px;cursor:pointer" style-hover="filter:brightness(1.08)" style-focus="outline:none;box-shadow:0 0 0 2px #0b0c0e,0 0 0 4px rgba(74,128,240,.5)">
+            <span style="position:absolute;top:0;bottom:0;left:0;width:60%;background:linear-gradient(100deg,transparent 0%,rgba(255,255,255,.5) 50%,transparent 100%);animation:shimmer 3.2s cubic-bezier(.4,0,.6,1) infinite;pointer-events:none"></span>
+            <span style="position:relative">{{ startLabel }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ pgActivity }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;min-width:0;padding:{{ pagePad }};display:flex;flex-direction:column;gap:{{ gap }};animation:rise .3s ease both">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <h1 style="font-size:19px;font-weight:600;letter-spacing:-.02em">Activity</h1>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#9aa3ad;white-space:nowrap">{{ actCount }}</span>
+        <div style="flex:1;min-width:8px"></div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <sc-for list="{{ actFilters }}" as="f" hint-placeholder-count="4">
+            <button onClick="{{ f.go }}" style="font-size:12px;font-weight:600;color:{{ f.fg }};background:{{ f.bg }};border:1px solid {{ f.bd }};border-radius:20px;padding:5px 13px;cursor:pointer;white-space:nowrap;transition:all .16s ease">{{ f.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;padding:6px 20px 18px">
+        <sc-for list="{{ actGroups }}" as="d" hint-placeholder-count="2">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:.11em;color:#8a939d;padding:16px 0 8px;text-transform:uppercase">{{ d.day }}</div>
+          <sc-for list="{{ d.items }}" as="a" hint-placeholder-count="5">
+            <div style="display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:12px;align-items:start;padding:11px 0;border-top:1px solid #171a1e">
+              <i class="{{ a.icon }}" style="font-size:16px;color:{{ a.tone }};margin-top:1px"></i>
+              <span style="display:flex;flex-direction:column;gap:5px;min-width:0">
+                <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.08em;color:{{ a.tone }};background:rgba(255,255,255,.05);border:1px solid #1e2227;border-radius:4px;padding:2px 6px;text-transform:uppercase;white-space:nowrap">{{ a.cat }}</span>
+                  <span style="font-size:13px;color:#c4cad2;line-height:1.45;text-wrap:pretty">{{ a.msg }}</span>
+                </span>
+              </span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a939d;white-space:nowrap">{{ a.t }}</span>
+            </div>
+          </sc-for>
+        </sc-for>
+        <sc-if value="{{ actEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:40px 0;text-align:center;font-size:13px;color:#8c949e;text-wrap:pretty">No activity yet. Events show up here as the bot starts, places orders, pauses, or hits an issue, live.</div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ pgRewards }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;min-width:0;padding:{{ pagePad }};display:flex;flex-direction:column;gap:{{ gap }};animation:rise .3s ease both">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <h1 style="font-size:19px;font-weight:600;letter-spacing:-.02em">Rewards</h1>
+        <div style="flex:1;min-width:8px"></div>
+        <button onClick="{{ goHistory }}" style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:#e8eaed;background:#191d23;border:1px solid #262b31;border-radius:8px;padding:8px 13px;cursor:pointer;white-space:nowrap" style-hover="background:#20252c"><i class="ph ph-clock-counter-clockwise" style="font-size:14px"></i>History</button>
+      </div>
+
+      <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid #1e2227;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:600">Your reward-eligible markets</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3ad;text-wrap:pretty">{{ rewardHint }}</span>
+        </div>
+
+        <sc-if value="{{ engineOff }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:44px 18px;text-align:center;font-size:13px;color:#8c949e;text-wrap:pretty">Engine is not running yet. Configure your wallet first.</div>
+        </sc-if>
+
+        <sc-if value="{{ engineOn }}" hint-placeholder-val="{{ true }}">
+          <div style="display:grid;grid-template-columns:{{ rwCols }};gap:12px;padding:11px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.11em;color:#8a939d">
+            <span>MARKET</span><span style="text-align:right">YOUR SHARE</span><span style="text-align:right">EARNED TODAY</span>
+            <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}"><span style="text-align:right">QUALIFY</span></sc-if>
+          </div>
+          <sc-for list="{{ rewardRows }}" as="r" hint-placeholder-count="5">
+            <div onClick="{{ r.open }}" style="display:grid;grid-template-columns:{{ rwCols }};gap:12px;align-items:center;padding:13px 18px;border-top:1px solid #171a1e;cursor:pointer;transition:background .14s ease" style-hover="background:#131619">
+              <span style="min-width:0;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.q }}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;color:#a2a9b3;white-space:nowrap">{{ r.share }}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;color:{{ r.todayFg }};white-space:nowrap">{{ r.today }}</span>
+              <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}">
+                <span style="justify-self:end;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#9aa3ad;white-space:nowrap">{{ r.qualify }}</span>
+              </sc-if>
+            </div>
+          </sc-for>
+          <sc-if value="{{ rewardsEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:44px 18px;text-align:center;font-size:13px;color:#8c949e;border-top:1px solid #171a1e;text-wrap:pretty">No reward data yet. Add a reward-eligible market and place a resting order.</div>
+          </sc-if>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ pgHistory }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;min-width:0;padding:{{ pagePad }};display:flex;flex-direction:column;gap:{{ gap }};animation:rise .3s ease both">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <button onClick="{{ goRewards }}" style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:#8c949e;background:none;border:none;cursor:pointer;padding:0;white-space:nowrap" style-hover="color:#e8eaed"><i class="ph ph-arrow-left" style="font-size:14px"></i>Rewards</button>
+        <h1 style="font-size:19px;font-weight:600;letter-spacing:-.02em">Reward history</h1>
+        <div style="flex:1;min-width:8px"></div>
+        <div style="display:inline-flex;gap:2px;background:#14171b;border-radius:8px;padding:2px;flex:none">
+          <sc-for list="{{ histRanges }}" as="h" hint-placeholder-count="3">
+            <button onClick="{{ h.go }}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;border:none;border-radius:6px;padding:5px 11px;cursor:pointer;background:{{ h.bg }};color:{{ h.fg }};white-space:nowrap">{{ h.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="min-width:0;max-width:640px;background:#0f1216;border:1px solid #1e2227;border-radius:12px;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid #1e2227;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:600">Daily totals</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8c949e;white-space:nowrap">{{ histTotal }}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:12px;padding:11px 18px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.11em;color:#8a939d">
+          <span>DATE (UTC)</span><span style="text-align:right">TOTAL EARNED</span>
+        </div>
+        <sc-for list="{{ histRows }}" as="h" hint-placeholder-count="8">
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:12px;align-items:center;padding:12px 18px;border-top:1px solid #171a1e;transition:background .14s ease" style-hover="background:#131619">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#a2a9b3;white-space:nowrap">{{ h.date }}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;text-align:right;color:#35c08a;white-space:nowrap">{{ h.total }}</span>
+          </div>
+        </sc-for>
+        <sc-if value="{{ histEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:44px 18px;text-align:center;font-size:13px;color:#8c949e;border-top:1px solid #171a1e;text-wrap:pretty">No history yet. The first snapshot is captured the day after your first reward-eligible order goes live.</div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ pgSetup }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;min-width:0;padding:{{ pagePad }};display:flex;flex-direction:column;gap:{{ gap }};animation:rise .3s ease both">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <h1 style="font-size:19px;font-weight:600;letter-spacing:-.02em">Setup</h1>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#9aa3ad">keys never leave your machine</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:{{ setupCols }};gap:{{ gap }};align-items:start;max-width:1060px;width:100%">
+
+        <div style="min-width:0;background:#0f1216;border:1px solid #1e2227;border-radius:12px;overflow:hidden">
+          <div style="padding:16px 20px;border-bottom:1px solid #1e2227;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <span style="font-size:13px;font-weight:600">Private Key</span>
+            <sc-if value="{{ configured }}" hint-placeholder-val="{{ false }}">
+              <span style="display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:#4ed3a0;white-space:nowrap"><i class="ph-fill ph-check-circle" style="font-size:13px"></i>configured</span>
+            </sc-if>
+          </div>
+
+          <div style="padding:18px 20px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="position:relative;display:flex;align-items:center">
+                <input id="private_key" name="private_key" type="{{ keyType }}" value="{{ pkey }}" onInput="{{ onPkey }}" maxLength="{{ 66 }}" placeholder="0x…" style="width:100%;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:13.5px;color:#e8eaed;background:#0b0c0e;border:1px solid {{ keyBorder }};border-radius:8px;padding:10px 42px 10px 12px;outline:none" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)" />
+                <button onClick="{{ toggleKey }}" aria-label="{{ keyAria }}" style="position:absolute;right:7px;display:grid;place-items:center;width:30px;height:30px;border:none;background:transparent;color:#9aa3ad;border-radius:6px;cursor:pointer" style-hover="color:#e8eaed;background:#181b20"><i class="{{ keyIcon }}" style="font-size:16px"></i></button>
+              </div>
+              <sc-if value="{{ keyNote }}" hint-placeholder-val="{{ false }}">
+                <span style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:{{ keyNoteFg }}"><i class="{{ keyNoteIcon }}" style="font-size:13px"></i>{{ keyNote }}</span>
+              </sc-if>
+            </div>
+
+            <sc-if value="{{ keyComplete }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:7px;animation:rise .3s cubic-bezier(.16,1,.3,1) both">
+                <label for="proxy_wallet" style="font-size:13px;font-weight:600;color:#e8eaed">Wallet Address</label>
+                <input id="proxy_wallet" name="proxy_wallet" value="{{ waddr }}" onInput="{{ onWaddr }}" placeholder="0x…" style="width:100%;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:13.5px;color:#e8eaed;background:#0b0c0e;border:1px solid #23272d;border-radius:8px;padding:10px 12px;outline:none" style-focus="border-color:#4a80f0;box-shadow:0 0 0 3px rgba(74,128,240,.22)" />
+              </div>
+            </sc-if>
+
+            <span style="font-size:12.5px;color:#8c949e;text-wrap:pretty">Private, encrypted, never leaves your device.</span>
+
+            <button onClick="{{ saveWallet }}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;font-size:13.5px;font-weight:600;color:{{ saveFg }};background:{{ saveBg }};border:1px solid {{ saveBd }};border-radius:8px;padding:11px;cursor:{{ saveCursor }}" style-hover="filter:brightness(1.08)"><i class="{{ saveIcon }}" style="font-size:15px"></i>{{ saveLabel }}</button>
+          </div>
+        </div>
+
+        <div style="min-width:0;display:flex;flex-direction:column;gap:{{ gap }}">
+          <div style="background:#0f1216;border:1px solid #1e2227;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px">
+            <span style="font-size:13px;font-weight:600">Engine</span>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span style="font-size:12.5px;color:#8c949e">Status</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;color:{{ engineFg }};white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex:none"></span>{{ engineShort }}</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span style="font-size:12.5px;color:#8c949e">Websocket</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#a2a9b3;white-space:nowrap">{{ wsStatus }}</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span style="font-size:12.5px;color:#8c949e">Requote interval</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#a2a9b3;white-space:nowrap">2s</span>
+            </div>
+            <button onClick="{{ toggleEngine }}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;font-size:12.5px;font-weight:600;color:{{ engBtnFg }};background:{{ engBtnBg }};border:1px solid {{ engBtnBd }};border-radius:8px;padding:9px;cursor:pointer;white-space:nowrap" style-hover="filter:brightness(1.2)"><i class="{{ engBtnIcon }}" style="font-size:14px"></i>{{ engBtnLabel }}</button>
+          </div>
+
+          <div style="background:#0f1216;border:1px solid #1e2227;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px">
+            <span style="font-size:13px;font-weight:600">Session</span>
+            <span style="font-size:12.5px;color:#8c949e;line-height:1.5;text-wrap:pretty">Self-hosted. Nothing is sent anywhere except signed orders to Polymarket.</span>
+            <button onClick="{{ logout }}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;font-size:12.5px;font-weight:600;color:#e8eaed;background:#191d23;border:1px solid #262b31;border-radius:8px;padding:9px;cursor:pointer" style-hover="background:#20252c"><i class="ph ph-sign-out" style="font-size:14px"></i>Log out</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  </div>
+
+  <div style="position:fixed;top:{{ toastTop }};right:14px;z-index:1000;display:flex;flex-direction:column;gap:8px;width:{{ toastW }};max-width:calc(100vw - 28px);pointer-events:none">
+    <sc-for list="{{ toasts }}" as="t" hint-placeholder-count="0">
+      <div style="position:relative;display:flex;gap:10px;align-items:flex-start;background:#14181d;border:1px solid #262b31;border-left:3px solid {{ t.tone }};border-radius:8px;padding:11px 34px 11px 12px;box-shadow:0 14px 40px rgba(0,0,0,.5);animation:slidein .24s cubic-bezier(.16,1,.3,1) both;pointer-events:auto">
+        <i class="{{ t.icon }}" style="font-size:16px;color:{{ t.tone }};margin-top:1px"></i>
+        <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.09em;color:#9aa3ad;text-transform:uppercase">{{ t.cat }}</span>
+          <span style="font-size:12.5px;color:#e8eaed;line-height:1.45;text-wrap:pretty">{{ t.msg }}</span>
+        </span>
+        <button onClick="{{ t.close }}" aria-label="Dismiss" style="position:absolute;top:6px;right:7px;width:20px;height:20px;display:grid;place-items:center;border:none;background:transparent;color:#8a939d;border-radius:5px;cursor:pointer" style-hover="color:#e8eaed;background:#20252c"><i class="ph ph-x" style="font-size:12px"></i></button>
+      </div>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{ alertsOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;bottom:72px;right:14px;z-index:960;width:{{ toastW }};max-width:calc(100vw - 28px);height:min(352px,60vh);display:flex;flex-direction:column;background:#0f1216;border:1px solid #262b31;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.6);overflow:hidden;animation:pop .2s cubic-bezier(.16,1,.3,1) both">
+      <div style="flex:none;display:flex;align-items:center;gap:9px;padding:11px 10px 11px 14px;border-bottom:1px solid #1e2227;background:#14171b">
+        <span style="font-size:12.5px;font-weight:600">Alerts</span>
+        <div style="flex:1"></div>
+        <button onClick="{{ goActivity }}" style="font-size:11.5px;color:#8c949e;background:none;border:none;cursor:pointer;padding:0;white-space:nowrap" style-hover="color:#4a80f0">See all</button>
+        <button onClick="{{ toggleAlerts }}" aria-label="Close alerts" style="width:22px;height:22px;display:grid;place-items:center;border:none;background:transparent;color:#9aa3ad;border-radius:5px;cursor:pointer" style-hover="color:#e8eaed;background:#20252c"><i class="ph ph-x" style="font-size:13px"></i></button>
+      </div>
+      <div style="flex:1;min-height:0;overflow-y:auto;padding:4px 14px 12px">
+        <sc-for list="{{ alerts }}" as="a" hint-placeholder-count="4">
+          <div style="display:grid;grid-template-columns:16px minmax(0,1fr);gap:10px;align-items:start;padding:10px 0;border-top:1px solid #171a1e">
+            <i class="{{ a.icon }}" style="font-size:15px;color:{{ a.tone }};margin-top:1px"></i>
+            <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+              <span style="font-size:12.5px;color:#c4cad2;line-height:1.45;text-wrap:pretty">{{ a.msg }}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#8a939d;text-transform:uppercase">{{ a.cat }} · {{ a.t }}</span>
+            </span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <button onClick="{{ toggleAlerts }}" style="position:fixed;bottom:18px;right:14px;z-index:950;display:inline-flex;align-items:center;gap:8px;padding:9px 15px;font-size:13px;font-weight:600;color:{{ dockFg }};background:{{ dockBg }};border:none;border-radius:22px;box-shadow:0 10px 30px rgba(0,0,0,.45);cursor:pointer;white-space:nowrap" style-hover="filter:brightness(1.12)">
+    <i class="ph-fill ph-bell" style="font-size:15px"></i>Alerts
+    <span style="min-width:17px;height:17px;padding:0 5px;display:inline-grid;place-items:center;font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:700;color:#fff;background:#c8434a;border-radius:9px">{{ alertCount }}</span>
+  </button>
+
+  <sc-if value="{{ confirmOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;z-index:1100;display:grid;place-items:center;background:rgba(6,7,9,.62);padding:20px;animation:pop .16s ease both">
+      <div style="width:100%;max-width:404px;background:#0f1216;border:1px solid #262b31;border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.6);padding:20px">
+        <div style="display:flex;gap:12px;align-items:flex-start">
+          <i class="ph-fill ph-warning-circle" style="font-size:20px;color:#f0787c;margin-top:1px"></i>
+          <div style="display:flex;flex-direction:column;gap:5px;min-width:0">
+            <span style="font-size:14px;font-weight:600">{{ confirmTitle }}</span>
+            <span style="font-size:12.5px;color:#a2a9b3;line-height:1.5;text-wrap:pretty">{{ confirmBody }}</span>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:9px;margin-top:20px;flex-wrap:wrap">
+          <button onClick="{{ confirmNo }}" style="font-size:12.5px;font-weight:600;color:#e8eaed;background:#191d23;border:1px solid #262b31;border-radius:8px;padding:9px 15px;cursor:pointer;white-space:nowrap" style-hover="background:#20252c">Cancel</button>
+          <button onClick="{{ confirmYes }}" style="font-size:12.5px;font-weight:600;color:#fff;background:#c8434a;border:1px solid #c8434a;border-radius:8px;padding:9px 15px;cursor:pointer;white-space:nowrap" style-hover="filter:brightness(1.1)">{{ confirmAction }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#4a80f0&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#4a80f0&quot;,&quot;#35c08a&quot;,&quot;#e0a33c&quot;,&quot;#8b7bf5&quot;],&quot;section&quot;:&quot;Theme&quot;},&quot;zoneEmphasis&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Order book&quot;},&quot;hoverPrefetch&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Performance&quot;}}">
+const A_DEFAULT = "#4a80f0";
+const GREEN = "#35c08a", RED = "#e8595e", AMBER = "#d9a03a", MUTED = "#8c949e";
+
+const MARKETS = [
+  { id: "fed", q: "Will the Fed cut rates at the September meeting?", leg: "Yes", legKind: "yes", price: "62.0¢", size: "$250", distance: "1.5¢", paused: false, scoring: true, resolves: "Resolves Sep 17", liq: "$1.24M", vol: "$318K", earned: "$1.84", share: "1.3%", minSize: "100 sh", maxSpread: "3.0¢" },
+  { id: "btc", q: "Bitcoin above $150K on Dec 31?", leg: "Yes", legKind: "yes", price: "31.5¢", size: "$400", distance: "2.0¢", paused: false, scoring: true, resolves: "Resolves Dec 31", liq: "$3.10M", vol: "$740K", earned: "$1.12", share: "0.8%", minSize: "150 sh", maxSpread: "2.5¢" },
+  { id: "f1", q: "Who wins the 2026 F1 constructors' title?", leg: "Both", legKind: "both", price: "44.0¢", size: "$600", distance: "1.0¢", paused: false, scoring: true, resolves: "Resolves Dec 6", liq: "$820K", vol: "$96K", earned: "$1.40", share: "2.1%", minSize: "100 sh", maxSpread: "4.0¢" },
+  { id: "shutdown", q: "US government shutdown before October?", leg: "Yes", legKind: "yes", price: "18.0¢", size: "$250", distance: "6.2¢", paused: true, scoring: false, resolves: "Resolves Oct 1", liq: "$460K", vol: "$210K", earned: "$0.00", share: "0.0%", minSize: "100 sh", maxSpread: "3.0¢" },
+  { id: "gpt6", q: "Will GPT-6 ship in 2026?", leg: "No", legKind: "no", price: "44.0¢", size: "$150", distance: "1.8¢", paused: false, scoring: true, resolves: "Resolves Dec 31", liq: "$390K", vol: "$54K", earned: "$0.26", share: "0.4%", minSize: "100 sh", maxSpread: "3.0¢" },
+  { id: "ucl", q: "Champions League winner 2026/27", leg: "Idle", legKind: "idle", price: "n/a", size: "$0", distance: "n/a", paused: false, scoring: false, resolves: "Resolves Jun 2027", liq: "$1.02M", vol: "$31K", earned: "$0.00", share: "0.0%", minSize: "100 sh", maxSpread: "5.0¢" }
+];
+
+const CATALOG = [
+  { id: "ecb", q: "Will the ECB hold rates through Q4?", outcomes: "Yes 71¢ · No 29¢", pool: "$800", minSize: "100 sh", maxSpread: "3.0¢", spread: "1.0¢", vol: "$212K", qualifies: true },
+  { id: "eth", q: "Ethereum above $6K on Sep 30?", outcomes: "Yes 38¢ · No 62¢", pool: "$650", minSize: "150 sh", maxSpread: "2.5¢", spread: "0.5¢", vol: "$486K", qualifies: true },
+  { id: "nba", q: "NBA champion 2027", outcomes: "Yes 12¢ · No 88¢", pool: "$500", minSize: "100 sh", maxSpread: "4.0¢", spread: "3.0¢", vol: "$74K", qualifies: true },
+  { id: "cpi", q: "US CPI below 2.5% in August print?", outcomes: "Yes 44¢ · No 56¢", pool: "$450", minSize: "200 sh", maxSpread: "2.0¢", spread: "2.5¢", vol: "$131K", qualifies: false },
+  { id: "oscar", q: "Best Picture winner 2027", outcomes: "Yes 9¢ · No 91¢", pool: "$300", minSize: "100 sh", maxSpread: "5.0¢", spread: "6.0¢", vol: "$18K", qualifies: false },
+  { id: "sol", q: "Solana above $400 on Dec 31?", outcomes: "Yes 27¢ · No 73¢", pool: "$700", minSize: "120 sh", maxSpread: "3.0¢", spread: "1.5¢", vol: "$298K", qualifies: true },
+  { id: "elect", q: "Turnout above 60% in the midterms?", outcomes: "Yes 58¢ · No 42¢", pool: "$550", minSize: "100 sh", maxSpread: "3.5¢", spread: "2.0¢", vol: "$164K", qualifies: true }
+];
+
+// level: info | warn | error (filters). category: order | connection | wallet |
+// market | engine | event. tone: pos | caution | err. Mirrors web/activity.rs.
+const EVENTS = [
+  { day: "Today", level: "info", tone: "pos", cat: "order", icon: "ph ph-arrows-clockwise", msg: "Replaced Yes order at 62.0¢, midpoint moved 0.5¢", t: "12:41" },
+  { day: "Today", level: "warn", tone: "caution", cat: "market", icon: "ph ph-pause-circle", msg: "Paused: best bid moved 6.2¢ past your volatility threshold", t: "12:18" },
+  { day: "Today", level: "info", tone: "pos", cat: "event", icon: "ph ph-coins", msg: "Reward snapshot recorded, $0.41 accrued", t: "12:00" },
+  { day: "Today", level: "info", tone: "pos", cat: "order", icon: "ph ph-check-circle", msg: "Order placed, 403 shares No at 44.0¢", t: "11:52" },
+  { day: "Today", level: "info", tone: "pos", cat: "connection", icon: "ph ph-plugs-connected", msg: "WS connected after a 2.1s gap", t: "11:34" },
+  { day: "Today", level: "info", tone: "caution", cat: "order", icon: "ph ph-arrow-down-right", msg: "Partial fill, 120 of 403 shares Yes at 62.0¢", t: "11:09" },
+  { day: "Today", level: "error", tone: "err", cat: "order", icon: "ph ph-x-circle", msg: "Order rejected: insufficient allowance, retrying in 5s", t: "10:22" },
+  { day: "Yesterday", level: "info", tone: "pos", cat: "event", icon: "ph ph-coins", msg: "Settlement posted, $3.91 for the day", t: "00:02" },
+  { day: "Yesterday", level: "info", tone: "pos", cat: "order", icon: "ph ph-arrows-clockwise", msg: "Replaced both legs after a 1.2¢ midpoint shift", t: "22:47" },
+  { day: "Yesterday", level: "warn", tone: "caution", cat: "market", icon: "ph ph-warning", msg: "Min depth ahead of you fell below 500 shares", t: "19:15" },
+  { day: "Yesterday", level: "info", tone: "pos", cat: "wallet", icon: "ph ph-wallet", msg: "Wallet authenticated, allowances confirmed", t: "08:31" },
+  { day: "Yesterday", level: "info", tone: "pos", cat: "engine", icon: "ph ph-play-circle", msg: "Engine started, 5 markets loaded", t: "08:30" },
+  { day: "Aug 1, 2026", level: "error", tone: "err", cat: "connection", icon: "ph ph-plugs", msg: "WS disconnected, falling back to polling", t: "16:04" },
+  { day: "Aug 1, 2026", level: "info", tone: "caution", cat: "engine", icon: "ph ph-stop-circle", msg: "Shutting down on operator request", t: "15:58" }
+];
+
+const HISTORY = [
+  { date: "2026-08-03", total: "$3.28", days: 1 },
+  { date: "2026-08-02", total: "$2.96", days: 2 },
+  { date: "2026-08-01", total: "$4.11", days: 3 },
+  { date: "2026-07-31", total: "$2.44", days: 4 },
+  { date: "2026-07-30", total: "$3.72", days: 5 },
+  { date: "2026-07-29", total: "$1.98", days: 6 },
+  { date: "2026-07-28", total: "$1.36", days: 7 },
+  { date: "2026-07-21", total: "$2.88", days: 14 },
+  { date: "2026-07-06", total: "$2.02", days: 29 },
+  { date: "2026-06-12", total: "$1.74", days: 53 }
+];
+
+const LEVELS = [
+  { c: 68.0, side: "ask", sh: 7400, cum: "$18.2K", pct: 22 },
+  { c: 67.0, side: "ask", sh: 4120, cum: "$13.3K", pct: 14 },
+  { c: 66.0, side: "ask", sh: 2980, cum: "$9.2K", pct: 10 },
+  { c: 65.0, side: "ask", sh: 6450, cum: "$7.2K", pct: 21 },
+  { c: 64.0, side: "ask", sh: 1240, cum: "$0.8K", pct: 4, best: true, spreadAfter: true },
+  { c: 63.0, side: "bid", sh: 2860, cum: "$1.8K", pct: 9, best: true },
+  { c: 62.0, side: "bid", sh: 5310, cum: "$3.3K", pct: 17 },
+  { c: 61.0, side: "bid", sh: 8940, cum: "$10.6K", pct: 29 },
+  { c: 60.0, side: "bid", sh: 3120, cum: "$12.5K", pct: 10 },
+  { c: 59.0, side: "bid", sh: 11500, cum: "$19.3K", pct: 38 },
+  { c: 58.0, side: "bid", sh: 3640, cum: "$21.4K", pct: 12 }
+];
+
+const EARN = {
+  "7D": { vals: [2.1, 3.4, 2.8, 4.0, 3.1, 3.9, 4.62], labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Today"], max: 5, total: 4.62, delta: "+18% vs yesterday", sub: "Still accruing. Finalizes after midnight UTC.", scope: "today" },
+  "30D": { vals: [12.4, 18.1, 15.7, 22.3, 19.8, 24.6, 28.2], labels: ["W1", "W2", "W3", "W4", "W5", "W6", "W7"], max: 30, total: 141.1, delta: "+31% vs prior 30d", sub: "Weekly buckets across the last 30 days.", scope: "in 30 days" },
+  "All": { vals: [41, 58, 72, 66, 89, 94, 118], labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"], max: 130, total: 418.35, delta: "+12% vs prior month", sub: "Monthly totals since your first order.", scope: "all time" }
+};
+
+const TONE = { pos: GREEN, caution: AMBER, err: "#f0787c" };
+
+class Component extends DCLogic {
+  state = {
+    page: "overview", viewId: "fed",
+    side: 0, both: false, price: "62.0", size: "250",
+    group: 0, range: 2, advanced: false,
+    vol: "", minDepth: "0", expires: "7d",
+    paused: {}, removed: {}, added: {},
+    earnScope: "7D", ticker: EARN["7D"].total,
+    actFilter: "all",
+    toasts: [], nextToast: 1,
+    confirm: null, alertsOpen: false,
+    showKey: false, pkey: "", waddr: "", saved: false,
+    engineOn: true, addUrl: "", browseQuery: "", browseSort: 0,
+    histRange: 0, browsePage: 1,
+    w: typeof window === "undefined" ? 1440 : window.innerWidth,
+    collapsed: false,
+    live: false, probing: true,
+    api: null, apiMarkets: null, apiActivity: null, apiRewards: null, apiHistory: null,
+    cache: {}, warming: {}, loadingView: false
+  };
+
+  accent() { return this.props.accent || A_DEFAULT; }
+
+  componentDidMount() {
+    this._onResize = () => this.setState({ w: window.innerWidth });
+    window.addEventListener("resize", this._onResize);
+    this._onResize();
+    this.runTicker(EARN["7D"].total);
+
+    try {
+      const saved = localStorage.getItem("pfSidebarCollapsed");
+      if (saved === "1") this.setState({ collapsed: true });
+    } catch (e) { /* storage blocked */ }
+
+    this.connect();
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener("resize", this._onResize);
+    if (this._raf) cancelAnimationFrame(this._raf);
+    if (this._closeStream) this._closeStream();
+    if (this._poll) clearInterval(this._poll);
+  }
+
+  // Try the real backend. Everything below degrades to the bundled fixtures when
+  // there is no server (opening this file directly), so the prototype always
+  // renders and the header says which mode it is in.
+  async connect() {
+    let api = null;
+    try {
+      const mod = await import("./polyfarmer-api.js");
+      api = new mod.PolyfarmerApi();
+    } catch (e) {
+      this.setState({ probing: false, live: false });
+      return;
+    }
+    const ok = await api.probe();
+    if (!ok) { this.setState({ probing: false, live: false, api }); return; }
+
+    this.setState({ api, live: true, probing: false, engineOn: api.engineRunning });
+    this.refreshAll(api);
+
+    // Live alerts over SSE, exactly the payload web/activity.rs sends.
+    this._closeStream = api.streamActivity((a) => {
+      const tone = TONE[a.tone] || GREEN;
+      this.toast(a.category || "event", a.message, tone, a.level === "error"
+        ? "ph-fill ph-x-circle"
+        : (a.level === "warn" ? "ph-fill ph-warning-circle" : "ph-fill ph-check-circle"));
+      api.activity().then((act) => { if (act) this.setState({ apiActivity: act }); });
+    });
+
+    // The htmx templates poll markets every 2s and rewards every 12s; match that.
+    this._poll = setInterval(() => this.refreshAll(api), 4000);
+  }
+
+  async refreshAll(api) {
+    const [markets, activity, rewards, history] = await Promise.all([
+      api.markets(), api.activity(), api.rewards(), api.rewardHistory()
+    ]);
+    const patch = {};
+    if (markets) patch.apiMarkets = markets;
+    if (activity) patch.apiActivity = activity;
+    if (rewards) patch.apiRewards = rewards;
+    if (history) patch.apiHistory = history;
+    if (Object.keys(patch).length) this.setState(patch);
+  }
+
+  // Hover prefetch. Warms the order book for a market before you click it, the
+  // same trick htmx's preload extension does, then keeps it in a short-lived
+  // cache so opening the view paints instantly instead of showing a skeleton.
+  warm(id, slug) {
+    const S = this.state;
+    if (S.cache[id] || S.warming[id]) return;
+    const warming = Object.assign({}, S.warming);
+    warming[id] = true;
+    this.setState({ warming });
+
+    const done = (payload) => {
+      const cache = Object.assign({}, this.state.cache);
+      cache[id] = { at: Date.now(), book: payload };
+      const w2 = Object.assign({}, this.state.warming);
+      delete w2[id];
+      this.setState({ cache, warming: w2 });
+    };
+
+    if (S.live && S.api && slug) {
+      S.api.book(slug, this.state.side, null).then(done).catch(() => done(null));
+    } else {
+      // No backend: still model the latency so the interaction reads honestly.
+      this._warmTimers = this._warmTimers || {};
+      this._warmTimers[id] = setTimeout(() => done(null), 260);
+    }
+  }
+
+  cancelWarm(id) {
+    if (this._warmTimers && this._warmTimers[id]) {
+      clearTimeout(this._warmTimers[id]);
+      delete this._warmTimers[id];
+      const w2 = Object.assign({}, this.state.warming);
+      delete w2[id];
+      this.setState({ warming: w2 });
+    }
+  }
+
+  toggleCollapse() {
+    const next = !this.state.collapsed;
+    this.setState({ collapsed: next });
+    try { localStorage.setItem("pfSidebarCollapsed", next ? "1" : "0"); } catch (e) { /* ignore */ }
+  }
+
+  // Number Ticker. The correct value is always in state already, so this only
+  // animates the approach and can never leave a wrong figure on screen.
+  runTicker(target) {
+    if (this._raf) cancelAnimationFrame(this._raf);
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const from = 0, t0 = performance.now(), dur = 1000;
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      this.setState({ ticker: from + (target - from) * eased });
+      if (p < 1) this._raf = requestAnimationFrame(step);
+      else this.setState({ ticker: target });
+    };
+    this._raf = requestAnimationFrame(step);
+  }
+
+  // Thresholds account for the 228px desktop sidebar, so they describe how much
+  // room the CONTENT has, not the window.
+  bp() {
+    const w = this.state.w;
+    if (w >= 1560) return "xl";
+    if (w >= 1240) return "lg";
+    if (w >= 820) return "md";
+    return "sm";
+  }
+
+  toast(cat, msg, tone, icon) {
+    const id = this.state.nextToast;
+    this.setState((s) => ({ nextToast: s.nextToast + 1, toasts: [{ id, cat, msg, tone, icon }].concat(s.toasts).slice(0, 4) }));
+    setTimeout(() => this.setState((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 5200);
+  }
+
+  seg(on) { return on ? { bg: "#252b33", fg: "#e8eaed" } : { bg: "transparent", fg: MUTED }; }
+  chip(on) { return on ? { bg: this.accent(), fg: "#08090b", bd: this.accent() } : { bg: "transparent", fg: MUTED, bd: "#262b31" }; }
+
+  liveMarkets() {
+    const S = this.state;
+
+    // Real data wins when the backend answered; the fixtures are the offline
+    // fallback so the prototype is never blank.
+    if (S.apiMarkets && S.apiMarkets.length) {
+      return S.apiMarkets.filter((m) => !S.removed[m.legs[0] ? m.legs[0].id : m.slug]).map((m) => {
+        const leg = m.legs[0] || {};
+        const both = m.legs.length > 1;
+        return {
+          id: leg.id || m.slug, slug: m.slug, url: m.url, q: m.label,
+          leg: both ? "Both" : (leg.sideLabel || "Yes"),
+          legKind: both ? "both" : (/^no$/i.test(leg.sideLabel || "") ? "no" : "yes"),
+          price: (leg.status || "").split("·").pop().trim() || "n/a",
+          size: leg.size || "$0",
+          distance: leg.distance || "n/a",
+          paused: !!leg.paused,
+          scoring: leg.scoring !== false && !leg.paused,
+          resolves: "", liq: "", vol: "",
+          earned: "$0.00", share: "0.0%", minSize: "100 sh", maxSpread: "3.0¢",
+          legIds: m.legs.map((l) => l.id)
+        };
+      });
+    }
+
+    return MARKETS.filter((m) => !S.removed[m.id]).concat(
+      CATALOG.filter((c) => S.added[c.id]).map((c) => ({
+        id: c.id, q: c.q, leg: "Yes", legKind: "yes", price: "50.0¢", size: "$250",
+        distance: "1.0¢", paused: false, scoring: true, resolves: "Newly tracked",
+        liq: c.vol, vol: c.vol, earned: "$0.00", share: "0.0%", minSize: c.minSize, maxSpread: c.maxSpread
+      }))
+    );
+  }
+
+  isPaused(m) { return this.state.paused[m.id] === undefined ? m.paused : this.state.paused[m.id]; }
+  legFg(kind) { return kind === "both" ? "#c4cad2" : (kind === "idle" ? "#9aa3ad" : GREEN); }
+
+  keyState() {
+    const body = this.state.pkey.trim().replace(/^0[xX]/, "");
+    if (body.length === 0) return "empty";
+    if (!/^[0-9a-fA-F]*$/.test(body)) return "invalid";
+    if (body.length < 64) return "partial";
+    if (body.length === 64) return "complete";
+    return "invalid";
+  }
+
+  qualify() {
+    const S = this.state;
+    const p = parseFloat(S.price) || 0;
+    const usd = parseFloat(S.size) || 0;
+    const mid = 63.5, maxSpread = 3.0, minShares = 100;
+    const perSide = S.both ? usd / 2 : usd;
+    const sh = p > 0 ? perSide / (p / 100) : 0;
+    const fromMid = mid - p;
+    const inZone = fromMid >= -0.0001 && fromMid <= maxSpread + 0.0001;
+    const meetsMin = sh >= minShares;
+    const reasons = [];
+    if (!meetsMin) reasons.push("need 100 shares per side, have " + Math.floor(sh));
+    if (!inZone) reasons.push(fromMid < 0 ? p.toFixed(1) + "¢ is above the midpoint" : (fromMid - maxSpread).toFixed(1) + "¢ below the zone floor");
+    return { ok: inZone && meetsMin, inZone, sh, fromMid, reasons, maxSpread };
+  }
+
+  bars() {
+    const s = EARN[this.state.earnScope];
+    const A = this.accent();
+    const small = this.bp() === "sm";
+    return React.createElement(
+      "div",
+      { style: { display: "flex", alignItems: "flex-end", gap: small ? 6 : 10, width: "100%", height: small ? 108 : 132 } },
+      s.vals.map((v, i) => {
+        const last = i === s.vals.length - 1;
+        return React.createElement(
+          "div",
+          { key: i, style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 7, height: "100%", justifyContent: "flex-end" } },
+          React.createElement("span", {
+            style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: small ? 9.5 : 11, color: last ? "#e8eaed" : "#9aa3ad", fontWeight: last ? 600 : 400, whiteSpace: "nowrap" }
+          }, "$" + v.toFixed(v < 10 ? 2 : 0)),
+          React.createElement("div", {
+            style: {
+              width: "100%", height: (v / s.max * 100) + "%", borderRadius: 8,
+              background: last ? A : "#232830",
+              transition: "height .45s cubic-bezier(.16,1,.3,1), background .3s ease"
+            }
+          }),
+          React.createElement("span", { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: small ? 9 : 10.5, color: "#8a939d", whiteSpace: "nowrap" } }, s.labels[i])
+        );
+      })
+    );
+  }
+
+  chart() {
+    const shapes = [
+      "0,58 50,62 100,48 150,54 200,40 250,46 300,34 350,40 400,30 450,36 500,26 550,32 600,24 650,28 700,22",
+      "0,64 50,52 100,60 150,44 200,50 250,38 300,44 350,32 400,40 450,28 500,34 550,24 600,30 650,20 700,26",
+      "0,66 44,70 88,58 132,62 176,49 220,54 264,40 308,46 352,33 396,38 440,30 484,36 528,24 572,29 616,20 660,26 700,22"
+    ];
+    return React.createElement(
+      "svg",
+      { viewBox: "0 0 700 84", preserveAspectRatio: "none", style: { width: "100%", height: 84, display: "block" } },
+      React.createElement("line", { x1: 0, y1: 30, x2: 700, y2: 30, stroke: "#20252b", strokeWidth: 1, strokeDasharray: "2 5" }),
+      React.createElement("polyline", { points: shapes[this.state.range], fill: "none", stroke: this.accent(), strokeWidth: 2, strokeLinejoin: "round", strokeLinecap: "round" })
+    );
+  }
+
+  renderVals() {
+    const A = this.accent();
+    const S = this.state;
+    const set = (p) => this.setState(p);
+    const go = (page) => () => set({ page, alertsOpen: false });
+    const bp = this.bp();
+    const xl = bp === "xl", md = bp === "md", sm = bp === "sm";
+    const lg = bp === "lg" || xl;
+    const wide = !sm;
+    const q = this.qualify();
+    const showZone = this.props.zoneEmphasis !== false;
+    const live = this.liveMarkets();
+    const scoring = live.filter((m) => !this.isPaused(m) && m.scoring);
+    const viewM = live.find((m) => m.id === S.viewId) || live[0] || MARKETS[0];
+    const priceNum = parseFloat(S.price) || 0;
+    const sizeNum = parseFloat(S.size) || 0;
+    // Cached markets open with no skeleton; cold ones show one briefly.
+    const openMarket = (id) => () => {
+      const hit = !!S.cache[id];
+      set({ page: "market", viewId: id, alertsOpen: false, loadingView: !hit });
+      if (!hit) {
+        const m = live.find((x) => x.id === id);
+        this.warm(id, m && m.slug);
+        setTimeout(() => this.setState({ loadingView: false }), 320);
+      }
+    };
+    const hoverMarket = (id) => {
+      const m = live.find((x) => x.id === id);
+      return {
+        enter: () => { if (this.props.hoverPrefetch !== false) this.warm(id, m && m.slug); },
+        leave: () => this.cancelWarm(id)
+      };
+    };
+    const askConfirm = (title, body, action, onYes) => () => set({ confirm: { title, body, action, onYes } });
+    const ks = this.keyState();
+
+    const navDef = [
+      { key: "overview", label: "Overview", icon: "circle-dashed" },
+      { key: "markets", label: "Markets", icon: "list-dashes" },
+      { key: "activity", label: "Activity", icon: "pulse" },
+      { key: "rewards", label: "Rewards", icon: "coins" },
+      { key: "setup", label: "Setup", icon: "sliders-horizontal" }
+    ];
+    const activeKey = S.page === "browse" || S.page === "market" ? "markets" : (S.page === "history" ? "rewards" : S.page);
+
+    const deployedTotal = live.filter((m) => !this.isPaused(m) && m.size !== "$0")
+      .reduce((sum, m) => sum + (parseFloat(m.size.replace(/[$,]/g, "")) || 0), 0);
+
+    const filtered = S.actFilter === "all" ? EVENTS : EVENTS.filter((e) => e.level === S.actFilter);
+    const groups = [];
+    filtered.forEach((e) => {
+      let g = groups.find((d) => d.day === e.day);
+      if (!g) { g = { day: e.day, items: [] }; groups.push(g); }
+      g.items.push({ cat: e.cat, msg: e.msg, t: e.t, icon: e.icon, tone: TONE[e.tone] });
+    });
+
+    const histCut = [7, 30, 9999][S.histRange];
+    const histRows = HISTORY.filter((h) => h.days <= histCut);
+    const histSum = histRows.reduce((s, h) => s + parseFloat(h.total.replace("$", "")), 0);
+
+    const bq = S.browseQuery.trim().toLowerCase();
+    const sortKey = ["pool", "spread", "vol"][S.browseSort];
+    const catalog = CATALOG.filter((c) => !bq || c.q.toLowerCase().indexOf(bq) >= 0)
+      .slice().sort((a, b) => {
+        const n = (v) => parseFloat(String(v).replace(/[^0-9.]/g, "")) || 0;
+        return S.browseSort === 1 ? n(a[sortKey]) - n(b[sortKey]) : n(b[sortKey]) - n(a[sortKey]);
+      });
+    const shown = catalog.slice(0, S.browsePage * 5);
+
+    const earnS = EARN[S.earnScope];
+    const posPaused = this.isPaused(viewM);
+    const rewardMarkets = live.filter((m) => m.size !== "$0");
+    const cachedCount = Object.keys(S.cache).length;
+
+    // One gauge rail per farmed market. Band is drawn from the market's max
+    // spread; the tick is your resting price's distance below the midpoint.
+    const gaugeRows = live.filter((m) => m.size !== "$0").slice(0, 5).map((m) => {
+      const maxSpread = parseFloat(m.maxSpread) || 3;
+      const dist = parseFloat(m.distance);
+      const paused = this.isPaused(m);
+      const known = !isNaN(dist);
+      const inZone = known && !paused && dist >= 0 && dist <= maxSpread;
+      // Rail spans 0 to 2x maxSpread below the midpoint, band covers the first half.
+      const pos = known ? Math.max(0, Math.min(1, dist / (maxSpread * 2))) : 0;
+      const hov = hoverMarket(m.id);
+      return {
+        short: m.q.length > 26 ? m.q.slice(0, 25).trim() + "…" : m.q,
+        badge: paused ? "paused" : (known ? dist + " off" : "idle"),
+        dot: paused ? AMBER : (inZone ? A : RED),
+        fg: S.page === "market" && m.id === viewM.id ? "#e8eaed" : "#c4cad2",
+        bg: S.page === "market" && m.id === viewM.id ? "#161b24" : "transparent",
+        bandLeft: "0%",
+        bandWidth: "50%",
+        bandColor: paused ? "rgba(217,160,58,.3)" : "rgba(74,128,240,.42)",
+        markLeft: (pos * 100).toFixed(1) + "%",
+        open: openMarket(m.id),
+        enter: hov.enter,
+        leave: hov.leave
+      };
+    });
+    const gaugeIn = gaugeRows.filter((g) => g.dot === A).length;
+
+    return {
+      accent: A, wide, narrow: !lg,
+
+      barGap: sm ? "8px" : "16px",
+      barPad: sm ? "9px 12px" : "0 18px",
+      navPad: sm ? "7px 9px" : "6px 11px",
+      navLabel: sm ? "none" : "inline",
+      barWrap: sm ? "wrap" : "nowrap",
+      walletChipShow: lg ? "flex" : "none",
+      shellDir: sm ? "column" : "row",
+      hasSidebar: !sm,
+      hasTopbar: sm,
+      toastTop: sm ? "64px" : "18px",
+      pgMarketsGroup: activeKey === "markets",
+
+      collapsed: S.collapsed,
+      sideW: S.collapsed ? "62px" : "228px",
+      sideLabels: S.collapsed ? "none" : "inline",
+      toggleCollapse: () => this.toggleCollapse(),
+      collapseIcon: S.collapsed ? "ph ph-caret-double-right" : "ph ph-caret-double-left",
+      collapseTitle: S.collapsed ? "Expand sidebar" : "Collapse sidebar",
+
+      // Zone gauge: one rail per farmed market showing the reward band and where
+      // your resting bid sits inside it. The whole product is "stay in the band",
+      // so this is the one thing worth keeping permanently on screen.
+      showGauge: !S.collapsed && gaugeRows.length > 0,
+      gauge: gaugeRows,
+      gaugeCount: gaugeIn + "/" + gaugeRows.length + " in zone",
+      gaugeCountFg: gaugeIn === gaugeRows.length ? GREEN : AMBER,
+
+      connLabel: S.probing ? "Connecting" : (S.live ? "Live backend" : "Demo data"),
+      connFg: S.probing ? "#8a939d" : (S.live ? GREEN : "#8b7bf5"),
+      connBeat: S.probing ? "beat 1.1s ease-in-out infinite" : (S.live ? "beat 2s ease-in-out infinite" : "none"),
+      connTitle: S.live
+        ? "Reading live fragments from the Rust app and listening on /activity/stream"
+        : "No backend reachable, rendering bundled fixtures",
+      cacheLabel: cachedCount + " cached",
+      cacheTitle: "Order books warmed on hover, " + cachedCount + " in cache",
+      pagePad: sm ? "16px 14px 90px" : (md ? "20px 22px 90px" : "26px 30px 80px"),
+      gap: sm ? "14px" : (md ? "18px" : "22px"),
+      heroSize: sm ? "32px" : "40px",
+      toastW: sm ? "280px" : "326px",
+      topCols: lg ? "1.35fr minmax(0,1fr)" : "minmax(0,1fr)",
+      kpiCols: lg ? "minmax(0,1fr)" : (md ? "repeat(2,minmax(0,1fr))" : "minmax(0,1fr)"),
+      bottomCols: lg ? "1.55fr minmax(0,1fr)" : "minmax(0,1fr)",
+      setupCols: lg ? "minmax(0,1fr) 340px" : "minmax(0,1fr)",
+      addFlex: sm ? "1 1 100%" : "0 1 300px",
+      ovCols: wide ? "minmax(0,1fr) 92px 92px 84px 104px" : "minmax(0,1fr) 74px 92px",
+      mkCols: lg ? "minmax(0,1fr) 92px 84px 76px 132px 190px" : (md ? "minmax(0,1fr) 76px 72px 68px 118px 96px" : "minmax(0,1fr) 112px 84px"),
+      brCols: wide ? "minmax(0,1fr) 96px 132px 104px 104px 116px" : "minmax(0,1fr) 84px 112px",
+      rwCols: wide ? "minmax(0,1fr) 104px 116px 168px" : "minmax(0,1fr) 84px 104px",
+      bookCols: sm ? "72px minmax(0,1fr) 84px 78px" : "92px minmax(0,1fr) 104px 96px",
+      marketCols: xl ? "minmax(0,1fr) 372px" : (lg ? "minmax(0,1fr) 344px" : (md ? "minmax(0,1fr) 320px" : "minmax(0,1fr)")),
+      showRail: false,
+      tradeTopBorder: sm ? "1px solid #1e2227" : "none",
+
+      nav: navDef.map((n) => {
+        const on = n.key === activeKey;
+        return {
+          label: n.label, go: go(n.key), wt: on ? 600 : 500,
+          fg: on ? "#e8eaed" : MUTED, bg: on ? "#191d23" : "transparent",
+          icon: (on ? "ph-fill ph-" : "ph ph-") + n.icon,
+          iconFg: on ? A : "inherit"
+        };
+      }),
+      goOverview: go("overview"), goMarkets: go("markets"), goBrowse: go("browse"),
+      goActivity: go("activity"), goRewards: go("rewards"), goHistory: go("history"), goSetup: go("setup"),
+
+      pgOverview: S.page === "overview", pgMarkets: S.page === "markets", pgBrowse: S.page === "browse",
+      pgMarket: S.page === "market", pgActivity: S.page === "activity", pgRewards: S.page === "rewards",
+      pgHistory: S.page === "history", pgSetup: S.page === "setup",
+
+      engineOn: S.engineOn, engineOff: !S.engineOn,
+      engineFg: S.engineOn ? GREEN : AMBER,
+      engineBeat: S.engineOn ? "beat 2s ease-in-out infinite" : "none",
+      engineMsg: S.engineOn ? (sm ? "Live" : "Engine running") : (sm ? "Idle" : "Engine idle"),
+      engineShort: S.engineOn ? "Running" : "Idle",
+      wsStatus: S.engineOn ? "connected, 41ms" : "closed",
+      walletChip: S.saved && S.waddr ? S.waddr.slice(0, 6) + "…" + S.waddr.slice(-4) : "No wallet",
+      noWallet: !S.saved,
+
+      askStopAll: askConfirm("Stop all farming?", "Every resting order will be cancelled and the engine will stop quoting. You can restart it from Setup.", "Stop everything", () => {
+        const paused = {};
+        live.forEach((m) => { paused[m.id] = true; });
+        set({ paused, engineOn: false, confirm: null });
+        this.toast("engine", "All farming stopped, " + live.length + " orders cancelled", TONE.err, "ph-fill ph-stop-circle");
+      }),
+
+      ticker: S.ticker.toFixed(2),
+      earnScopeLabel: earnS.scope, earnDelta: earnS.delta, earnSub: earnS.sub,
+      earnRanges: ["7D", "30D", "All"].map((k) => {
+        const c = this.seg(S.earnScope === k);
+        return { label: k, bg: c.bg, fg: c.fg, go: () => { set({ earnScope: k, ticker: EARN[k].total }); this.runTicker(EARN[k].total); } };
+      }),
+      bars: this.bars(),
+
+      deployed: deployedTotal.toLocaleString(),
+      deployedPct: Math.min(100, (deployedTotal / 2400) * 100).toFixed(0) + "%",
+      deployedSub: "Across " + scoring.length + " scoring markets",
+      liveOrders: live.filter((m) => !this.isPaused(m) && m.size !== "$0").length.toString(),
+      liveOrdersSub: live.filter((m) => this.isPaused(m)).length + " paused",
+
+      overviewRows: live.slice(0, 5).map((m) => {
+        const p = this.isPaused(m);
+        const hov = hoverMarket(m.id);
+        return {
+          enter: hov.enter, leave: hov.leave,
+          warmEdge: S.cache[m.id] ? "inset 2px 0 0 rgba(74,128,240,.45)" : "none",
+          q: m.q, sub: p ? "Paused, bid moved " + m.distance : m.resolves + " · " + m.share + " of zone",
+          leg: m.leg + (m.price === "n/a" ? "" : " " + m.price),
+          legFg: p ? AMBER : this.legFg(m.legKind),
+          size: m.size, pnl: p ? "$0.00" : m.earned, pnlFg: p ? "#9aa3ad" : GREEN,
+          st: p ? "Paused" : (m.scoring ? "Scoring" : "Idle"),
+          stFg: p ? AMBER : (m.scoring ? GREEN : "#9aa3ad"),
+          stBg: p ? "rgba(217,160,58,.12)" : (m.scoring ? "rgba(53,192,138,.11)" : "rgba(255,255,255,.04)"),
+          open: openMarket(m.id)
+        };
+      }),
+      recentActs: EVENTS.slice(0, 6).map((e) => ({ msg: e.msg, cat: e.cat, t: e.t, icon: e.icon, tone: TONE[e.tone] })),
+
+      marketCount: live.length + " configured",
+      marketsEmpty: live.length === 0,
+      marketRows: live.map((m) => {
+        const p = this.isPaused(m);
+        const hov = hoverMarket(m.id);
+        return {
+          enter: hov.enter, leave: hov.leave,
+          warmEdge: S.cache[m.id] ? "inset 2px 0 0 rgba(74,128,240,.45)" : "none",
+          q: m.q, leg: m.leg + " · BUY", legFg: p ? AMBER : this.legFg(m.legKind),
+          distance: m.distance, size: m.size,
+          st: p ? "Paused" : (m.scoring ? "Live · " + m.price : "Idle"),
+          stFg: p ? AMBER : (m.scoring ? GREEN : "#9aa3ad"),
+          stBg: p ? "rgba(217,160,58,.12)" : (m.scoring ? "rgba(53,192,138,.11)" : "rgba(255,255,255,.04)"),
+          score: p || !m.scoring ? "Not scoring" : "Scoring",
+          scoreFg: p || !m.scoring ? "#8a939d" : GREEN,
+          pauseLabel: p ? "Resume" : "Pause",
+          pauseIcon: p ? "ph ph-play-circle" : "ph ph-pause-circle",
+          pauseFg: p ? GREEN : AMBER,
+          pauseBg: p ? "rgba(53,192,138,.1)" : "rgba(217,160,58,.1)",
+          pauseBd: p ? "rgba(53,192,138,.26)" : "rgba(217,160,58,.24)",
+          toggle: () => {
+            const next = Object.assign({}, S.paused);
+            next[m.id] = !p;
+            set({ paused: next });
+            // Optimistic: flip locally, then POST every leg id and re-read.
+            if (S.live && S.api) {
+              const ids = m.legIds && m.legIds.length ? m.legIds : [m.id];
+              Promise.all(ids.map((id) => (p ? S.api.resume(id) : S.api.pause(id))))
+                .then(() => this.refreshAll(S.api));
+            }
+            this.toast("market", (p ? "Resumed quoting on " : "Paused quoting on ") + m.q, p ? GREEN : AMBER, p ? "ph-fill ph-play-circle" : "ph-fill ph-pause-circle");
+          },
+          remove: askConfirm("Remove the " + m.leg + " order?", "The resting order on “" + m.q + "” will be cancelled and the market untracked.", "Remove", () => {
+            const removed = Object.assign({}, S.removed);
+            removed[m.id] = true;
+            const added = Object.assign({}, S.added);
+            delete added[m.id];
+            set({ removed, added, confirm: null });
+            if (S.live && S.api) {
+              const ids = m.legIds && m.legIds.length ? m.legIds : [m.id];
+              Promise.all(ids.map((id) => S.api.remove(id))).then(() => this.refreshAll(S.api));
+            }
+            this.toast("order", "Cancelled and untracked " + m.q, TONE.err, "ph-fill ph-trash");
+          }),
+          open: openMarket(m.id)
+        };
+      }),
+
+      addUrl: S.addUrl,
+      onAddUrl: (e) => set({ addUrl: e.target.value }),
+      resolveUrl: () => {
+        if (!S.addUrl.trim()) { this.toast("event", "Paste a Polymarket market URL first", TONE.err, "ph-fill ph-warning-circle"); return; }
+        set({ addUrl: "", page: "browse" });
+        this.toast("event", "Market resolved, pick a side to start farming", GREEN, "ph-fill ph-check-circle");
+      },
+
+      browseQuery: S.browseQuery,
+      onBrowseQuery: (e) => set({ browseQuery: e.target.value, browsePage: 1 }),
+      browseSorts: ["Daily pool", "Tightest spread", "24h volume"].map((label, i) => {
+        const c = this.seg(S.browseSort === i);
+        return { label, bg: c.bg, fg: c.fg, go: () => set({ browseSort: i, browsePage: 1 }) };
+      }),
+      browseEmpty: shown.length === 0,
+      browseRows: shown.map((c) => ({
+        q: c.q, outcomes: c.outcomes, pool: c.pool, spread: c.spread, vol: c.vol,
+        qualify: c.minSize + " min · " + c.maxSpread + " max",
+        qFg: c.qualifies ? GREEN : AMBER,
+        qBg: c.qualifies ? "rgba(53,192,138,.11)" : "rgba(217,160,58,.12)",
+        configure: () => {
+          const added = Object.assign({}, S.added);
+          added[c.id] = true;
+          const removed = Object.assign({}, S.removed);
+          delete removed[c.id];
+          set({ added, removed, page: "market", viewId: c.id });
+          this.toast("event", "Tracking " + c.q, GREEN, "ph-fill ph-check-circle");
+        }
+      })),
+      loadMoreLabel: shown.length < catalog.length ? "Load more" : "No more results",
+      loadMore: () => { if (shown.length < catalog.length) set({ browsePage: S.browsePage + 1 }); },
+
+      scoringCount: scoring.length + " of " + live.length,
+      tracked: live.map((m) => ({
+        q: m.q, leg: this.isPaused(m) ? "Paused" : m.leg, size: m.size,
+        tone: this.isPaused(m) ? AMBER : this.legFg(m.legKind),
+        bg: m.id === viewM.id ? "#161b24" : "transparent",
+        edge: m.id === viewM.id ? "inset 2px 0 0 " + A : "none",
+        fg: m.id === viewM.id ? "#e8eaed" : "#c4cad2",
+        open: openMarket(m.id)
+      })),
+
+      viewQuestion: viewM.q, viewResolves: viewM.resolves, viewLiq: viewM.liq, viewVol: viewM.vol,
+
+      hasPosition: viewM.size !== "$0",
+      posSt: posPaused ? "not scoring" : "scoring",
+      posStFg: posPaused ? AMBER : GREEN,
+      posStBg: posPaused ? "rgba(217,160,58,.11)" : "rgba(53,192,138,.11)",
+      posShare: viewM.share, posEarned: viewM.earned,
+      posLegs: [{
+        label: viewM.leg + " · BUY " + viewM.size,
+        status: posPaused ? "Paused" : "Live · " + viewM.price,
+        icon: posPaused ? "ph-fill ph-x-circle" : "ph-fill ph-check-circle",
+        iconFg: posPaused ? AMBER : GREEN
+      }],
+      posPauseLabel: posPaused ? "Resume" : "Pause",
+      posPauseIcon: posPaused ? "ph ph-play-circle" : "ph ph-pause-circle",
+      posPauseFg: posPaused ? GREEN : AMBER,
+      posPauseBg: posPaused ? "rgba(53,192,138,.1)" : "rgba(217,160,58,.1)",
+      posPauseBd: posPaused ? "rgba(53,192,138,.26)" : "rgba(217,160,58,.24)",
+      togglePos: () => {
+        const next = Object.assign({}, S.paused);
+        next[viewM.id] = !posPaused;
+        set({ paused: next });
+        this.toast("market", (posPaused ? "Resumed quoting on " : "Paused quoting on ") + viewM.q, posPaused ? GREEN : AMBER, posPaused ? "ph-fill ph-play-circle" : "ph-fill ph-pause-circle");
+      },
+      askCancelPos: askConfirm("Remove the " + viewM.leg + " order?", "Your resting order on “" + viewM.q + "” will be cancelled. Rewards stop accruing.", "Remove", () => {
+        const removed = Object.assign({}, S.removed);
+        removed[viewM.id] = true;
+        set({ removed, confirm: null, page: "markets" });
+        this.toast("order", "Order cancelled on " + viewM.q, TONE.err, "ph-fill ph-x-circle");
+      }),
+
+      book: LEVELS.map((l) => {
+        const inZone = l.c >= 60.5 && l.c <= 66.5;
+        const yours = Math.abs(l.c - priceNum) < 0.05;
+        const isBid = l.side === "bid";
+        const barCol = isBid ? "rgba(53,192,138,.3)" : "rgba(232,89,94,.3)";
+        return {
+          price: l.c.toFixed(1), shares: l.sh.toLocaleString(),
+          cum: yours ? "your order" : l.cum,
+          cumFg: yours ? A : "#9aa3ad",
+          cumSize: yours ? "10px" : "12.5px",
+          cumWt: yours ? 600 : 400,
+          priceFg: isBid ? GREEN : RED,
+          priceWt: l.best ? 600 : 400,
+          bar: "linear-gradient(to right," + barCol + " " + l.pct + "%,transparent " + l.pct + "%)",
+          rowBg: yours ? "rgba(74,128,240,.12)" : (inZone && showZone ? "rgba(74,128,240,.045)" : "transparent"),
+          rowEdge: yours ? "inset 0 0 0 1px " + A : (inZone && showZone ? "inset 2px 0 0 rgba(74,128,240,.55)" : "none"),
+          cursor: isBid ? "pointer" : "default",
+          showSpread: !!l.spreadAfter,
+          pick: () => { if (isBid) set({ price: l.c.toFixed(1) }); }
+        };
+      }),
+
+      groups: ["0.1¢", "0.5¢", "1¢"].map((label, i) => {
+        const c = this.seg(S.group === i);
+        return { label, bg: c.bg, fg: c.fg, go: () => set({ group: i }) };
+      }),
+      ranges: ["1D", "1W", "All"].map((label, i) => {
+        const c = this.seg(S.range === i);
+        return { label, bg: c.bg, fg: c.fg, go: () => set({ range: i }) };
+      }),
+      rangeCaption: ["range 62 to 65¢", "range 59 to 66¢", "range 58 to 67¢"][S.range],
+      chart: this.chart(),
+
+      sideLabel: S.side === 0 ? "Yes" : "No",
+      pickA: () => set({ side: 0 }), pickB: () => set({ side: 1 }),
+      aBg: S.side === 0 ? "#252b33" : "transparent", aFg: S.side === 0 ? "#e8eaed" : MUTED,
+      bBg: S.side === 1 ? "#252b33" : "transparent", bFg: S.side === 1 ? "#e8eaed" : MUTED,
+      setOne: () => set({ both: false }), setBoth: () => set({ both: true }),
+      oneBg: !S.both ? "#252b33" : "transparent", oneFg: !S.both ? "#e8eaed" : MUTED,
+      bothBg: S.both ? "#252b33" : "transparent", bothFg: S.both ? "#e8eaed" : MUTED,
+      splitNote: S.both ? " · split across both sides" : "",
+
+      price: S.price, size: S.size,
+      shares: priceNum > 0 && sizeNum > 0 ? Math.round((S.both ? sizeNum / 2 : sizeNum) / (priceNum / 100)).toString() : "",
+      onPrice: (e) => set({ price: e.target.value }),
+      onSize: (e) => set({ size: e.target.value }),
+      onShares: (e) => {
+        const sh = parseFloat(e.target.value) || 0;
+        if (sh > 0 && priceNum > 0) set({ size: (sh * (priceNum / 100) * (S.both ? 2 : 1)).toFixed(0) });
+      },
+      useSuggested: () => set({ price: "62.0" }),
+
+      advanced: S.advanced,
+      advIcon: S.advanced ? "ph ph-caret-down" : "ph ph-caret-right",
+      toggleAdvanced: () => set({ advanced: !S.advanced }),
+      vol: S.vol, onVol: (e) => set({ vol: e.target.value }),
+      minDepth: S.minDepth, onMinDepth: (e) => set({ minDepth: e.target.value }),
+      expires: S.expires, onExpires: (e) => set({ expires: e.target.value }),
+
+      markerLeft: (18 + ((Math.max(56, Math.min(69, priceNum)) - 60.5) / 6) * 46).toFixed(1) + "%",
+      markerColor: q.ok ? A : AMBER,
+      zoneTrack: showZone ? "rgba(74,128,240,.6)" : "#2b3239",
+      zoneMsg: q.ok ? "In zone, " + (q.maxSpread - q.fromMid).toFixed(1) + "¢ headroom" : (q.inZone ? "In zone, too small" : "Outside the zone"),
+      zoneFg: q.ok ? GREEN : AMBER,
+      zoneBg: q.ok ? "rgba(53,192,138,.11)" : "rgba(217,160,58,.12)",
+
+      qualBg: q.ok ? "rgba(53,192,138,.08)" : "rgba(217,160,58,.09)",
+      qualEdge: "inset 0 0 0 1px " + (q.ok ? "rgba(53,192,138,.26)" : "rgba(217,160,58,.28)"),
+      qualFg: q.ok ? "#4ed3a0" : "#e6b45c",
+      qualIcon: React.createElement("i", {
+        className: q.ok ? "ph-fill ph-check-circle" : "ph-fill ph-warning-circle",
+        style: { fontSize: 17, color: q.ok ? "#4ed3a0" : "#e6b45c", marginTop: 1, flex: "none" }
+      }),
+      qualTitle: q.ok ? "Qualifies for rewards" : "Will not score",
+      qualDetail: q.ok ? Math.floor(q.sh) + " shares per side, " + q.fromMid.toFixed(1) + "¢ below the midpoint" : q.reasons.join(" · "),
+      riskLabel: q.fromMid <= 1.0 ? "High" : (q.fromMid <= 2.0 ? "Medium" : "Low"),
+      riskFg: q.fromMid <= 1.0 ? RED : (q.fromMid <= 2.0 ? AMBER : GREEN),
+
+      startLabel: q.ok ? "Start farming" : "Start anyway",
+      startFarming: () => {
+        const next = Object.assign({}, S.paused);
+        next[viewM.id] = false;
+        set({ paused: next, engineOn: true });
+
+        if (S.live && S.api) {
+          // Field names match StartFarmingForm in web/markets.rs exactly.
+          S.api.startFarming({
+            slug: viewM.slug || S.viewId,
+            side: S.side,
+            sides: S.both ? "both" : "one",
+            price: S.price,
+            order_size: S.size,
+            min_depth_cents: S.minDepth,
+            expires_in: S.expires,
+            max_volatility_cents: S.vol
+          }).then((r) => {
+            if (r && r.ok) {
+              this.toast("order", "Quoting " + Math.floor(q.sh) + " shares at " + S.price + "¢", GREEN, "ph-fill ph-check-circle");
+              this.refreshAll(S.api);
+            } else {
+              this.toast("order", (r && r.error) || "Could not start farming", TONE.err, "ph-fill ph-x-circle");
+            }
+          });
+          return;
+        }
+
+        if (q.ok) this.toast("order", "Quoting " + Math.floor(q.sh) + " shares at " + S.price + "¢ on " + viewM.q, GREEN, "ph-fill ph-check-circle");
+        else this.toast("order", "Order placed but it will not score: " + q.reasons[0], AMBER, "ph-fill ph-warning-circle");
+      },
+
+      actCount: filtered.length + " events",
+      actEmpty: filtered.length === 0,
+      actFilters: [["all", "All"], ["info", "Info"], ["warn", "Warnings"], ["error", "Errors"]].map((p) => {
+        const c = this.chip(S.actFilter === p[0]);
+        return { label: p[1], bg: c.bg, fg: c.fg, bd: c.bd, go: () => set({ actFilter: p[0] }) };
+      }),
+      actGroups: groups,
+
+      rewardHint: S.engineOn ? "Today so far: $4.62 (still accruing, finalizes after midnight UTC)" : "",
+      rewardsEmpty: rewardMarkets.length === 0,
+      rewardRows: rewardMarkets.map((m) => {
+        const p = this.isPaused(m);
+        return {
+          q: m.q, share: m.share,
+          today: p ? "$0.00" : m.earned, todayFg: p ? "#9aa3ad" : GREEN,
+          qualify: m.minSize + " min · " + m.maxSpread + " max spread",
+          open: openMarket(m.id)
+        };
+      }),
+
+      histRanges: ["7D", "30D", "All"].map((label, i) => {
+        const c = this.seg(S.histRange === i);
+        return { label, bg: c.bg, fg: c.fg, go: () => set({ histRange: i }) };
+      }),
+      histTotal: "$" + histSum.toFixed(2) + " over " + histRows.length + " days",
+      histEmpty: histRows.length === 0,
+      histRows: histRows.map((h) => ({ date: h.date, total: h.total })),
+
+      configured: S.saved,
+      keyType: S.showKey ? "text" : "password",
+      keyIcon: S.showKey ? "ph ph-eye-slash" : "ph ph-eye",
+      keyAria: S.showKey ? "Hide private key" : "Show private key",
+      toggleKey: () => set({ showKey: !S.showKey }),
+      pkey: S.pkey,
+      onPkey: (e) => {
+        const v = e.target.value;
+        const body = v.trim().replace(/^0[xX]/, "");
+        const complete = body.length === 64 && /^[0-9a-fA-F]+$/.test(body);
+        set({ pkey: v, saved: false, waddr: complete ? S.waddr : "" });
+        // Mirrors setup.html: the on-chain lookup fires only once the key is a
+        // complete 64 hex chars, debounced the same 150ms.
+        if (complete) {
+          clearTimeout(this._detect);
+          this._detect = setTimeout(() => {
+            if (this.state.live && this.state.api) {
+              this.state.api.detectWallet(v).then((r) => {
+                if (r && r.proxyWallet) this.setState({ waddr: r.proxyWallet });
+              });
+            } else if (!this.state.waddr) {
+              this.setState({ waddr: "0x7a4c9e2b1d8f5a3c6e0b4d7f2a9c3f21" });
+            }
+          }, 150);
+        }
+      },
+      keyComplete: ks === "complete",
+      keyBorder: ks === "invalid" ? "rgba(232,89,94,.5)" : "#23272d",
+      keyNote: ks === "invalid" ? "Invalid private key" : (ks === "complete" ? "Checking on-chain, proxy wallet found" : ""),
+      keyNoteFg: ks === "invalid" ? "#f0787c" : "#4ed3a0",
+      keyNoteIcon: ks === "invalid" ? "ph-fill ph-warning-circle" : "ph-fill ph-check-circle",
+      waddr: S.waddr, onWaddr: (e) => set({ waddr: e.target.value, saved: false }),
+
+      saveLabel: S.saved ? "Saved" : "Save",
+      saveIcon: S.saved ? "ph-fill ph-check-circle" : "ph ph-floppy-disk",
+      saveFg: S.saved ? GREEN : "#08090b",
+      saveBg: S.saved ? "rgba(53,192,138,.1)" : A,
+      saveBd: S.saved ? "rgba(53,192,138,.26)" : A,
+      saveCursor: S.saved ? "default" : "pointer",
+      saveWallet: () => {
+        if (S.saved) return;
+        if (ks !== "complete") { this.toast("wallet", "Enter a valid 64 character private key first", TONE.err, "ph-fill ph-warning-circle"); return; }
+        if (!S.waddr.trim()) { this.toast("wallet", "A wallet address is required", TONE.err, "ph-fill ph-warning-circle"); return; }
+        if (S.live && S.api) {
+          S.api.saveWallet(S.pkey, S.waddr).then((r) => {
+            if (r && r.ok) { set({ saved: true }); this.toast("wallet", "Wallet saved, encrypted at rest", GREEN, "ph-fill ph-lock-key"); }
+            else this.toast("wallet", (r && r.error) || "Could not save the wallet", TONE.err, "ph-fill ph-x-circle");
+          });
+          return;
+        }
+        set({ saved: true });
+        this.toast("wallet", "Wallet saved, encrypted at rest", GREEN, "ph-fill ph-lock-key");
+      },
+
+      toggleEngine: () => {
+        set({ engineOn: !S.engineOn });
+        this.toast("engine", S.engineOn ? "Shutting down, quoting halted" : "Engine started, markets loaded", S.engineOn ? AMBER : GREEN, S.engineOn ? "ph-fill ph-pause-circle" : "ph-fill ph-play-circle");
+      },
+      engBtnLabel: S.engineOn ? "Stop engine" : "Start engine",
+      engBtnIcon: S.engineOn ? "ph ph-pause-circle" : "ph ph-play-circle",
+      engBtnFg: S.engineOn ? AMBER : GREEN,
+      engBtnBg: S.engineOn ? "rgba(217,160,58,.1)" : "rgba(53,192,138,.1)",
+      engBtnBd: S.engineOn ? "rgba(217,160,58,.24)" : "rgba(53,192,138,.26)",
+      logout: askConfirm("Log out of polyfarmer?", "The engine keeps running locally. You will need your password to sign back in.", "Log out", () => {
+        set({ confirm: null });
+        this.toast("wallet", "Signed out, engine still running locally", MUTED, "ph-fill ph-sign-out");
+      }),
+
+      toasts: S.toasts.map((t) => ({
+        cat: t.cat, msg: t.msg, tone: t.tone, icon: t.icon,
+        close: () => set({ toasts: S.toasts.filter((x) => x.id !== t.id) })
+      })),
+
+      alertsOpen: S.alertsOpen,
+      toggleAlerts: () => set({ alertsOpen: !S.alertsOpen }),
+      alertCount: EVENTS.filter((e) => e.level !== "info").length.toString(),
+      dockBg: S.alertsOpen ? A : "#191d23",
+      dockFg: S.alertsOpen ? "#08090b" : "#e8eaed",
+      alerts: EVENTS.filter((e) => e.level !== "info").map((e) => ({ msg: e.msg, cat: e.cat, t: e.t, icon: e.icon, tone: TONE[e.tone] })),
+
+      confirmOpen: !!S.confirm,
+      confirmTitle: S.confirm ? S.confirm.title : "",
+      confirmBody: S.confirm ? S.confirm.body : "",
+      confirmAction: S.confirm ? S.confirm.action : "",
+      confirmYes: () => { if (S.confirm) S.confirm.onYes(); },
+      confirmNo: () => set({ confirm: null })
+    };
+  }
+}
+
+</script>
+</body>
+</html>
