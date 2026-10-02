@@ -14,6 +14,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tower_sessions::Session;
 
+use crate::rewards::portfolio;
 use crate::storage::load_reward_history;
 use crate::types::RewardHistoryFile;
 
@@ -121,6 +122,46 @@ pub async fn page(State(state): State<WebState>, session: Session) -> Html<Strin
             .collect(),
         history_error,
     })
+}
+
+#[derive(Template)]
+#[template(path = "_alltime_kpi.html")]
+struct AllTimeTemplate {
+    /// "$1,234.56" — `None` when it couldn't be loaded.
+    total: Option<String>,
+    sub: String,
+}
+
+/// GET /rewards/alltime — every payout ever received, from Polymarket's
+/// activity feed (not just what this bot has logged since it started).
+pub async fn alltime(State(state): State<WebState>) -> Html<String> {
+    let Some(user) = state.wallet_address() else {
+        return render(&AllTimeTemplate { total: None, sub: "configure your wallet".into() });
+    };
+    let res = state
+        .caches
+        .reward_payouts
+        .get_or_fetch(&user, || async {
+            tokio::time::timeout(Duration::from_secs(30), portfolio::reward_payouts(&user))
+                .await
+                .map_err(|_| eyre::eyre!("timeout"))?
+        })
+        .await;
+    match res {
+        Ok(payouts) => {
+            let t = portfolio::summarize_rewards(&payouts);
+            let since = t
+                .first_ts
+                .and_then(|ts| chrono::DateTime::<Utc>::from_timestamp(ts, 0))
+                .map(|d| format!(" since {}", d.format("%b %-d, %Y")))
+                .unwrap_or_default();
+            render(&AllTimeTemplate {
+                total: Some(format!("${:.2}", t.total)),
+                sub: format!("{} payout{}{since}", t.payouts, if t.payouts == 1 { "" } else { "s" }),
+            })
+        }
+        Err(e) => render(&AllTimeTemplate { total: None, sub: format!("couldn't load: {e}") }),
+    }
 }
 
 /// The old standalone history page now lives on /rewards.

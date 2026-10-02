@@ -8,10 +8,13 @@
   </div>
 </div>
 <div class="stack-lg">
-  <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+  <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
     <div class="kpi"><div class="k">Last 7 days</div><div class="v pos">{{ total_7d }}</div></div>
     <div class="kpi"><div class="k">Last 30 days</div><div class="v pos">{{ total_30d }}</div></div>
     <div class="kpi"><div class="k">Best day (30d)</div><div class="v">{{ best_day }}</div></div>
+    <div class="kpi" hx-get="/rewards/alltime" hx-trigger="load" hx-swap="outerHTML">
+      <div class="k">All time</div><div class="skel v"></div>
+    </div>
   </div>
 
   <section class="panel">

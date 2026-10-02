@@ -93,6 +93,78 @@ pub struct Activity {
     pub transaction_hash: String,
 }
 
+/// A page with its pagination block (activity is cursor-paged).
+#[derive(Debug, Deserialize)]
+struct CursorPage<T> {
+    #[serde(default = "Vec::new")]
+    data: Vec<T>,
+    #[serde(default)]
+    pagination: Pagination,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Pagination {
+    #[serde(default)]
+    has_more: bool,
+    #[serde(default)]
+    next_cursor: Option<String>,
+}
+
+/// Rewards are one payout per day, so even years of history is a few hundred
+/// rows — but never loop unboundedly on an upstream that misbehaves.
+const REWARD_PAGE_LIMIT: u32 = 500;
+const REWARD_MAX_PAGES: usize = 20;
+
+/// Every liquidity-reward payout ever paid to `user` (newest first), from the
+/// activity feed's `REWARD` entries. NB: the cursor query parameter is
+/// `cursor` — the response field is `next_cursor`, but sending that name back
+/// is silently ignored and returns page 1 again.
+pub async fn reward_payouts(user: &str) -> Result<Vec<Activity>> {
+    let mut all: Vec<Activity> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..REWARD_MAX_PAGES {
+        let mut req = HTTP.get(format!("{DATA_API}/activity")).query(&[
+            ("user", user),
+            ("type", "REWARD"),
+            ("limit", &REWARD_PAGE_LIMIT.to_string()),
+        ]);
+        if let Some(c) = &cursor {
+            req = req.query(&[("cursor", c)]);
+        }
+        let page = req.send().await?.error_for_status()?.json::<CursorPage<Activity>>().await?;
+        // Stop if a page adds nothing new (cursor ignored / upstream looping).
+        let mut fresh = 0;
+        for a in page.data {
+            if a.kind == "REWARD" && seen.insert(format!("{}:{}", a.transaction_hash, a.timestamp)) {
+                all.push(a);
+                fresh += 1;
+            }
+        }
+        match page.pagination.next_cursor {
+            Some(c) if page.pagination.has_more && fresh > 0 => cursor = Some(c),
+            _ => break,
+        }
+    }
+    Ok(all)
+}
+
+/// All-time reward summary over a set of payouts.
+pub struct RewardTotals {
+    pub total: Decimal,
+    pub payouts: usize,
+    /// Unix seconds of the earliest payout.
+    pub first_ts: Option<i64>,
+}
+
+pub fn summarize_rewards(payouts: &[Activity]) -> RewardTotals {
+    RewardTotals {
+        total: payouts.iter().map(|a| a.usdc_size).sum(),
+        payouts: payouts.len(),
+        first_ts: payouts.iter().map(|a| a.timestamp).min(),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ValueResp {
     data: ValueData,
@@ -161,6 +233,18 @@ mod tests {
         let a: Page<Activity> = serde_json::from_str(act).unwrap();
         assert_eq!(a.data[0].kind, "TRADE");
         assert_eq!(a.data[0].side, "BUY");
+
+        let page: CursorPage<Activity> = serde_json::from_str(
+            r#"{"data":[{"timestamp":10,"type":"REWARD","usdc_size":1.5,"transaction_hash":"0xa"},
+                        {"timestamp":20,"type":"REWARD","usdc_size":2.25,"transaction_hash":"0xb"}],
+                "pagination":{"has_more":true,"next_cursor":"abc"}}"#,
+        )
+        .unwrap();
+        assert!(page.pagination.has_more);
+        assert_eq!(page.pagination.next_cursor.as_deref(), Some("abc"));
+        let t = summarize_rewards(&page.data);
+        assert_eq!(t.total.to_string(), "3.75");
+        assert_eq!((t.payouts, t.first_ts), (2, Some(10)));
 
         let v: ValueResp = serde_json::from_str(r#"{"data":{"proxy_wallet":"0x1","value":2481.2971}}"#).unwrap();
         assert_eq!(v.data.value.to_string(), "2481.2971");

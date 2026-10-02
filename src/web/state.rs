@@ -28,6 +28,7 @@ const SCORING_TTL: Duration = Duration::from_secs(15);
 const BALANCE_TTL: Duration = Duration::from_secs(15);
 const PORTFOLIO_TTL: Duration = Duration::from_secs(15);
 const REWARDS_TTL: Duration = Duration::from_secs(60);
+const PAYOUTS_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Clone)]
 pub struct WebState {
@@ -82,6 +83,8 @@ pub struct Caches {
     pub activity: Arc<TtlCache<Vec<Activity>>>,
     /// Today's accrued reward total (single key). Polymarket updates it slowly.
     pub rewards_today: Arc<TtlCache<Decimal>>,
+    /// Full reward payout history (one payout a day — slow-moving).
+    pub reward_payouts: Arc<TtlCache<Vec<Activity>>>,
 }
 
 impl Default for Caches {
@@ -93,6 +96,7 @@ impl Default for Caches {
             value: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
             activity: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
             rewards_today: Arc::new(TtlCache::new(REWARDS_TTL)),
+            reward_payouts: Arc::new(TtlCache::new(PAYOUTS_TTL)),
         }
     }
 }
