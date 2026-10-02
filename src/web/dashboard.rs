@@ -219,7 +219,7 @@ fn shares_label(c: &MarketConfig, live_price: Option<Decimal>, best_bid: Option<
         return None;
     }
     let shares = (c.order_size / price).round_dp(0);
-    Some(format!("{}{shares} sh", if estimated { "~" } else { "" }))
+    Some(format!("{}{shares} shares", if estimated { "~" } else { "" }))
 }
 
 fn leg_row(
@@ -526,9 +526,9 @@ mod tests {
             expires_at: Utc::now(), paused: false, benchmark_bid: None, max_volatility: None,
         };
         // Live at 18c → 100 / 0.18 = 556 shares, exact.
-        assert_eq!(shares_label(&c, Some(dec!(0.18)), Some(dec!(0.20))).as_deref(), Some("556 sh"));
+        assert_eq!(shares_label(&c, Some(dec!(0.18)), Some(dec!(0.20))).as_deref(), Some("556 shares"));
         // Not live: best bid 20c − 2c = 18c → same, marked as an estimate.
-        assert_eq!(shares_label(&c, None, Some(dec!(0.20))).as_deref(), Some("~556 sh"));
+        assert_eq!(shares_label(&c, None, Some(dec!(0.20))).as_deref(), Some("~556 shares"));
         // Nothing to go on.
         assert_eq!(shares_label(&c, None, None), None);
         // Degenerate price.
