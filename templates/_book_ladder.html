@@ -6,7 +6,7 @@
 <div class="book-side asks">
   {% for r in ladder.asks %}
   <div class="book-row ask{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}" data-price="{{ r.price_raw }}">
-    <span class="bar" style="width:{{ r.depth_pct }}%"></span><span class="px">{{ r.price_cents }}¢</span><span class="sz">{{ r.size }}</span><span class="tot">{{ r.total }}</span>
+    <span class="bar" style="width:{{ r.depth_pct }}%"></span><span class="px">{{ r.price_cents }}¢</span><span class="sz">{{ r.size }}</span><span class="tot">{{ r.total }}</span><span class="usd">{{ r.total_usd }}</span>
   </div>
   {% endfor %}
   {% if ladder.asks.is_empty() %}<div class="book-row empty-row">No asks</div>{% endif %}
@@ -19,7 +19,7 @@
 <div class="book-side bids">
   {% for r in ladder.bids %}
   <div class="book-row bid{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}{% if r.is_live_mine %} live-mine{% endif %}" data-price="{{ r.price_raw }}" data-action="book-price">
-    <span class="bar" style="width:{{ r.depth_pct }}%"></span><span class="px">{{ r.price_cents }}¢</span><span class="sz">{{ r.size }}</span><span class="tot">{{ r.total }}</span>
+    <span class="bar" style="width:{{ r.depth_pct }}%"></span><span class="px">{{ r.price_cents }}¢</span><span class="sz">{{ r.size }}</span><span class="tot">{{ r.total }}</span><span class="usd">{{ r.total_usd }}</span>
   </div>
   {% endfor %}
   {% if ladder.bids.is_empty() %}<div class="book-row empty-row">No bids</div>{% endif %}

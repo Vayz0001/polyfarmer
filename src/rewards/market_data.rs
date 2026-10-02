@@ -330,6 +330,7 @@ pub struct LadderRow {
     pub price_raw: String,    // "0.34" — the value click-to-set writes
     pub size: String,         // shares at this level, compact
     pub total: String,        // cumulative shares from the best level, compact
+    pub total_usd: String,    // cumulative USD depth (Σ price × size) from the best level
     pub depth_pct: u32,       // 0-100, cumulative-depth bar width
     pub side: &'static str,   // "ask" | "bid"
     pub in_band: bool,        // within the reward-qualifying zone
@@ -414,17 +415,25 @@ pub fn build_ladder(
     };
     let bid_cum = cum(&bid_levels);
     let ask_cum = cum(&ask_levels);
+    // Cumulative USD depth: what it would cost / is resting from the best level out.
+    let cum_usd = |levels: &[(Decimal, Decimal)]| -> Vec<Decimal> {
+        let mut acc = dec!(0);
+        levels.iter().map(|(p, s)| { acc += p * s; acc }).collect()
+    };
+    let bid_usd = cum_usd(&bid_levels);
+    let ask_usd = cum_usd(&ask_levels);
     let max_level = bid_levels.iter().chain(ask_levels.iter())
         .map(|(_, s)| *s).fold(dec!(0), Decimal::max);
 
     let pct = |s: Decimal| -> u32 {
         if max_level <= dec!(0) { 0 } else { ((s / max_level) * dec!(100)).round().to_u32().unwrap_or(0).min(100) }
     };
-    let row = |p: Decimal, s: Decimal, cumv: Decimal, side: &'static str, is_best: bool| LadderRow {
+    let row = |p: Decimal, s: Decimal, cumv: Decimal, usd: Decimal, side: &'static str, is_best: bool| LadderRow {
         price_cents: format!("{:.1}", p * dec!(100)),
         price_raw: p.normalize().to_string(),
         size: fmt_shares(s),
         total: fmt_shares(cumv),
+        total_usd: fmt_usd(usd),
         depth_pct: pct(s),
         side,
         in_band: p > band_lo && p < band_hi,
@@ -433,12 +442,12 @@ pub fn build_ladder(
     };
 
     // asks displayed high→low so the best ask sits just above the midpoint line.
-    let asks: Vec<LadderRow> = ask_levels.iter().zip(ask_cum.iter()).enumerate()
-        .map(|(i, ((p, s), c))| row(*p, *s, *c, "ask", i == 0))
+    let asks: Vec<LadderRow> = ask_levels.iter().zip(ask_cum.iter()).zip(ask_usd.iter()).enumerate()
+        .map(|(i, (((p, s), c), u))| row(*p, *s, *c, *u, "ask", i == 0))
         .rev()
         .collect();
-    let bids: Vec<LadderRow> = bid_levels.iter().zip(bid_cum.iter()).enumerate()
-        .map(|(i, ((p, s), c))| row(*p, *s, *c, "bid", i == 0))
+    let bids: Vec<LadderRow> = bid_levels.iter().zip(bid_cum.iter()).zip(bid_usd.iter()).enumerate()
+        .map(|(i, (((p, s), c), u))| row(*p, *s, *c, *u, "bid", i == 0))
         .collect();
 
     let spread = match (book.best_bid, book.best_ask) {
@@ -710,5 +719,15 @@ mod tests {
         let marked: Vec<_> = l.bids.iter().filter(|r| r.is_live_mine).map(|r| r.price_raw.clone()).collect();
         assert_eq!(marked, vec!["0.38".to_string()]);
         assert!(l.asks.iter().all(|r| !r.is_live_mine));
+    }
+
+    #[test]
+    fn ladder_shows_cumulative_usd_depth() {
+        // bids: 100 @ 0.40 = $40, then 50 @ 0.38 = $19 → cumulative $40, $59.
+        let b = book(dec!(0.40), &[(dec!(0.40), dec!(100)), (dec!(0.38), dec!(50))]);
+        let l = build_ladder(&b, dec!(0.41), dec!(3), 10, &[], dec!(0.01));
+        assert_eq!(l.bids[0].total_usd, "$40");
+        assert_eq!(l.bids[1].total_usd, "$59");
+        assert_eq!(l.bids[1].total, "150");
     }
 }

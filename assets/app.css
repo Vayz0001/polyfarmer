@@ -321,9 +321,9 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .mv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 6px; color: var(--muted); font-size: 12px; }
 .mv-meta .sep { width: 3px; height: 3px; border-radius: 50%; background: var(--faint); }
 .book-panel .panel-head { position: relative; }
-.book-cols, .book-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 8px; padding: 0 14px; }
+.book-cols, .book-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; padding: 0 14px; }
 .book-cols { height: 28px; align-items: center; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); border-bottom: 1px solid var(--line); }
-.book-cols span + span, .book-row .sz, .book-row .tot { text-align: right; }
+.book-cols span + span, .book-row .sz, .book-row .tot, .book-row .usd { text-align: right; }
 #book { height: 460px; overflow-y: auto; position: relative; overscroll-behavior: contain; }
 .book-row { position: relative; height: 22px; align-items: center; font: 12px var(--mono); font-variant-numeric: tabular-nums; }
 .book-row > span { position: relative; z-index: 1; }
@@ -331,6 +331,7 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .book-row.ask .bar { background: var(--ask); } .book-row.bid .bar { background: var(--bid); }
 .book-row.ask .px { color: var(--ask); } .book-row.bid .px { color: var(--bid); }
 .book-row .sz, .book-row .tot { color: var(--fg-2); }
+.book-row .usd { color: var(--muted); }
 .book-row.best .px { font-weight: 700; }
 .book-row.bid { cursor: pointer; }
 .book-row:hover { background: var(--hover); }

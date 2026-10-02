@@ -111,15 +111,25 @@ pub async fn engine_status(state: &WebState) -> EngineStatus {
     }
 }
 
-/// pUSD balance, stale-while-revalidate — never blocks a render. `None` until
-/// the engine is running and the first read lands.
+/// pUSD balance of the **Polymarket wallet** (the funder address you trade
+/// from — not the signer/EOA key's own address), stale-while-revalidate so it
+/// never blocks a render. Read on-chain (`balanceOf`); the CLOB's cached view is
+/// only a fallback if every RPC fails. `None` until the first read lands.
 pub async fn balance_swr(state: &WebState) -> Option<rust_decimal::Decimal> {
-    let (executor, _) = state.engine_handle.get().await?;
+    let wallet: alloy::primitives::Address = state.wallet_address()?.parse().ok()?;
+    let rpc = state.polygon_rpc_url.clone();
+    let executor = state.engine_handle.get().await.map(|(e, _)| e);
     state.caches.balance.get_swr("balance", move || async move {
-        tokio::time::timeout(Duration::from_secs(8), executor.collateral_balance())
-            .await
-            .map_err(|_| eyre::eyre!("timeout"))
-            .and_then(|r| r)
+        match crate::wallet_detect::pusd_balance(wallet, rpc.as_deref()).await {
+            Ok(v) => Ok(v),
+            Err(e) => match executor {
+                Some(ex) => tokio::time::timeout(Duration::from_secs(8), ex.collateral_balance())
+                    .await
+                    .map_err(|_| eyre::eyre!("timeout"))
+                    .and_then(|r| r),
+                None => Err(e),
+            },
+        }
     })
 }
 
