@@ -465,9 +465,36 @@
   document.addEventListener("input", function (e) { if (e.target.matches && e.target.matches("[data-keycheck]")) onKeyInput(e.target); });
   document.addEventListener("scroll", function (e) { if (MV && e.target && e.target.id === "book") MV.scrolled = true; }, true);
 
+  // ── tooltips: one floating bubble on <body>, never clipped by a container ──
+  function initTips() {
+    var tip = document.createElement("div");
+    tip.id = "pf-tip"; tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+    function show(el) {
+      var text = el.getAttribute("data-tip"); if (!text) return;
+      tip.textContent = text;
+      tip.style.left = "0px"; tip.style.top = "0px";
+      var r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+      var left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), innerWidth - w - 8);
+      var top = r.top - h - 8;
+      if (top < 8) top = r.bottom + 8;            // no room above → open below
+      tip.style.left = left + "px"; tip.style.top = top + "px";
+      tip.classList.add("show");
+    }
+    function hide() { tip.classList.remove("show"); }
+    document.addEventListener("mouseover", function (e) { var el = e.target.closest && e.target.closest(".tip"); if (el) show(el); });
+    document.addEventListener("mouseout", function (e) { if (e.target.closest && e.target.closest(".tip")) hide(); });
+    document.addEventListener("focusin", function (e) { var el = e.target.closest && e.target.closest(".tip"); if (el) show(el); });
+    document.addEventListener("focusout", hide);
+    document.addEventListener("scroll", hide, true);
+    // Fragments re-render under the cursor; drop the bubble so it can't get stuck.
+    document.body.addEventListener("htmx:beforeSwap", hide);
+  }
+
   // ── boot ────────────────────────────────────────────────────────────────
   function boot() {
     syncPrefSegs();
+    initTips();
     initModal();
     initDrawer();
     initWindow();

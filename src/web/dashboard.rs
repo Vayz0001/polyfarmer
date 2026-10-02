@@ -106,6 +106,9 @@ pub struct LegRow {
     /// How the engine places this leg: "2.0¢ below best bid".
     pub peg: String,
     pub size: String,
+    /// Shares resting for this leg: exact for a live order ("556"), an
+    /// estimate otherwise ("~556", from the current best bid and distance).
+    pub shares: Option<String>,
     pub min_depth: String,
     pub expires: String,
     pub expires_title: String,
@@ -202,6 +205,23 @@ pub(super) async fn build_rows(state: &WebState) -> Vec<MarketRow> {
         .collect()
 }
 
+/// Shares behind a leg's USD size, as the engine would compute them
+/// (`Executor::shares_from_usd`: size / price, 2dp). Uses the live order's
+/// price when there is one; otherwise estimates the next bid from the book
+/// (best bid − distance, snapped down to a tick) and prefixes "~".
+fn shares_label(c: &MarketConfig, live_price: Option<Decimal>, best_bid: Option<Decimal>) -> Option<String> {
+    let (price, estimated) = match (live_price, best_bid) {
+        (Some(p), _) => (p, false),
+        (None, Some(bb)) => (crate::engine::orderbook::TokenBook::snap_to_tick(bb - c.distance, c.tick_size), true),
+        _ => return None,
+    };
+    if price <= dec!(0) {
+        return None;
+    }
+    let shares = (c.order_size / price).round_dp(0);
+    Some(format!("{}{shares} sh", if estimated { "~" } else { "" }))
+}
+
 fn leg_row(
     c: &MarketConfig,
     slot: usize,
@@ -255,6 +275,7 @@ fn leg_row(
         scoring: is_scoring,
         peg: format!("{}¢ below bid", cents(c.distance)),
         size: format!("${}", c.order_size.normalize()),
+        shares: shares_label(c, live.as_ref().map(|(_, p)| *p), top.and_then(|(b, _)| *b)),
         min_depth: if c.min_depth_between > dec!(0) { usd(c.min_depth_between) } else { "—".to_string() },
         expires: until(c.expires_at),
         expires_title: c.expires_at.format("%b %-d, %Y %H:%M UTC").to_string(),
@@ -494,6 +515,24 @@ mod tests {
         assert_eq!(until(Utc::now() + chrono::Duration::days(36500)), "never");
         assert!(until(Utc::now() + chrono::Duration::hours(50)).starts_with("2d"));
         assert!(until(Utc::now() + chrono::Duration::minutes(90)).starts_with("1h"));
+    }
+
+    #[test]
+    fn shares_follow_the_live_price_or_estimate_from_the_book() {
+        let c = MarketConfig {
+            id: "x".into(), url: String::new(), label: String::new(), condition_id: String::new(),
+            token_id: String::new(), token_label: String::new(), tick_size: dec!(0.01),
+            distance: dec!(0.02), min_depth_between: dec!(0), order_size: dec!(100),
+            expires_at: Utc::now(), paused: false, benchmark_bid: None, max_volatility: None,
+        };
+        // Live at 18c → 100 / 0.18 = 556 shares, exact.
+        assert_eq!(shares_label(&c, Some(dec!(0.18)), Some(dec!(0.20))).as_deref(), Some("556 sh"));
+        // Not live: best bid 20c − 2c = 18c → same, marked as an estimate.
+        assert_eq!(shares_label(&c, None, Some(dec!(0.20))).as_deref(), Some("~556 sh"));
+        // Nothing to go on.
+        assert_eq!(shares_label(&c, None, None), None);
+        // Degenerate price.
+        assert_eq!(shares_label(&c, None, Some(dec!(0.02))), None);
     }
 
     #[test]

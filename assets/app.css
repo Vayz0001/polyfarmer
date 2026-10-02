@@ -218,7 +218,7 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .empty h3 { color: var(--fg); font-size: 14px; font-weight: 600; margin-bottom: 4px; }
 .empty .actions { justify-content: center; margin-top: 14px; }
 .cell-stack { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; }
-.cell-stack small { color: var(--faint); font-size: 11px; }
+.cell-stack small { color: var(--faint); font-size: 11px; white-space: nowrap; }
 .check { color: var(--bid); } .cross { color: var(--ask); }
 
 /* KPIs */
@@ -299,9 +299,10 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 /* tooltips (CSS-only, keyboard accessible) */
 .tip { position: relative; display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line-2); color: var(--faint); font: 600 9px/1 var(--sans); cursor: help; vertical-align: middle; }
 .tip:hover, .tip:focus-visible { color: var(--fg); border-color: var(--muted); outline: none; }
-.tip::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 260px; padding: 8px 10px; background: var(--panel-2); color: var(--fg-2); font: 400 11.5px/1.45 var(--sans); text-align: left; border-radius: var(--r-sm); box-shadow: var(--pop); opacity: 0; visibility: hidden; transition: opacity .12s; z-index: 40; pointer-events: none; }
-.tip.left::after { left: auto; right: -6px; transform: none; }
-.tip:hover::after, .tip:focus-visible::after { opacity: 1; visibility: visible; }
+/* The bubble is a single floating element appended to <body> by app.js (see
+   "tooltips"), so no overflow:auto / sticky container can clip it. */
+#pf-tip { position: fixed; z-index: 2000; width: max-content; max-width: 260px; padding: 8px 10px; background: var(--panel-2); color: var(--fg-2); font: 400 11.5px/1.45 var(--sans); text-align: left; border-radius: var(--r-sm); box-shadow: var(--pop); pointer-events: none; opacity: 0; transition: opacity .1s; }
+#pf-tip.show { opacity: 1; }
 
 /* ── Markets table extras ───────────────────────────────────────────────── */
 .zone { display: inline-flex; align-items: center; gap: 5px; font: 12px var(--mono); }

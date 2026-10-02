@@ -55,7 +55,7 @@
         </span>
       </td>
       <td class="nowrap muted">{{ leg.peg }}{% if let Some(v) = leg.auto_pause %} <span class="tag" title="Auto-pauses if the best bid moves {{ v }} from where it started">±{{ v }}</span>{% endif %}</td>
-      <td class="num">{{ leg.size }}</td>
+      <td class="num"><div class="cell-stack"><span>{{ leg.size }}</span>{% if let Some(s) = leg.shares %}<small>{{ s }}</small>{% endif %}</div></td>
       <td class="num">{{ leg.min_depth }}</td>
       <td class="nowrap"><span class="{% if leg.status_class == "expired" %}neg{% else %}muted{% endif %}" title="{{ leg.expires_title }}">{{ leg.expires }}</span></td>
       <td>
