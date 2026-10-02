@@ -129,20 +129,15 @@ pub struct ViewParams {
     pub sides: Option<String>,
 }
 
-pub struct PresetView {
-    pub key: &'static str,
-    pub label: &'static str,
-    pub price_cents: String,
-    pub weight_pct: String,
-}
-
 /// One outcome's pre-rendered data. Both sides are embedded so switching the
 /// outcome tab is a client-side swap; the live book re-streams for that side.
 pub struct SideView {
     pub idx: usize,
     pub label: String,
     pub price_cents: String,
-    pub presets: Vec<PresetView>,
+    /// Price (¢) prefilled when this outcome is selected — the "balanced"
+    /// reward-weight vs fill-risk starting point, "" if no reward program.
+    pub default_price_cents: String,
     pub selected: bool,
 }
 
@@ -173,16 +168,16 @@ fn group_options(tick: Decimal) -> Vec<GroupOpt> {
         .collect()
 }
 
-fn preset_views(mid: Decimal, max_spread: Decimal, tick: Decimal, best_bid: Option<Decimal>) -> Vec<PresetView> {
-    market_data::placement_presets(mid, max_spread, tick, best_bid)
-        .into_iter()
-        .map(|p| PresetView {
-            key: p.key,
-            label: p.label,
-            price_cents: (p.price * dec!(100)).normalize().to_string(),
-            weight_pct: super::dashboard::pct(p.weight),
-        })
-        .collect()
+/// Sensible prefilled bid: the Balanced preset (≈50% reward weight), else the
+/// first available one.
+fn default_price_cents(mid: Decimal, max_spread: Decimal, tick: Decimal, best_bid: Option<Decimal>) -> String {
+    let presets = market_data::placement_presets(mid, max_spread, tick, best_bid);
+    presets
+        .iter()
+        .find(|p| p.key == "balanced")
+        .or_else(|| presets.first())
+        .map(|p| (p.price * dec!(100)).normalize().to_string())
+        .unwrap_or_default()
 }
 
 #[derive(Template)]
@@ -261,18 +256,12 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
                 idx: i,
                 label: label.clone(),
                 price_cents: mr.outcome_prices.get(i).map(|p| cents(*p)).unwrap_or_else(|| "—".to_string()),
-                presets: preset_views(m, max_spread, mr.tick_size, b),
+                default_price_cents: default_price_cents(m, max_spread, mr.tick_size, b),
                 selected: i == side,
             }
         })
         .collect();
-    let default_price_cents = sides[side]
-        .presets
-        .iter()
-        .find(|p| p.key == "balanced")
-        .or_else(|| sides[side].presets.first())
-        .map(|p| p.price_cents.clone())
-        .unwrap_or_default();
+    let default_price_cents = sides[side].default_price_cents.clone();
 
     let ladder = match &book {
         Some(b) => market_data::build_ladder(b, mid, max_spread, LADDER_LEVELS, &live_mine(&state, &mr.token_ids[side]).await, mr.tick_size),

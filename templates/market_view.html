@@ -71,7 +71,7 @@
           <span class="label">Outcome</span>
           <div class="seg full" id="side-toggle">
             {% for s in sides %}
-            <button type="button" class="{% if s.selected %}selected{% endif %}" data-action="side" data-side="{{ s.idx }}" data-label="{{ s.label }}">{{ s.label }} <span class="num">{{ s.price_cents }}¢</span></button>
+            <button type="button" class="{% if s.selected %}selected{% endif %}" data-action="side" data-side="{{ s.idx }}" data-label="{{ s.label }}" data-default-price="{{ s.default_price_cents }}">{{ s.label }} <span class="num">{{ s.price_cents }}¢</span></button>
             {% endfor %}
           </div>
         </div>
@@ -82,20 +82,6 @@
             <button type="button" class="{% if !sides_both %}selected{% endif %}" data-action="mode" data-mode="one">One side</button>
             <button type="button" class="{% if sides_both %}selected{% endif %}" data-action="mode" data-mode="both">Both sides</button>
           </div>
-        </div>
-
-        <div class="field">
-          <span class="label">Starting point <span class="hint">reward weight vs. fill risk</span></span>
-          {% for s in sides %}
-          <div class="presets" data-presets="{{ s.idx }}"{% if !s.selected %} hidden{% endif %}>
-            {% for p in s.presets %}
-            <button type="button" class="preset" data-action="preset" data-price="{{ p.price_cents }}">
-              <span class="n">{{ p.label }}</span><span class="p">{{ p.price_cents }}¢</span><span class="w">{{ p.weight_pct }} weight</span>
-            </button>
-            {% endfor %}
-            {% if s.presets.is_empty() %}<div class="help">No reward program — set a price manually.</div>{% endif %}
-          </div>
-          {% endfor %}
         </div>
 
         <div class="field">
@@ -120,17 +106,19 @@
 
         <div id="placement-preview" hx-target="this" hx-post="/markets/view/preview" hx-trigger="load, pf:preview delay:300ms" hx-include="#order-form" hx-swap="innerHTML"></div>
 
-        <details class="adv">
-          <summary><svg class="i sm"><use href="#i-chev"/></svg>Safety &amp; expiry</summary>
+        <details class="adv" open>
+          <summary><svg class="i sm"><use href="#i-chev"/></svg>Safety &amp; expiry <span class="tag accent">Recommended</span></summary>
           <div class="adv-body">
+            <p class="help">These protect you from getting filled. They're pre-filled with cautious values — adjust to taste, or clear a field to turn that check off.</p>
             <div class="field">
               <label class="label" for="min_depth_usd">Min depth ahead <span class="hint">USD in front of you</span></label>
-              <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="any" min="0" name="min_depth_usd" id="min_depth_usd" value="0" /><span class="suf">USD</span></div>
-              <p class="help">Pull the order whenever less than this sits between it and the best bid — your buffer against fills. 0 = off.</p>
+              <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="any" min="0" name="min_depth_usd" id="min_depth_usd" value="500" /><span class="suf">USD</span></div>
+              <p class="help">Your bid is pulled whenever less than this sits between it and the best bid — your buffer against being filled. 0 = off.</p>
             </div>
             <div class="field">
               <label class="label" for="max_volatility_cents">Auto-pause if best bid moves <span class="hint">blank = off</span></label>
-              <div class="affix"><input class="input mono" type="number" step="any" min="0.1" name="max_volatility_cents" id="max_volatility_cents" placeholder="e.g. 5" /><span class="suf">¢</span></div>
+              <div class="affix"><input class="input mono" type="number" step="any" min="0.1" name="max_volatility_cents" id="max_volatility_cents" value="5" placeholder="e.g. 5" /><span class="suf">¢</span></div>
+              <p class="help">If the market jumps this far from where it started, the leg pauses itself and cancels its order.</p>
             </div>
             <div class="field">
               <label class="label" for="expires_in">Stop quoting after</label>

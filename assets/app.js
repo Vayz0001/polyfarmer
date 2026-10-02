@@ -341,8 +341,6 @@
     // peg hint
     var hint = $("#peg-hint");
     if (hint) hint.textContent = b && b.bb > 0 && p > 0 && p < b.bb ? "follows " + ((b.bb - p) * 100).toFixed(1) + "¢ below best bid" : "";
-    // preset highlight
-    $$(".presets:not([hidden]) .preset").forEach(function (el) { el.classList.toggle("selected", Math.abs(num(el.dataset.price) - p * 100) < 1e-6); });
     mvMarkPreview();
     if (!skipPreview) { var pv = $("#placement-preview"); if (pv && window.htmx) htmx.trigger(pv, "pf:preview"); }
   }
@@ -417,11 +415,9 @@
     $("#f-side").value = i;
     var btn = $('#side-toggle button[data-side="' + i + '"]');
     $$("#side-toggle button").forEach(function (b) { b.classList.toggle("selected", b === btn); });
-    $$(".presets").forEach(function (p) { p.hidden = p.dataset.presets !== String(i); });
     var label = btn ? btn.dataset.label : "";
     $("#book-title").textContent = label; $("#chart-title").textContent = label;
-    var pre = $('.presets[data-presets="' + i + '"] .preset:nth-child(2)') || $('.presets[data-presets="' + i + '"] .preset');
-    if (pre) $("#price").value = pre.dataset.price;
+    if (btn && btn.dataset.defaultPrice) $("#price").value = btn.dataset.defaultPrice;
     MV.scrolled = false;
     mvFetchBook(); mvConnect(); mvLoadChart();
     mvSyncShares(); mvUpdate();
@@ -458,7 +454,6 @@
       case "tab": $$("button", el.parentElement).forEach(function (b) { b.classList.toggle("selected", b === el); }); break;
       case "side": if (MV) mvSelectSide(parseInt(el.dataset.side, 10)); break;
       case "mode": if (MV) mvSetMode(el.dataset.mode); break;
-      case "preset": if (MV) { $("#price").value = el.dataset.price; mvSyncShares(); mvUpdate(); } break;
       case "book-price": if (MV) { $("#price").value = fmtC(num(el.dataset.price) * 100); mvSyncShares(); mvUpdate(); } break;
       case "group": if (MV) mvSetGroup(el.dataset.group); break;
       case "range": if (MV) { MV.range = el.dataset.range; $$("#ranges button").forEach(function (b) { b.classList.toggle("selected", b === el); }); mvLoadChart(); } break;
