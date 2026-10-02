@@ -420,6 +420,16 @@ impl Executor {
         Ok(all)
     }
 
+    /// Collateral (pUSD) balance available to the exchange, in USD. Read-only;
+    /// the CLOB reports collateral in 6-decimal base units.
+    pub async fn collateral_balance(&self) -> Result<Decimal> {
+        use polymarket_client_sdk_v2::clob::types::request::BalanceAllowanceRequest;
+        use polymarket_client_sdk_v2::clob::types::AssetType;
+        let req = BalanceAllowanceRequest::builder().asset_type(AssetType::Collateral).build();
+        let resp = self.client.balance_allowance(req).await?;
+        Ok(resp.balance / Decimal::from(1_000_000u32))
+    }
+
     /// Present and future reward configurations for one market.
     pub async fn raw_rewards_for_market(&self, condition_id: &str) -> Result<Vec<MarketRewardResponse>> {
         let mut all = Vec::new();

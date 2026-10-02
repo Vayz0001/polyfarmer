@@ -1,26 +1,22 @@
 {% if show %}
-<section class="panel position-panel pf-rise" style="margin-bottom:16px">
+<section class="panel pf-rise">
   <div class="panel-head">
-    <h2>Your position</h2>
-    {% if scoring_any %}
-    <span class="pill live"><span class="dot live"></span> scoring</span>
-    {% else %}
-    <span class="pill idle">not scoring</span>
-    {% endif %}
+    <h2>You're farming this</h2>
+    {% if scoring_any %}<span class="pill ok">Scoring</span>{% else %}<span class="pill warn">Not scoring</span>{% endif %}
   </div>
-  <div class="position-body">
-    {% if let Some(p) = reward_pct %}
-    <div class="sum-row"><span class="label">Your reward share</span><span class="value">{{ p }}</span></div>
-    {% endif %}
-    {% if let Some(e) = earnings_today %}
-    <div class="sum-row"><span class="label">Earned today</span><span class="value">{{ e }}</span></div>
-    {% endif %}
+  <div class="panel-body kv">
+    {% if let Some(p) = reward_pct %}<div class="kv-row"><span class="k">Your share of today's pool</span><span class="v">{{ p }}</span></div>{% endif %}
+    {% if let Some(e) = earnings_today %}<div class="kv-row ok"><span class="k">Earned today</span><span class="v">{{ e }}</span></div>{% endif %}
     {% for leg in legs %}
-    <div class="sum-row">
-      <span class="label">{{ leg.label }}</span>
-      <span class="value">{{ leg.status }}{% if let Some(s) = leg.scoring %} {% if s %}<span class="ok-inline">&check;</span>{% else %}<span class="warn-inline">&times;</span>{% endif %}{% endif %}</span>
+    <div class="kv-row">
+      <span class="k">{{ leg.label }}</span>
+      <span class="v">
+        {{ leg.status }}{% match leg.scoring %}{% when Some(true) %} <span class="check">✓</span>{% when Some(false) %} <span class="cross">✗</span>{% when None %}{% endmatch %}
+        <button class="btn ghost icon" title="Edit leg" hx-get="/markets/{{ leg.id }}/edit" hx-target="#pf-drawer"><svg class="i sm"><use href="#i-edit"/></svg></button>
+      </span>
     </div>
     {% endfor %}
   </div>
+  <div class="panel-foot"><a href="/markets">Pause or remove in Markets →</a></div>
 </section>
 {% endif %}

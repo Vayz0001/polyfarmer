@@ -1,8 +1,7 @@
 {% if saved %}
-<button class="btn btn-ok pf-rise" type="button" aria-disabled="true">✓ Saved</button>
-<p class="muted pf-rise" style="margin-top:0">Restart the bot to switch wallets.</p>
-<span id="key-badge" hx-swap-oob="true"><span class="ok-inline">✓ configured</span></span>
+<div class="alert ok pf-rise"><svg class="i"><use href="#i-check"/></svg><span>Wallet saved (encrypted). Restart the bot to switch the trading wallet.</span></div>
+<span id="key-badge" hx-swap-oob="true"><span class="pill ok">Configured</span></span>
 {% else %}
-<div class="err pf-rise">{{ message }}</div>
-<button class="btn" type="submit">Save</button>
+<div class="alert err pf-rise" style="margin-bottom:10px">{{ message }}</div>
+<button class="btn primary" type="submit">Save wallet</button>
 {% endif %}

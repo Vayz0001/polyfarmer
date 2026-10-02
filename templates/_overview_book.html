@@ -1,0 +1,31 @@
+{% if rows.is_empty() %}
+<div class="empty">
+  <h3>No markets yet</h3>
+  <div>Pick a reward-eligible market and place your first farming bid.</div>
+  <div class="actions"><a class="btn primary" href="/markets/browse"><svg class="i sm"><use href="#i-search"/></svg>Browse markets</a></div>
+</div>
+{% else %}
+<div class="tbl-wrap">
+<table class="tbl">
+  <thead><tr><th>Market</th><th>Side</th><th>Status</th><th class="num">Bid</th><th class="num">Δ mid</th><th class="num">Score</th></tr></thead>
+  {% for row in rows %}
+  <tbody class="group">
+    {% for leg in row.legs %}
+    <tr>
+      {% if loop.first %}
+      <td class="mkt" rowspan="{{ row.legs.len() }}">
+        <div class="mkt-title"><a class="name" href="/markets/view?slug={{ row.slug }}" title="{{ row.label }}">{{ row.label }}</a></div>
+      </td>
+      {% endif %}
+      <td><span class="leg-label side-{{ leg.side_class }}">{{ leg.side_label }}</span></td>
+      <td><span class="pill {{ leg.status_class }}">{{ leg.status_label }}</span></td>
+      <td class="num">{% if let Some(p) = leg.price %}{{ p }}¢{% else %}<span class="faint">—</span>{% endif %}</td>
+      <td class="num">{% if let Some(d) = leg.dmid %}{{ d }}¢{% else %}<span class="faint">—</span>{% endif %}</td>
+      <td class="num"><span class="score-cell">{% if let Some(w) = leg.weight %}{% if leg.in_zone == Some(true) %}<span class="zone in">{{ w }}</span>{% else %}<span class="zone out">out</span>{% endif %}{% else %}<span class="faint">—</span>{% endif %}{% match leg.scoring %}{% when Some(true) %}<span class="check" title="Scoring">✓</span>{% when Some(false) %}<span class="cross" title="Not scoring">✗</span>{% when None %}{% endmatch %}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  {% endfor %}
+</table>
+</div>
+{% endif %}

@@ -1,21 +1,34 @@
-//! Shared web state: credential store, live engine state, and a tiny in-memory
-//! login rate-limiter.
+//! Shared web state: credential store, live engine state, caches for slow
+//! upstream reads, the live order-book hub, and a tiny login rate-limiter.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use rust_decimal::Decimal;
 use tokio::sync::{broadcast, mpsc, Notify, RwLock};
 
+use crate::cache::TtlCache;
 use crate::creds::CredentialStore;
 use crate::engine::executor::Executor;
 use crate::engine::ws_manager::AppState;
+use crate::rewards::portfolio::{Activity, Position};
 use crate::types::{Alert, WsCommand};
+
+use super::book_hub::BookHub;
 
 /// Lock the dashboard after this many consecutive failed logins.
 pub const MAX_LOGIN_FAILS: u32 = 5;
 /// Lockout duration once the fail threshold is hit.
 pub const LOCKOUT_SECS: u64 = 30;
+
+/// Freshness budgets for dashboard-only reads. None of these drive trading.
+const SCORING_TTL: Duration = Duration::from_secs(15);
+const BALANCE_TTL: Duration = Duration::from_secs(15);
+const PORTFOLIO_TTL: Duration = Duration::from_secs(15);
+const REWARDS_TTL: Duration = Duration::from_secs(60);
+const PAYOUTS_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Clone)]
 pub struct WebState {
@@ -39,13 +52,53 @@ pub struct WebState {
     /// — Polymarket has no range/history endpoint, only single-day queries).
     pub reward_history_file: PathBuf,
     /// Live alert fan-out: the engine's `Alerter` publishes every alert here;
-    /// the `/activity/stream` SSE endpoint subscribes to push them to the UI.
+    /// the `/events` SSE endpoint subscribes to push them to the UI.
     pub alert_tx: broadcast::Sender<Alert>,
+    /// Pinged (by `events::spawn_state_watcher`) whenever engine state the UI
+    /// shows changes — markets, order statuses, phase, connection health.
+    pub state_tx: broadcast::Sender<()>,
     /// Path to `alerts.json` — read for the Activity feed's history on load.
     pub alerts_file: PathBuf,
     /// Poke the engine's quote loop to re-evaluate immediately instead of
     /// waiting for the next price event / 30s timer (e.g. right after a resume).
     pub quote_nudge: Arc<Notify>,
+    /// The Polymarket wallet (proxy / deposit wallet) address — public, used
+    /// for read-only Data API lookups (positions, value, fills). Set by the
+    /// boot task once a wallet is configured.
+    pub proxy_wallet: Arc<std::sync::RwLock<Option<String>>>,
+    /// Caches for slow reads, so pages and the status strip never block on them.
+    pub caches: Arc<Caches>,
+    /// Live order books for the market view (its own WS connection — never the
+    /// engine's, whose disconnect handling cancels live orders).
+    pub book_hub: BookHub,
+}
+
+pub struct Caches {
+    /// `are_orders_scoring` results, keyed by the sorted order-id list.
+    pub scoring: Arc<TtlCache<HashMap<String, bool>>>,
+    /// pUSD collateral balance (single key).
+    pub balance: Arc<TtlCache<Decimal>>,
+    pub positions: Arc<TtlCache<Vec<Position>>>,
+    pub value: Arc<TtlCache<Decimal>>,
+    pub activity: Arc<TtlCache<Vec<Activity>>>,
+    /// Today's accrued reward total (single key). Polymarket updates it slowly.
+    pub rewards_today: Arc<TtlCache<Decimal>>,
+    /// Full reward payout history (one payout a day — slow-moving).
+    pub reward_payouts: Arc<TtlCache<Vec<Activity>>>,
+}
+
+impl Default for Caches {
+    fn default() -> Self {
+        Self {
+            scoring: Arc::new(TtlCache::new(SCORING_TTL)),
+            balance: Arc::new(TtlCache::new(BALANCE_TTL)),
+            positions: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
+            value: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
+            activity: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
+            rewards_today: Arc::new(TtlCache::new(REWARDS_TTL)),
+            reward_payouts: Arc::new(TtlCache::new(PAYOUTS_TTL)),
+        }
+    }
 }
 
 /// Bundles the authenticated [`Executor`] and the WS command sender as one
@@ -123,6 +176,7 @@ impl WebState {
         alerts_file: PathBuf,
         quote_nudge: Arc<Notify>,
     ) -> Self {
+        let (state_tx, _) = broadcast::channel(16);
         Self {
             store,
             engine,
@@ -132,8 +186,21 @@ impl WebState {
             engine_handle: EngineHandle::new(),
             reward_history_file,
             alert_tx,
+            state_tx,
             alerts_file,
             quote_nudge,
+            proxy_wallet: Arc::new(std::sync::RwLock::new(None)),
+            caches: Arc::new(Caches::default()),
+            book_hub: BookHub::new(),
         }
+    }
+
+    /// The configured Polymarket wallet address, if known.
+    pub fn wallet_address(&self) -> Option<String> {
+        self.proxy_wallet.read().unwrap().clone()
+    }
+
+    pub fn set_wallet_address(&self, addr: Option<String>) {
+        *self.proxy_wallet.write().unwrap() = addr;
     }
 }

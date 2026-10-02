@@ -1,13 +1,8 @@
 {% if failed %}
-<div id="engine-status">
-  <script>
-    if (window.__pfRot) { clearInterval(window.__pfRot); }
-    var l = document.querySelector('.launch'); if (l) { l.classList.add('failed'); }
-  </script>
-  <p class="warn-inline" style="margin-top:14px">Couldn't start automatically. Check the logs.</p>
-  <a class="btn ghost sm" href="/setup" style="margin-top:12px">Try again</a>
+<div id="engine-status" class="stack pf-rise" data-launch-failed>
+  <div class="alert err">The engine couldn't start (Polymarket auth or network). It keeps retrying — check the logs.</div>
+  <a class="btn" href="/setup">Back to Settings</a>
 </div>
 {% else %}
-<div id="engine-status" hx-get="/setup/engine-status"
-     hx-trigger="load delay:1000ms" hx-swap="outerHTML" style="display:none"></div>
+<div id="engine-status" hx-get="/setup/engine-status" hx-trigger="load delay:1000ms" hx-swap="outerHTML" hidden></div>
 {% endif %}

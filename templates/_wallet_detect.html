@@ -1,20 +1,12 @@
-<div id="wallet-field-wrap" hx-swap-oob="true" class="{% if reveal %}pf-expand{% else %}pf-collapse{% endif %}">
-  <div class="lbl-row">
-    <label class="h" for="proxy_wallet">Wallet Address</label>
-    {% if verified %}<span class="ok-inline">✓ Verified</span>{% endif %}
-  </div>
-  <input class="inp" type="text" name="proxy_wallet" id="proxy_wallet"
-         value="{% if reveal %}{{ value }}{% endif %}"
-         placeholder="0x…" required />
+<div id="wallet-field-wrap" hx-swap-oob="true" class="{% if reveal %}pf-rise{% else %}pf-collapse{% endif %}">
+  <label class="label" for="proxy_wallet">Polymarket wallet address {% if verified %}<span class="pill ok">Found on-chain</span>{% endif %}</label>
+  <input class="input mono" type="text" name="proxy_wallet" id="proxy_wallet" value="{% if reveal %}{{ value }}{% endif %}" placeholder="0x…" required />
 </div>
-{% if !message.is_empty() %}
-<div class="pf-rise muted" style="margin-top:6px">{{ message }}</div>
-{% endif %}
+{% if !message.is_empty() %}<div class="help pf-rise">{{ message }}</div>{% endif %}
 {% if !candidates.is_empty() %}
-<div class="pf-rise" style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+<div class="cand-list pf-rise">
   {% for c in candidates %}
-  <button type="button" class="btn ghost sm"
-          onclick="document.getElementById('proxy_wallet').value='{{ c }}'">{{ c }}</button>
+  <button type="button" class="btn sm mono" data-action="pick-wallet" data-addr="{{ c }}">{{ c }}</button>
   {% endfor %}
 </div>
 {% endif %}

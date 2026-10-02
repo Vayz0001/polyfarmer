@@ -1,28 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>polyfarmer · market</title>
-  <link rel="stylesheet" href="/assets/app.css" />
-  <script src="/assets/htmx.min.js" defer></script>
-</head>
-<body>
-  <div class="app">
-    {% include "_sidebar.html" %}
-
-    <div class="main">
-      <header class="topbar">
-        <h1>Market</h1>
-        <a class="btn ghost" href="/markets">&larr; Markets</a>
-      </header>
-
-      <div class="content">
-        <div class="err pf-rise">{{ message }}</div>
-        <p class="muted">Try <a href="/markets/browse">browsing reward-eligible markets</a> or pasting the URL again.</p>
-      </div>
-    </div>
-  </div>
-  {% include "_toasts.html" %}
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Market{% endblock %}
+{% block content %}
+<a class="crumb" href="/markets"><svg class="i sm"><use href="#i-back"/></svg>Markets</a>
+<div class="stack" style="max-width:640px">
+  <div class="alert err"><svg class="i"><use href="#i-warn"/></svg>{{ message }}</div>
+  <p class="muted">Try <a href="/markets/browse">browsing reward-eligible markets</a> or pasting the URL again.</p>
+</div>
+{% endblock %}

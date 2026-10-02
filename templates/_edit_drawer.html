@@ -1,0 +1,57 @@
+<form class="drawer-form" hx-post="/markets/{{ id }}/edit" hx-target="#pf-drawer" style="display:contents">
+  <div class="drawer-head">
+    <div>
+      <div class="muted" style="font-size:11.5px">Edit leg · <span class="leg-label">{{ side_label }}</span></div>
+      <h3>{{ label }}</h3>
+    </div>
+    <button type="button" class="btn ghost icon" data-action="drawer-close" aria-label="Close"><svg class="i sm"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="drawer-body">
+    <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+    {% if let Some(e) = error %}<div class="alert err"><svg class="i"><use href="#i-warn"/></svg>{{ e }}</div>{% endif %}
+    {% if live %}<div class="alert info"><svg class="i"><use href="#i-info"/></svg><span>Changing size or distance cancels the live order; the engine re-places it with the new settings within seconds.</span></div>{% endif %}
+
+    <div class="form-grid">
+      <div class="field">
+        <label class="label" for="e-size">Order size</label>
+        <div class="affix"><span class="pre">$</span><input class="input mono" id="e-size" name="order_size" type="number" step="any" min="1" value="{{ order_size }}" required /><span class="suf">USD</span></div>
+      </div>
+      <div class="field">
+        <label class="label" for="e-dist">Distance below bid</label>
+        <div class="affix"><input class="input mono" id="e-dist" name="distance_cents" type="number" step="any" min="0.1" value="{{ distance_cents }}" required /><span class="suf">¢</span></div>
+      </div>
+    </div>
+    <p class="help">The engine keeps this leg's bid exactly this far below the best bid, following it as it moves.</p>
+
+    <div class="field">
+      <label class="label" for="e-depth">Min depth ahead <span class="hint">USD of bids between you and the best bid</span></label>
+      <div class="affix"><span class="pre">$</span><input class="input mono" id="e-depth" name="min_depth_usd" type="number" step="any" min="0" value="{{ min_depth_usd }}" /><span class="suf">USD</span></div>
+      <p class="help">The order is pulled whenever less than this sits in front of it — your buffer against getting filled. 0 = off.</p>
+    </div>
+
+    <div class="field">
+      <label class="label" for="e-vol">Auto-pause if best bid moves <span class="hint">blank = off</span></label>
+      <div class="affix"><input class="input mono" id="e-vol" name="max_volatility_cents" type="number" step="any" min="0.1" value="{{ max_volatility_cents }}" placeholder="e.g. 5" /><span class="suf">¢</span></div>
+      <p class="help">Measured from the best bid when you save a new value.</p>
+    </div>
+
+    <div class="field">
+      <label class="label" for="e-exp">Stop quoting <span class="hint">now: {{ expires }}</span></label>
+      <select class="input" id="e-exp" name="expires_in">
+        <option value="keep" selected>Keep current</option>
+        <option value="1d">1 day from now</option>
+        <option value="3d">3 days from now</option>
+        <option value="7d">7 days from now</option>
+        <option value="30d">30 days from now</option>
+        <option value="never">Never</option>
+      </select>
+    </div>
+  </div>
+  <div class="drawer-foot">
+    <a class="btn ghost" href="/markets/view?slug={{ slug }}">Open market</a>
+    <div class="btn-row">
+      <button type="button" class="btn" data-action="drawer-close">Cancel</button>
+      <button type="submit" class="btn primary">Save changes</button>
+    </div>
+  </div>
+</form>

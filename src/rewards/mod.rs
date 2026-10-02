@@ -7,3 +7,4 @@ pub mod gamma_resolve;
 pub mod history;
 pub mod market_data;
 pub mod markets_browse;
+pub mod portfolio;

@@ -181,6 +181,52 @@ impl Rpc {
     }
 }
 
+/// ERC-20 `balanceOf(address)` selector.
+const BALANCE_OF_SELECTOR: [u8; 4] = [0x70, 0xa0, 0x82, 0x31];
+
+/// pUSD (Polymarket's collateral token) balance of `owner` — the Polymarket
+/// wallet's real on-chain balance, in USD (6 decimals). Tries each RPC in turn
+/// (a public endpoint can answer `eth_chainId` yet fail real calls), so one
+/// flaky node doesn't blank the dashboard.
+pub async fn pusd_balance(owner: Address, configured_rpc: Option<&str>) -> Result<rust_decimal::Decimal> {
+    let token = polymarket_client_sdk_v2::contract_config(POLYGON, false)
+        .ok_or_else(|| eyre!("no contract config for Polygon"))?
+        .collateral;
+    let mut data = Vec::with_capacity(36);
+    data.extend_from_slice(&BALANCE_OF_SELECTOR);
+    data.extend_from_slice(&left_pad_32(owner));
+
+    let client = reqwest::Client::builder().timeout(PER_REQUEST_TIMEOUT).build()?;
+    let urls = configured_rpc.into_iter().chain(DEFAULT_RPC_URLS.iter().copied());
+    let mut last_err = eyre!("no RPC configured");
+    for url in urls {
+        let rpc = Rpc { client: client.clone(), url: url.to_string() };
+        match rpc.eth_call(token, &data).await {
+            Ok(hex) => match parse_token_amount(&hex, 6) {
+                Ok(v) => return Ok(v),
+                Err(e) => last_err = e,
+            },
+            Err(e) => last_err = e,
+        }
+    }
+    Err(last_err)
+}
+
+/// Decode a 32-byte uint256 eth_call result into a decimal with `decimals`.
+fn parse_token_amount(hex_result: &str, decimals: u32) -> Result<rust_decimal::Decimal> {
+    let bytes = hex::decode(hex_result.trim_start_matches("0x")).map_err(|e| eyre!("bad hex: {e}"))?;
+    if bytes.len() < 32 {
+        return Err(eyre!("balanceOf result too short"));
+    }
+    // Balances fit comfortably in u128 (≈3.4e38 base units).
+    let raw = u128::from_be_bytes(bytes[16..32].try_into().expect("16 bytes"));
+    if bytes[..16].iter().any(|b| *b != 0) {
+        return Err(eyre!("balance out of range"));
+    }
+    let raw = i128::try_from(raw).map_err(|_| eyre!("balance out of range"))?;
+    rust_decimal::Decimal::try_from_i128_with_scale(raw, decimals).map_err(|e| eyre!("balance: {e}"))
+}
+
 /// Detect which Polymarket wallet(s) actually exist on-chain for this EOA.
 /// `configured_rpc` is tried first if set, then [`DEFAULT_RPC_URLS`]. Bounded
 /// by [`TOTAL_BUDGET`] — always returns within that window, including when
@@ -299,6 +345,26 @@ mod tests {
         assert_eq!(
             addr,
             Address::from_str("0x78f3fbbaD90D9076126E05Cb4b834C074a84CFb0").unwrap()
+        );
+    }
+
+    #[test]
+    fn parses_pusd_balance_in_usd() {
+        // 100.123456 pUSD = 100_123_456 base units (6 decimals).
+        let hex = format!("0x{:064x}", 100_123_456u128);
+        assert_eq!(parse_token_amount(&hex, 6).unwrap().to_string(), "100.123456");
+        assert_eq!(parse_token_amount(&format!("0x{:064x}", 0u8), 6).unwrap().to_string(), "0.000000");
+        assert!(parse_token_amount("0x12", 6).is_err());
+    }
+
+    #[test]
+    fn balance_of_calldata_is_selector_plus_padded_owner() {
+        let owner = Address::from_str("0xe2d1DB006b8042c99AA8Ae31a0ada8D9b7f11c4E").unwrap();
+        let mut data = BALANCE_OF_SELECTOR.to_vec();
+        data.extend_from_slice(&left_pad_32(owner));
+        assert_eq!(
+            hex::encode(&data),
+            "70a08231000000000000000000000000e2d1db006b8042c99aa8ae31a0ada8d9b7f11c4e"
         );
     }
 

@@ -44,6 +44,13 @@ pub struct AppState {
     /// Engine lifecycle phase — driven by the boot task, read by the dashboard
     /// to show first-run auto-start progress without a manual restart.
     pub engine_phase: crate::types::EnginePhase,
+    /// Whether the engine's market WebSocket is currently connected. Display
+    /// only (dashboard status strip) — no trading decision reads it.
+    pub ws_connected: bool,
+    /// When the last WS message arrived (display only).
+    pub last_ws_msg: Option<std::time::Instant>,
+    /// When the last successful heartbeat completed (display only).
+    pub last_heartbeat_ok: Option<std::time::Instant>,
 }
 
 impl AppState {
@@ -57,6 +64,9 @@ impl AppState {
             markets_file,
             heartbeat_paused: false,
             engine_phase: crate::types::EnginePhase::AwaitingWallet,
+            ws_connected: false,
+            last_ws_msg: None,
+            last_heartbeat_ok: None,
         }
     }
 }
@@ -103,7 +113,7 @@ pub fn spawn(
                     std::sync::atomic::AtomicU32::new(0);
                 let count = IDLE_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if count % 10 == 0 {
-                    info!("WS manager: no markets configured, waiting... (use /add-market to add one)");
+                    info!("WS manager: no markets configured, waiting... (add one from the dashboard)");
                 }
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_secs(3)) => {}
@@ -125,6 +135,7 @@ pub fn spawn(
             };
 
             info!("WS connected");
+            state.write().await.ws_connected = true;
             alerter.info("WS connected");
 
             let (mut write, mut read) = ws_stream.split();
@@ -160,6 +171,7 @@ pub fn spawn(
                                     warn!("WS message too large ({} bytes) — discarding", text.len());
                                     continue;
                                 }
+                                state.write().await.last_ws_msg = Some(std::time::Instant::now());
                                 if text.trim() == "PONG" { continue; }
                                 handle_message(
                                     &text,
@@ -246,6 +258,7 @@ pub fn spawn(
                 }
             };
 
+            state.write().await.ws_connected = false;
             if disconnect_reason == "shutdown" {
                 break;
             }
@@ -495,7 +508,7 @@ async fn execute_actions(
                                     .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
                                 drop(s);
                                 alerter2.info(format!(
-                                    "Order Placed: `{}`\nBUY {} {} Shares @ {}c for {}$",
+                                    "Order placed · {}\nBUY {} {} shares @ {}¢ (${})",
                                     label,
                                     shares,
                                     token_label,
@@ -597,17 +610,18 @@ async fn execute_actions(
                 let exec = Arc::clone(executor);
                 let state2 = Arc::clone(state);
                 let alerter2 = Arc::clone(alerter);
-                let reason_str = format!("{:?}", reason);
+                let reason_str = match reason {
+                    quoter::CancelReason::DepthDropped => "depth ahead fell below your minimum",
+                };
                 tokio::spawn(async move {
                     let confirmed = match exec.cancel_order_verified(&order_id).await {
                         Ok(true) => {
                             alerter2.info(format!(
-                                "Order Cancelled: `{}`\n{}$ of {} Shares\nReason: {}\n{}",
+                                "Order cancelled · {}\n${} of {} — {}",
                                 label,
                                 order_size,
                                 token_label,
                                 reason_str,
-                                chrono::Local::now().format("%I:%M %p")
                             ));
                             true
                         }
@@ -739,7 +753,7 @@ async fn execute_actions(
                                 });
                                 drop(s);
                                 alerter2.info(format!(
-                                    "Order Replaced: `{}`\nBUY {} {} Shares @ {}c for {}$",
+                                    "Order replaced · {}\nBUY {} {} shares @ {}¢ (${})",
                                     label,
                                     shares,
                                     token_label,
@@ -787,16 +801,16 @@ async fn execute_actions(
                         error!("Failed to save markets after volatility pause of '{}': {}", label, e);
                     }
                     alerter.warn(format!(
-                        "Market Auto-Paused: `{}`\nVolatility threshold exceeded — use /resume-market when stable",
+                        "Auto-paused · {}\nBest bid moved past your volatility limit — resume from Markets when stable",
                         label
                     ));
                 } else {
                     let (title, msg) = match reason {
-                        DeactivateReason::Paused     => ("Market Paused", "Order cancelled — use /resume-market to re-enable"),
-                        DeactivateReason::Expired    => ("Market Expired", "Config expired and has been deactivated"),
+                        DeactivateReason::Paused     => ("Paused", "Order cancelled — resume from Markets"),
+                        DeactivateReason::Expired    => ("Expired", "Expiry reached — stopped quoting"),
                         DeactivateReason::Volatility => unreachable!(),
                     };
-                    alerter.info(format!("{}: `{}`\n{}", title, label, msg));
+                    alerter.info(format!("{} · {}\n{}", title, label, msg));
                 }
 
                 match order_id {

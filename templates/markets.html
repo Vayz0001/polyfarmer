@@ -1,40 +1,25 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>polyfarmer · markets</title>
-  <link rel="stylesheet" href="/assets/app.css" />
-  <script src="/assets/htmx.min.js" defer></script>
-</head>
-<body>
-  <div class="app">
-    {% include "_sidebar.html" %}
-
-    <div class="main">
-      <header class="topbar">
-        <h1>Markets</h1>
-        <div class="row" style="margin-top:0;gap:10px">
-          <a class="btn ghost" href="/markets/browse">Browse reward-eligible</a>
-          <form action="/markets/resolve" method="get" class="row" style="gap:8px;margin-top:0">
-            <input class="inp" type="text" name="url" placeholder="Paste a Polymarket URL&hellip;" style="width:280px" required />
-            <button class="btn" type="submit">Go</button>
-          </form>
-        </div>
-      </header>
-
-      <div class="content">
-        {% if !has_wallet %}
-          <div class="warn">No wallet configured. <a href="/setup">Add it in Setup</a> to start trading.</div>
-        {% endif %}
-
-        <section class="panel" style="margin-top:18px"
-                  hx-get="/markets/table" hx-trigger="every 2s" hx-swap="innerHTML">
-          {% include "_markets_table.html" %}
-        </section>
-      </div>
-    </div>
+{% extends "base.html" %}
+{% block title %}Markets{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Markets</h1>
+    <div class="sub">Each leg is a resting BUY the engine keeps pegged below the best bid.</div>
   </div>
-  {% include "_toasts.html" %}
-</body>
-</html>
+  <div class="actions">
+    <form class="url-form" action="/markets/resolve" method="get">
+      <input class="input" type="text" name="url" placeholder="Paste a Polymarket URL…" required />
+      <button class="btn" type="submit">Open</button>
+    </form>
+    <a class="btn primary" href="/markets/browse"><svg class="i sm"><use href="#i-plus"/></svg>Add market</a>
+  </div>
+</div>
+
+{% if !has_wallet %}
+<div class="alert warn" style="margin-bottom:14px"><svg class="i"><use href="#i-warn"/></svg><span>No wallet configured — nothing will be placed. <a href="/setup">Add it in Settings</a>.</span></div>
+{% endif %}
+
+<section class="panel" id="markets-panel" hx-get="/markets/table" hx-trigger="pf:state from:body, every 5s" hx-swap="innerHTML">
+  {% include "_markets_table.html" %}
+</section>
+{% endblock %}

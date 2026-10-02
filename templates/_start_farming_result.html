@@ -1,4 +1,4 @@
 {% if let Some(e) = error %}
-<div class="err pf-rise">{{ e }}</div>
+<div class="alert err pf-rise" style="margin-bottom:10px"><svg class="i"><use href="#i-warn"/></svg>{{ e }}</div>
 {% endif %}
-<button class="btn" type="submit">Start farming</button>
+<button class="btn primary block" type="submit">Start farming</button>

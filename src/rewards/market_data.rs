@@ -47,10 +47,19 @@ pub async fn fetch_midpoint(token_id: &str) -> Result<Decimal> {
 }
 
 /// One unix-second timestamped price point per `(t, p)`.
+///
+/// `fidelity` (minutes per point) matters: Polymarket returns an EMPTY history
+/// for a 1-week range without it, so each range gets an explicit resolution.
 pub async fn fetch_history(token_id: &str, interval: Interval) -> Result<Vec<(i64, Decimal)>> {
+    let fidelity = match interval {
+        Interval::OneDay => Some(5),
+        Interval::OneWeek => Some(30),
+        _ => None,
+    };
     let req = PriceHistoryRequest::builder()
         .market(token_u256(token_id)?)
         .time_range(interval)
+        .maybe_fidelity(fidelity)
         .build();
     Ok(CLIENT.price_history(&req).await?.history.into_iter().map(|p| (p.t, p.p)).collect())
 }
@@ -119,6 +128,10 @@ pub struct PlacementEval {
     pub per_side_shares: Decimal,
     pub per_side_meets_min: bool,
     pub fill_risk: FillRisk,
+    /// Polymarket's per-order scoring weight at this distance from the
+    /// midpoint, ((v − s) / v)² — 1.0 at the midpoint, 0 at the band edge.
+    /// Before the single/two-sided adjustment (see [`effective_weight`]).
+    pub score_weight: Decimal,
 }
 
 pub fn evaluate_placement(
@@ -157,6 +170,7 @@ pub fn evaluate_placement(
         per_side_meets_min,
         // Fill risk compares USDC depth-ahead to USD size, so it stays in USD.
         fill_risk: fill_risk(book, your_price, per_side_size),
+        score_weight: score_weight(midpoint, your_price, max_spread_cents),
     }
 }
 
@@ -192,24 +206,121 @@ fn fill_risk(book: &BookSnapshot, your_price: Decimal, size: Decimal) -> FillRis
     }
 }
 
-/// A conservative starting placement: the far edge of the reward band
-/// (`midpoint − max_spread`), snapped down to a tick. That's the lowest-fill-
-/// risk price that still qualifies — exactly where a cautious farmer parks.
-/// Returns `None` if the band is degenerate (e.g. no rewards configured).
-pub fn suggest_placement(
+// ── Reward scoring model ────────────────────────────────────────────────────
+// Mirrors Polymarket's liquidity-rewards rules (docs: programs/liquidity-rewards):
+//   * each order scores S(v, s) = ((v − s) / v)² · size, where v is the market's
+//     max spread and s the order's distance from the midpoint (both in cents);
+//   * with the midpoint in [0.10, 0.90], one-sided liquidity still scores but
+//     divided by c = 3; outside that range it must be two-sided to score at all.
+
+/// The single-sided scaling factor `c` (currently 3.0 on all markets).
+pub const SINGLE_SIDED_FACTOR: Decimal = dec!(3);
+
+/// Per-order scoring weight in [0, 1]: `((v − s) / v)²`, 0 outside the band.
+pub fn score_weight(midpoint: Decimal, price: Decimal, max_spread_cents: Decimal) -> Decimal {
+    if max_spread_cents <= dec!(0) {
+        return dec!(0);
+    }
+    let s = ((midpoint - price) * dec!(100)).abs();
+    if s >= max_spread_cents {
+        return dec!(0);
+    }
+    let r = (max_spread_cents - s) / max_spread_cents;
+    r * r
+}
+
+/// Whether one-sided liquidity can score at this midpoint (in [0.10, 0.90]).
+pub fn single_sided_allowed(midpoint: Decimal) -> bool {
+    midpoint >= dec!(0.10) && midpoint <= dec!(0.90)
+}
+
+/// Effective weight after Polymarket's two-sided rule, given this leg's weight
+/// and the complementary leg's (`None` / 0 = one-sided):
+/// `max(min(a, b), max(a, b) / c)` when single-sided is allowed, else `min(a, b)`.
+pub fn effective_weight(midpoint: Decimal, this_leg: Decimal, other_leg: Option<Decimal>) -> Decimal {
+    let other = other_leg.unwrap_or(dec!(0));
+    let lo = this_leg.min(other);
+    if single_sided_allowed(midpoint) {
+        lo.max(this_leg.max(other) / SINGLE_SIDED_FACTOR)
+    } else {
+        lo
+    }
+}
+
+/// A named starting placement offered as a one-click chip.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Preset {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub price: Decimal,
+    /// Scoring weight at `price` (before the two-sided adjustment).
+    pub weight: Decimal,
+}
+
+/// Starting placements trading reward weight against fill risk: the lowest
+/// tick-aligned price reaching each target weight (25% / 50% / 75%), kept
+/// strictly below the best bid (the engine pegs below it). Presets that
+/// collapse onto the same price, or would score nothing, are dropped.
+pub fn placement_presets(
     midpoint: Decimal,
     max_spread_cents: Decimal,
     tick: Decimal,
-) -> Option<Decimal> {
-    if max_spread_cents <= dec!(0) {
-        return None;
+    best_bid: Option<Decimal>,
+) -> Vec<Preset> {
+    // 1 − √target, precomputed (rust_decimal has no sqrt without `maths`).
+    const TARGETS: [(&str, &str, Decimal); 3] = [
+        ("safer", "Safer", dec!(0.5)),             // 25% weight
+        ("balanced", "Balanced", dec!(0.29289322)), // 50%
+        ("tight", "Tight", dec!(0.13397460)),       // 75%
+    ];
+    if max_spread_cents <= dec!(0) || tick <= dec!(0) {
+        return Vec::new();
     }
-    let edge = midpoint - max_spread_cents / dec!(100);
-    let snapped = TokenBook::snap_to_tick(edge, tick);
-    if snapped <= dec!(0) || snapped >= midpoint {
-        return None;
+    let mut out: Vec<Preset> = Vec::new();
+    for (key, label, one_minus_sqrt) in TARGETS {
+        let max_s = max_spread_cents * one_minus_sqrt / dec!(100);
+        let mut price = ((midpoint - max_s) / tick).ceil() * tick;
+        if let Some(bb) = best_bid {
+            if price >= bb {
+                price = bb - tick;
+            }
+        }
+        let price = price.normalize();
+        if price <= dec!(0) || price >= dec!(1) {
+            continue;
+        }
+        let weight = score_weight(midpoint, price, max_spread_cents);
+        if weight <= dec!(0) || out.iter().any(|p| p.price == price) {
+            continue;
+        }
+        out.push(Preset { key, label, price, weight });
     }
-    Some(snapped)
+    out
+}
+
+/// Midpoint from the top of book, when both sides exist.
+pub fn book_midpoint(book: &BookSnapshot) -> Option<Decimal> {
+    match (book.best_bid, book.best_ask) {
+        (Some(b), Some(a)) => Some((b + a) / dec!(2)),
+        _ => None,
+    }
+}
+
+/// Sorted snapshot of a live [`TokenBook`] (the engine's / book hub's WS-fed
+/// book), so the same ladder + placement math runs on either source.
+pub fn snapshot_from_token_book(book: &TokenBook, tick_size: Decimal) -> BookSnapshot {
+    let mut bids: Vec<(Decimal, Decimal)> = book.bids.iter().map(|(p, s)| (*p, *s)).collect();
+    let mut asks: Vec<(Decimal, Decimal)> = book.asks.iter().map(|(p, s)| (*p, *s)).collect();
+    bids.sort_by_key(|(p, _)| std::cmp::Reverse(*p));
+    asks.sort_by_key(|(p, _)| *p);
+    BookSnapshot {
+        best_bid: book.best_bid.or_else(|| bids.first().map(|(p, _)| *p)),
+        best_ask: book.best_ask.or_else(|| asks.first().map(|(p, _)| *p)),
+        tick_size,
+        min_order_size: dec!(0),
+        bids,
+        asks,
+    }
 }
 
 // ── Order-book ladder view-model (presentation) ──────────────────────────────
@@ -219,11 +330,14 @@ pub struct LadderRow {
     pub price_raw: String,    // "0.34" — the value click-to-set writes
     pub size: String,         // shares at this level, compact
     pub total: String,        // cumulative shares from the best level, compact
+    pub total_usd: String,    // cumulative USD depth (Σ price × size) from the best level
     pub depth_pct: u32,       // 0-100, cumulative-depth bar width
     pub side: &'static str,   // "ask" | "bid"
     pub in_band: bool,        // within the reward-qualifying zone
     pub is_best: bool,
-    pub is_yours: bool,       // this level == your current placement price
+    /// One of YOUR live engine orders rests at this level (solid marker; the
+    /// dashed placement preview is drawn client-side).
+    pub is_live_mine: bool,
 }
 
 pub struct Ladder {
@@ -237,26 +351,29 @@ pub struct Ladder {
     pub band_hi_cents: String, // reward-zone upper bound (display)
     pub in_zone_usdc: String,  // qualifying liquidity in the band (display, e.g. "$9.5k")
     pub in_zone_raw: String,   // same, plain number for the client-side "your share" calc
+    /// Raw top-of-book + midpoint (price units) for the client-side reward math.
+    pub best_bid_raw: String,
+    pub best_ask_raw: String,
+    pub midpoint_raw: String,
     pub has_book: bool,
 }
 
 /// Build the display ladder: top `per_side` levels each side, cumulative-depth
 /// bars (shares, normalized across shown levels), reward band shaded. Reward band
-/// = within `max_spread_cents` of the midpoint on either side. `your_price`, when
-/// set, flags the level you'd rest at so the book shows a "you are here" marker.
+/// = within `max_spread_cents` of the midpoint on either side. `live_mine` are
+/// the prices of your live engine orders on this token (marked on the ladder).
 /// `group` is the price-bucket size for the grouping control (== tick → raw).
 pub fn build_ladder(
     book: &BookSnapshot,
     midpoint: Decimal,
     max_spread_cents: Decimal,
     per_side: usize,
-    your_price: Option<Decimal>,
+    live_mine: &[Decimal],
     group: Decimal,
 ) -> Ladder {
     let band = max_spread_cents / dec!(100);
     let band_lo = midpoint - band;
     let band_hi = midpoint + band;
-    let yours = your_price.map(|p| p.normalize());
 
     // Aggregate the full book into price buckets of `group` (the grouping
     // control): bids floor toward the spread, asks ceil. Levels are already
@@ -278,8 +395,10 @@ pub fn build_ladder(
     };
     let bid_all = bucketize(&book.bids, true);
     let ask_all = bucketize(&book.asks, false);
-    let your_bid = yours.map(|y| if group > dec!(0) { ((y / group).floor() * group).normalize() } else { y });
-    let your_ask = yours.map(|y| if group > dec!(0) { ((y / group).ceil() * group).normalize() } else { y });
+    // Your live orders are bids — bucket them the same way bid levels are.
+    let mine: Vec<Decimal> = live_mine.iter()
+        .map(|y| if group > dec!(0) { ((y / group).floor() * group).normalize() } else { y.normalize() })
+        .collect();
 
     // bids best-first (sorted desc); asks best-first (sorted asc).
     let bid_levels: Vec<(Decimal, Decimal)> = bid_all.iter().take(per_side).copied().collect();
@@ -296,31 +415,39 @@ pub fn build_ladder(
     };
     let bid_cum = cum(&bid_levels);
     let ask_cum = cum(&ask_levels);
+    // Cumulative USD depth: what it would cost / is resting from the best level out.
+    let cum_usd = |levels: &[(Decimal, Decimal)]| -> Vec<Decimal> {
+        let mut acc = dec!(0);
+        levels.iter().map(|(p, s)| { acc += p * s; acc }).collect()
+    };
+    let bid_usd = cum_usd(&bid_levels);
+    let ask_usd = cum_usd(&ask_levels);
     let max_level = bid_levels.iter().chain(ask_levels.iter())
         .map(|(_, s)| *s).fold(dec!(0), Decimal::max);
 
     let pct = |s: Decimal| -> u32 {
         if max_level <= dec!(0) { 0 } else { ((s / max_level) * dec!(100)).round().to_u32().unwrap_or(0).min(100) }
     };
-    let row = |p: Decimal, s: Decimal, cumv: Decimal, side: &'static str, is_best: bool| LadderRow {
+    let row = |p: Decimal, s: Decimal, cumv: Decimal, usd: Decimal, side: &'static str, is_best: bool| LadderRow {
         price_cents: format!("{:.1}", p * dec!(100)),
         price_raw: p.normalize().to_string(),
         size: fmt_shares(s),
         total: fmt_shares(cumv),
+        total_usd: fmt_usd(usd),
         depth_pct: pct(s),
         side,
         in_band: p > band_lo && p < band_hi,
         is_best,
-        is_yours: if side == "bid" { your_bid == Some(p.normalize()) } else { your_ask == Some(p.normalize()) },
+        is_live_mine: side == "bid" && mine.contains(&p.normalize()),
     };
 
     // asks displayed high→low so the best ask sits just above the midpoint line.
-    let asks: Vec<LadderRow> = ask_levels.iter().zip(ask_cum.iter()).enumerate()
-        .map(|(i, ((p, s), c))| row(*p, *s, *c, "ask", i == 0))
+    let asks: Vec<LadderRow> = ask_levels.iter().zip(ask_cum.iter()).zip(ask_usd.iter()).enumerate()
+        .map(|(i, (((p, s), c), u))| row(*p, *s, *c, *u, "ask", i == 0))
         .rev()
         .collect();
-    let bids: Vec<LadderRow> = bid_levels.iter().zip(bid_cum.iter()).enumerate()
-        .map(|(i, ((p, s), c))| row(*p, *s, *c, "bid", i == 0))
+    let bids: Vec<LadderRow> = bid_levels.iter().zip(bid_cum.iter()).zip(bid_usd.iter()).enumerate()
+        .map(|(i, (((p, s), c), u))| row(*p, *s, *c, *u, "bid", i == 0))
         .collect();
 
     let spread = match (book.best_bid, book.best_ask) {
@@ -349,6 +476,9 @@ pub fn build_ladder(
         band_hi_cents: format!("{:.1}", band_hi.min(dec!(1)) * dec!(100)),
         in_zone_usdc: fmt_usd(in_zone),
         in_zone_raw: in_zone.round_dp(2).to_string(),
+        best_bid_raw: book.best_bid.map(|p| p.normalize().to_string()).unwrap_or_default(),
+        best_ask_raw: book.best_ask.map(|p| p.normalize().to_string()).unwrap_or_default(),
+        midpoint_raw: midpoint.normalize().to_string(),
     }
 }
 
@@ -461,8 +591,8 @@ pub fn price_chart_svg(points: &[(i64, Decimal)]) -> String {
     format!(
         "<svg viewBox=\"0 0 {W} {H}\" class=\"chart-svg\" preserveAspectRatio=\"none\">\
          <defs><linearGradient id=\"{gid}\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">\
-         <stop offset=\"0\" stop-color=\"rgba(255,77,141,0.18)\"/>\
-         <stop offset=\"1\" stop-color=\"rgba(255,77,141,0)\"/></linearGradient></defs>\
+         <stop offset=\"0\" stop-color=\"rgb(108,140,255)\" stop-opacity=\"0.22\"/>\
+         <stop offset=\"1\" stop-color=\"rgb(108,140,255)\" stop-opacity=\"0\"/></linearGradient></defs>\
          <path d=\"{area}\" fill=\"url(#{gid})\"/>\
          <line x1=\"0\" y1=\"{last_y:.1}\" x2=\"{W}\" y2=\"{last_y:.1}\" class=\"chart-guide\" vector-effect=\"non-scaling-stroke\"/>\
          <path d=\"{line}\" class=\"chart-line\" fill=\"none\" vector-effect=\"non-scaling-stroke\"/></svg>"
@@ -530,10 +660,74 @@ mod tests {
     }
 
     #[test]
-    fn suggest_is_far_edge_snapped() {
-        // midpoint 0.50, max spread 3c → edge 0.47, tick 0.01 → 0.47.
-        assert_eq!(suggest_placement(dec!(0.50), dec!(3), dec!(0.01)), Some(dec!(0.47)));
-        // no rewards → none.
-        assert_eq!(suggest_placement(dec!(0.50), dec!(0), dec!(0.01)), None);
+    fn score_weight_is_quadratic_and_zero_at_band_edge() {
+        // v = 4c. At the midpoint → 1; 2c away → (2/4)² = 0.25; at/after edge → 0.
+        assert_eq!(score_weight(dec!(0.50), dec!(0.50), dec!(4)), dec!(1));
+        assert_eq!(score_weight(dec!(0.50), dec!(0.48), dec!(4)), dec!(0.25));
+        assert_eq!(score_weight(dec!(0.50), dec!(0.46), dec!(4)), dec!(0));
+        assert_eq!(score_weight(dec!(0.50), dec!(0.40), dec!(4)), dec!(0));
+        // No reward program → 0.
+        assert_eq!(score_weight(dec!(0.50), dec!(0.49), dec!(0)), dec!(0));
+    }
+
+    #[test]
+    fn one_sided_is_divided_by_three_in_range_and_zero_outside() {
+        let w = dec!(0.9);
+        // Midpoint inside [0.10, 0.90]: one-sided scores w / 3.
+        assert_eq!(effective_weight(dec!(0.50), w, None), dec!(0.3));
+        // Outside: one-sided scores nothing.
+        assert_eq!(effective_weight(dec!(0.05), w, None), dec!(0));
+        assert_eq!(effective_weight(dec!(0.95), w, None), dec!(0));
+        // Two-sided outside the range: the weaker leg counts.
+        assert_eq!(effective_weight(dec!(0.05), w, Some(dec!(0.4))), dec!(0.4));
+        // Two-sided inside: max(min(a,b), max(a,b)/3).
+        assert_eq!(effective_weight(dec!(0.50), w, Some(dec!(0.6))), dec!(0.6));
+        assert_eq!(effective_weight(dec!(0.50), w, Some(dec!(0.1))), dec!(0.3));
+    }
+
+    #[test]
+    fn presets_hit_their_target_weight_and_stay_below_best_bid() {
+        // mid 0.50, v = 10c, tick 0.001: plenty of resolution.
+        let ps = placement_presets(dec!(0.50), dec!(10), dec!(0.001), Some(dec!(0.499)));
+        let keys: Vec<_> = ps.iter().map(|p| p.key).collect();
+        assert_eq!(keys, vec!["safer", "balanced", "tight"]);
+        for (p, target) in ps.iter().zip([dec!(0.25), dec!(0.5), dec!(0.75)]) {
+            assert!(p.weight >= target, "{} weight {} < {}", p.key, p.weight, target);
+            assert!(p.price < dec!(0.499));
+        }
+        // Safer: s ≤ 5c → 0.450, weight exactly 0.25.
+        assert_eq!(ps[0].price, dec!(0.45));
+        assert_eq!(ps[0].weight, dec!(0.25));
+    }
+
+    #[test]
+    fn presets_never_suggest_a_zero_score_price() {
+        // Coarse tick vs. a tight band: presets may collapse but never score 0.
+        let ps = placement_presets(dec!(0.505), dec!(3), dec!(0.01), Some(dec!(0.50)));
+        assert!(!ps.is_empty());
+        assert!(ps.iter().all(|p| p.weight > dec!(0) && p.price < dec!(0.50)));
+        // No rewards → no presets.
+        assert!(placement_presets(dec!(0.50), dec!(0), dec!(0.01), None).is_empty());
+    }
+
+    #[test]
+    fn ladder_marks_your_live_orders() {
+        let mut b = book(dec!(0.40), &[(dec!(0.40), dec!(100)), (dec!(0.38), dec!(50))]);
+        b.asks = vec![(dec!(0.42), dec!(10))];
+        b.best_ask = Some(dec!(0.42));
+        let l = build_ladder(&b, dec!(0.41), dec!(3), 10, &[dec!(0.38)], dec!(0.01));
+        let marked: Vec<_> = l.bids.iter().filter(|r| r.is_live_mine).map(|r| r.price_raw.clone()).collect();
+        assert_eq!(marked, vec!["0.38".to_string()]);
+        assert!(l.asks.iter().all(|r| !r.is_live_mine));
+    }
+
+    #[test]
+    fn ladder_shows_cumulative_usd_depth() {
+        // bids: 100 @ 0.40 = $40, then 50 @ 0.38 = $19 → cumulative $40, $59.
+        let b = book(dec!(0.40), &[(dec!(0.40), dec!(100)), (dec!(0.38), dec!(50))]);
+        let l = build_ladder(&b, dec!(0.41), dec!(3), 10, &[], dec!(0.01));
+        assert_eq!(l.bids[0].total_usd, "$40");
+        assert_eq!(l.bids[1].total_usd, "$59");
+        assert_eq!(l.bids[1].total, "150");
     }
 }

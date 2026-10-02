@@ -147,7 +147,7 @@ async fn full_login_grants_access() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    assert!(body_string(res).await.contains("Private Key"));
+    assert!(body_string(res).await.contains("Private key"));
 }
 
 #[tokio::test]
@@ -240,4 +240,130 @@ async fn wrong_password_is_rejected() {
     // Re-renders the login page (200) with an error rather than redirecting.
     assert_eq!(res.status(), StatusCode::OK);
     assert!(body_string(res).await.contains("Incorrect password"));
+}
+
+/// Log in against `app` and return the authenticated session cookie.
+async fn login(app: &Router, pw: &str) -> String {
+    let res = app.clone().oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
+    let cookie = session_cookie(&res).expect("session cookie");
+    let csrf = extract_csrf(&body_string(res).await);
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/login")
+                .header(header::COOKIE, &cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("csrf={csrf}&password={pw}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(res.status().is_redirection());
+    session_cookie(&res).unwrap_or(cookie)
+}
+
+/// An initialized app whose engine state holds one (paused) market leg.
+fn test_app_with_market() -> (Router, String) {
+    use polyfarmer::types::{MarketConfig, OrderStatus};
+    use rust_decimal_macros::dec;
+    let store = CredentialStore::open(unique_dir()).unwrap();
+    let pw = "test-password-123".to_string();
+    store.set_password(&pw).unwrap();
+    let engine = empty_engine();
+    {
+        let mut s = engine.try_write().unwrap();
+        s.configs.push(MarketConfig {
+            id: "mar_test_leg".into(),
+            url: "https://polymarket.com/event/test-event/test-market".into(),
+            label: "Will the test pass?".into(),
+            condition_id: "0xabc".into(),
+            token_id: "123".into(),
+            token_label: "Yes".into(),
+            tick_size: dec!(0.01),
+            distance: dec!(0.02),
+            min_depth_between: dec!(500),
+            order_size: dec!(100),
+            expires_at: chrono::Utc::now() + chrono::Duration::days(7),
+            paused: true,
+            benchmark_bid: None,
+            max_volatility: None,
+        });
+        s.order_status.insert("mar_test_leg".into(), OrderStatus::Idle);
+    }
+    (router(WebState::new(Arc::new(store), engine)), pw)
+}
+
+#[tokio::test]
+async fn every_page_and_fragment_renders() {
+    let (app, pw) = test_app_with_market();
+    let cookie = login(&app, &pw).await;
+    // None of these need the network: no engine/wallet → account panels
+    // render their "not running / no wallet" states.
+    for path in [
+        "/",
+        "/overview/kpis",
+        "/overview/book",
+        "/overview/fills",
+        "/status/strip",
+        "/markets",
+        "/markets/table",
+        "/markets/browse",
+        "/markets/mar_test_leg/edit",
+        "/positions",
+        "/positions/table?tab=open",
+        "/positions/table?tab=trades",
+        "/rewards",
+        "/rewards/table",
+        "/activity",
+        "/activity/recent",
+        "/setup",
+    ] {
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri(path).header(header::COOKIE, &cookie).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{path}");
+        let body = body_string(res).await;
+        assert!(!body.contains("template error"), "{path}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn markets_table_shows_min_depth_in_usd_and_real_status() {
+    let (app, pw) = test_app_with_market();
+    let cookie = login(&app, &pw).await;
+    let res = app
+        .clone()
+        .oneshot(Request::builder().uri("/markets/table").header(header::COOKIE, &cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = body_string(res).await;
+    assert!(body.contains("Will the test pass?"));
+    assert!(body.contains("$500.00"), "min depth shown in USD");
+    assert!(body.contains("2.0¢ below bid"), "peg shown");
+    assert!(body.contains(">Paused<"), "paused leg");
+
+    // Engine never started → the status strip must not claim it's running.
+    let res = app
+        .oneshot(Request::builder().uri("/status/strip").header(header::COOKIE, &cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = body_string(res).await;
+    assert!(body.contains("No wallet"), "{body}");
+    assert!(!body.contains(">Running<"));
+}
+
+#[tokio::test]
+async fn old_reward_history_url_redirects() {
+    let (app, pw) = test_app();
+    let cookie = login(&app, &pw).await;
+    let res = app
+        .oneshot(Request::builder().uri("/rewards/history").header(header::COOKIE, &cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert!(res.status().is_redirection());
+    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/rewards");
 }

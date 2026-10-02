@@ -1,58 +1,76 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>polyfarmer · overview</title>
-  <link rel="stylesheet" href="/assets/app.css" />
-  <script src="/assets/htmx.min.js" defer></script>
-</head>
-<body>
-  <div class="app">
-    {% include "_sidebar.html" %}
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Overview</h1>
+    <div class="sub">{% if st.running %}Farming {{ st.markets }} market{% if st.markets != 1 %}s{% endif %} · {{ st.live_orders }} live order{% if st.live_orders != 1 %}s{% endif %}{% else %}Engine {{ st.phase_label|lower }}{% endif %}</div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/markets/browse"><svg class="i sm"><use href="#i-search"/></svg>Find markets</a>
+  </div>
+</div>
 
-    <div class="main">
-      <header class="topbar">
-        <h1>Overview</h1>
-        {% if engine_running %}
-          <span class="pill live"><span class="dot live"></span> Engine running</span>
-        {% else %}
-          <span class="pill idle"><span class="dot off"></span> Engine idle</span>
-        {% endif %}
-      </header>
+<div class="stack-lg">
+  {% if !has_wallet %}
+  <div class="alert warn"><svg class="i"><use href="#i-warn"/></svg><span>No wallet configured — the engine is idle. <a href="/setup">Add your wallet in Settings</a> to start farming.</span></div>
+  {% else if st.phase_tone == "err" %}
+  <div class="alert err"><svg class="i"><use href="#i-warn"/></svg><span>Engine: {{ st.phase_label }}. Orders are not being placed — check <a href="/activity">Activity</a> and the logs.</span></div>
+  {% endif %}
 
-      <div class="content">
-        {% if !has_wallet %}
-          <div class="warn">No wallet configured. <a href="/setup">Add it in Setup</a> to start trading.</div>
-        {% endif %}
-
-        <section class="stats" style="margin-top:18px">
-          <div class="stat">
-            <div class="k">Active markets</div>
-            <div class="val num">{{ active_markets }}<span style="font-size:15px;color:var(--faint)"> / {{ total_markets }}</span></div>
-            <div class="sub">{{ paused_markets }} paused</div>
-          </div>
-          <div class="stat">
-            <div class="k">Live orders</div>
-            <div class="val num">{{ live_orders }}</div>
-            <div class="sub">resting near midpoint</div>
-          </div>
-          <div class="stat">
-            <div class="k">Wallet</div>
-            <div class="val">{% if has_wallet %}Configured{% else %}Not set{% endif %}</div>
-            <div class="sub">encrypted at rest</div>
-          </div>
-          <div class="stat">
-            <div class="k">Rewards today</div>
-            <div class="val num">{% if let Some(r) = rewards_today %}{{ r }}{% else %}&mdash;{% endif %}</div>
-            <div class="sub">{% if rewards_today.is_some() %}still accruing, see <a href="/rewards">Rewards</a>{% else %}engine not running{% endif %}</div>
-          </div>
-        </section>
-
-        <p class="muted">Manage which markets you're farming on the <a href="/markets">Markets</a> page.</p>
-      </div>
+  <div id="kpis" hx-get="/overview/kpis" hx-trigger="load, pf:state from:body delay:500ms, every 30s" hx-swap="innerHTML">
+    <div class="kpis">
+      {% for _k in [1, 2, 3, 4, 5] %}<div class="kpi"><span class="skel" style="width:80px"></span><div class="skel v"></div></div>{% endfor %}
     </div>
   </div>
-  {% include "_toasts.html" %}
-</body>
-</html>
+
+  <div class="grid side-main">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Your book</h2>
+        <a class="meta" href="/markets">Manage markets →</a>
+      </div>
+      <div id="overview-book" hx-get="/overview/book" hx-trigger="pf:state from:body, every 10s" hx-swap="innerHTML">
+        {% include "_overview_book.html" %}
+      </div>
+    </section>
+
+    <div class="stack-lg">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Rewards · last 30 days</h2>
+          <a class="meta" href="/rewards">Details →</a>
+        </div>
+        <div class="panel-body">
+          <div class="kv" style="margin-bottom:12px">
+            <div class="kv-row"><span class="k">Last 7 days</span><span class="v">{{ rewards_7d }}</span></div>
+            <div class="kv-row"><span class="k">Last 30 days</span><span class="v">{{ rewards_30d }}</span></div>
+          </div>
+          {{ chart_svg|safe }}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Recent fills</h2><a class="meta" href="/positions">Positions →</a></div>
+        <div hx-get="/overview/fills" hx-trigger="load, every 30s" hx-swap="innerHTML">
+          <div class="skel-rows"><span class="skel"></span><span class="skel"></span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Recent activity</h2><a class="meta" href="/activity">All →</a></div>
+        <div class="feed compact pf-feed" data-limit="6">
+          {% for a in alerts %}
+          <div class="feed-row {{ a.level }} tone-{{ a.tone }}" data-cat="{{ a.category }}">
+            <span class="dot"></span>
+            <div><div class="feed-title">{{ a.title }}</div>{% if !a.body.is_empty() %}<div class="feed-body">{{ a.body }}</div>{% endif %}</div>
+            <span class="feed-time" data-ts="{{ a.ts_iso }}">{{ a.time_hm }}</span>
+          </div>
+          {% endfor %}
+          {% if alerts.is_empty() %}<div class="feed-empty">Nothing yet — events appear here live.</div>{% endif %}
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}

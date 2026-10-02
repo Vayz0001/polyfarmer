@@ -1,53 +1,27 @@
 {% if !ladder.has_book %}
-<div class="empty">Order book unavailable right now. Retrying&hellip;</div>
+<div class="book-row empty-row">Order book unavailable right now — retrying…</div>
 {% else %}
-<span id="book-data" hidden
-      data-blo="{{ ladder.band_lo_cents }}" data-bhi="{{ ladder.band_hi_cents }}"
-      data-usdc="{{ ladder.in_zone_usdc }}" data-inzone="{{ ladder.in_zone_raw }}"></span>
-<div class="book-ladder">
-  <div class="book-side asks">
-    {% for r in ladder.asks %}
-    <div class="book-row {{ r.side }}{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}" data-price="{{ r.price_raw }}">
-      <span class="book-bar" style="width:{{ r.depth_pct }}%"></span>
-      <span class="book-price num">{{ r.price_cents }}&cent;</span>
-      <span class="book-size num">{{ r.size }}</span>
-      <span class="book-total num">{{ r.total }}</span>
-    </div>
-    {% endfor %}
-    {% if ladder.asks.is_empty() %}
-    <div class="book-row empty-row">no asks</div>
-    {% endif %}
+<span id="book-data" hidden data-bb="{{ ladder.best_bid_raw }}" data-ba="{{ ladder.best_ask_raw }}" data-mid="{{ ladder.midpoint_raw }}"
+      data-blo="{{ ladder.band_lo_cents }}" data-bhi="{{ ladder.band_hi_cents }}" data-usdc="{{ ladder.in_zone_usdc }}"></span>
+<div class="book-side asks">
+  {% for r in ladder.asks %}
+  <div class="book-row ask{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}" data-price="{{ r.price_raw }}">
+    <span class="bar" style="width:{{ r.depth_pct }}%"></span><span class="px">{{ r.price_cents }}¢</span><span class="sz">{{ r.size }}</span><span class="tot">{{ r.total }}</span><span class="usd">{{ r.total_usd }}</span>
   </div>
-
-  <div class="book-spread">
-    <div class="spread-item">
-      <span class="spread-label">Best bid</span>
-      <span class="spread-value bid">{{ ladder.best_bid_cents }}&cent;</span>
-    </div>
-    <div class="spread-item">
-      <span class="spread-label">Midpoint</span>
-      <span class="spread-value">{{ ladder.midpoint_cents }}&cent;</span>
-      <span class="spread-sub">{{ ladder.spread_cents }}&cent; spread</span>
-    </div>
-    <div class="spread-item">
-      <span class="spread-label">Best ask</span>
-      <span class="spread-value ask">{{ ladder.best_ask_cents }}&cent;</span>
-    </div>
+  {% endfor %}
+  {% if ladder.asks.is_empty() %}<div class="book-row empty-row">No asks</div>{% endif %}
+</div>
+<div class="book-spread" id="book-spread">
+  <div><div class="k">Best bid</div><div class="v bid">{{ ladder.best_bid_cents }}¢</div></div>
+  <div><div class="k">Mid · spread {{ ladder.spread_cents }}¢</div><div class="v">{{ ladder.midpoint_cents }}¢</div></div>
+  <div><div class="k">Best ask</div><div class="v ask">{{ ladder.best_ask_cents }}¢</div></div>
+</div>
+<div class="book-side bids">
+  {% for r in ladder.bids %}
+  <div class="book-row bid{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}{% if r.is_live_mine %} live-mine{% endif %}" data-price="{{ r.price_raw }}" data-action="book-price">
+    <span class="bar" style="width:{{ r.depth_pct }}%"></span><span class="px">{{ r.price_cents }}¢</span><span class="sz">{{ r.size }}</span><span class="tot">{{ r.total }}</span><span class="usd">{{ r.total_usd }}</span>
   </div>
-
-  <div class="book-side bids">
-    {% for r in ladder.bids %}
-    <div class="book-row {{ r.side }}{% if r.in_band %} in-band{% endif %}{% if r.is_best %} best{% endif %}"
-         data-price="{{ r.price_raw }}" onclick="pfSetPrice('{{ r.price_raw }}')">
-      <span class="book-bar" style="width:{{ r.depth_pct }}%"></span>
-      <span class="book-price num">{{ r.price_cents }}&cent;</span>
-      <span class="book-size num">{{ r.size }}</span>
-      <span class="book-total num">{{ r.total }}</span>
-    </div>
-    {% endfor %}
-    {% if ladder.bids.is_empty() %}
-    <div class="book-row empty-row">no bids</div>
-    {% endif %}
-  </div>
+  {% endfor %}
+  {% if ladder.bids.is_empty() %}<div class="book-row empty-row">No bids</div>{% endif %}
 </div>
 {% endif %}

@@ -1,60 +1,24 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>polyfarmer · choose a market</title>
-  <link rel="stylesheet" href="/assets/app.css" />
-  <script src="/assets/htmx.min.js" defer></script>
-</head>
-<body>
-  <div class="app">
-    {% include "_sidebar.html" %}
-
-    <div class="main">
-      <header class="topbar">
-        <h1>Choose a market</h1>
-        <a class="btn ghost" href="/markets">&larr; Markets</a>
-      </header>
-
-      <div class="content">
-        <p class="muted" style="margin-top:0">This event has more than one market. Pick the one you want to farm.</p>
-        <div class="panel pf-rise">
-          <table>
-            <thead>
-              <tr><th>Candidate</th><th>Prices</th><th>Rewards</th><th></th></tr>
-            </thead>
-            <tbody>
-              {% for c in candidates %}
-              <tr>
-                <td class="mkt">
-                  {% if let Some(img) = c.image %}<img src="{{ img }}" alt="" class="market-img" />{% endif %}
-                  {{ c.label }}
-                </td>
-                <td class="num">
-                  {% for (o, p) in c.outcomes.iter().zip(c.prices_cents.iter()) %}{{ o }} {{ p }}&cent;{% if !loop.last %} &middot; {% endif %}{% endfor %}
-                </td>
-                <td>
-                  {% if c.has_rewards %}
-                  <span class="pill live"><span class="dot live"></span>Eligible</span>
-                  {% else %}
-                  <span class="pill idle">No rewards</span>
-                  {% endif %}
-                </td>
-                <td class="row-actions">
-                  <a class="btn ghost sm" href="/markets/view?slug={{ c.market_slug }}">Configure &rarr;</a>
-                </td>
-              </tr>
-              {% endfor %}
-              {% if candidates.is_empty() %}
-              <tr><td colspan="4"><div class="empty">No tradeable markets found for this URL.</div></td></tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  </div>
-  {% include "_toasts.html" %}
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Choose a market{% endblock %}
+{% block content %}
+<a class="crumb" href="/markets"><svg class="i sm"><use href="#i-back"/></svg>Markets</a>
+<div class="page-head">
+  <div><h1>Choose a market</h1><div class="sub">This event has several markets — pick the one to farm.</div></div>
+</div>
+<section class="panel">
+  <table class="tbl">
+    <thead><tr><th>Candidate</th><th>Prices</th><th>Rewards</th><th></th></tr></thead>
+    <tbody>
+      {% for c in candidates %}
+      <tr>
+        <td class="mkt"><div class="mkt-title">{% if let Some(img) = c.image %}<img class="thumb" src="{{ img }}" alt="" />{% endif %}<a class="name" href="/markets/view?slug={{ c.market_slug }}">{{ c.label }}</a></div></td>
+        <td class="num muted">{% for (o, p) in c.outcomes.iter().zip(c.prices_cents.iter()) %}{{ o }} {{ p }}¢{% if !loop.last %} · {% endif %}{% endfor %}</td>
+        <td>{% if c.has_rewards %}<span class="pill ok">Eligible</span>{% else %}<span class="pill">None</span>{% endif %}</td>
+        <td class="right"><a class="btn sm" href="/markets/view?slug={{ c.market_slug }}">Open<svg class="i sm"><use href="#i-chev"/></svg></a></td>
+      </tr>
+      {% endfor %}
+      {% if candidates.is_empty() %}<tr><td colspan="4"><div class="empty">No tradeable markets found for this URL.</div></td></tr>{% endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

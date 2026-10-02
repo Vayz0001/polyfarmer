@@ -1,63 +1,79 @@
 <div class="panel-head">
-  <h2>Tracked markets</h2>
-  <span class="hint">{{ rows.len() }} configured &middot; auto-refreshing</span>
+  <h2>Tracked markets <span class="faint num">{{ rows.len() }}</span></h2>
+  <span class="meta">live · updates as the engine acts</span>
 </div>
-<table>
+{% if let Some(f) = flash %}<div class="panel-body" style="padding-bottom:0"><div class="alert err"><svg class="i"><use href="#i-warn"/></svg>{{ f }}</div></div>{% endif %}
+{% if rows.is_empty() %}
+<div class="empty">
+  <h3>No markets yet</h3>
+  <div>Browse reward-eligible markets, or paste a Polymarket URL above.</div>
+  <div class="actions"><a class="btn primary" href="/markets/browse"><svg class="i sm"><use href="#i-search"/></svg>Browse markets</a></div>
+</div>
+{% else %}
+<div class="tbl-wrap">
+<table class="tbl">
   <thead>
-    <tr><th>Market</th><th>Side</th><th>Distance</th><th>Size</th><th>Status</th><th></th></tr>
-  </thead>
-  <tbody>
-    {% for row in rows %}
     <tr>
-      <td class="mkt">
-        <a class="mkt-link" href="/markets/view?slug={{ row.slug }}">{{ row.label }}</a>
-        <a class="mkt-ext" href="{{ row.url }}" target="_blank" rel="noopener noreferrer" title="Open on Polymarket" aria-label="Open on Polymarket">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5h5v5"/><path d="M19 5l-8 8"/><path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4"/></svg>
-        </a>
-      </td>
-      <td>
-        {% for leg in row.legs %}
-        <div class="leg-line"><span class="side-{{ leg.side_class }}">{{ leg.side_label }}</span> &middot; BUY</div>
-        {% endfor %}
-      </td>
-      <td class="num">
-        {% for leg in row.legs %}<div class="leg-line">{{ leg.distance }}</div>{% endfor %}
-      </td>
-      <td class="num">
-        {% for leg in row.legs %}<div class="leg-line">{{ leg.size }}</div>{% endfor %}
-      </td>
-      <td>
-        {% for leg in row.legs %}
-        <div class="leg-line">
-          <span class="pill {{ leg.status_class }}">
-            {% if leg.status_class == "live" %}<span class="dot live"></span>{% endif %}
-            {{ leg.status_label }}{% if let Some(p) = leg.price %} &middot; {{ p }}{% endif %}
-          </span>
-          {% if let Some(scoring) = leg.scoring %}
-          <span class="pill sm {% if scoring %}live{% else %}paused{% endif %}" style="margin-left:6px">
-            {% if scoring %}Scoring{% else %}Not scoring{% endif %}
-          </span>
+      <th>Market</th><th>Side</th><th>Status</th>
+      <th class="num">Bid</th><th class="num" title="Mid price">Δ mid</th>
+      <th class="num">Score <span class="tip left" tabindex="0" data-tip="Reward weight of your live order: ((zone − distance from mid) / zone)². ✓ = Polymarket confirms it's scoring. 'out' = drifted outside the reward zone, earning nothing.">i</span></th>
+      <th>Peg</th><th class="num">Size</th><th class="num">Min depth</th><th>Expires</th><th></th>
+    </tr>
+  </thead>
+  {% for row in rows %}
+  <tbody class="group">
+    {% for leg in row.legs %}
+    <tr>
+      {% if loop.first %}
+      <td class="mkt" rowspan="{{ row.legs.len() }}">
+        <div class="mkt-title">
+          <a class="name" href="/markets/view?slug={{ row.slug }}" title="{{ row.label }}">{{ row.label }}</a>
+          <a class="ext" href="{{ row.url }}" target="_blank" rel="noopener noreferrer" title="Open on Polymarket"><svg class="i sm"><use href="#i-ext"/></svg></a>
+        </div>
+        <div class="mkt-sub">
+          {% if let Some(ms) = row.max_spread %}zone {{ ms }} · {% endif %}{{ row.legs.len() }} leg{% if row.legs.len() != 1 %}s{% endif %}
+          {% if row.legs.len() > 1 %}·
+            {% if row.all_paused %}
+            <a href="#" hx-post="/markets/group/{{ row.condition_id }}/resume" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#markets-panel">resume both</a>
+            {% else %}
+            <a href="#" hx-post="/markets/group/{{ row.condition_id }}/pause" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#markets-panel">pause both</a>
+            {% endif %}
           {% endif %}
         </div>
-        {% endfor %}
       </td>
+      {% endif %}
+      <td><span class="leg-label side-{{ leg.side_class }}">{{ leg.side_label }}</span></td>
+      <td><span class="pill {{ leg.status_class }}">{{ leg.status_label }}</span></td>
+      <td class="num">{% if let Some(p) = leg.price %}{{ p }}¢{% else %}<span class="faint">—</span>{% endif %}</td>
+      <td class="num"><div class="cell-stack">{% if let Some(d) = leg.dmid %}<span>{{ d }}¢</span>{% else %}<span class="faint">—</span>{% endif %}{% if let Some(m) = leg.mid %}<small>mid {{ m }}¢</small>{% endif %}</div></td>
+      <td class="num">
+        <span class="score-cell">
+        {% if let Some(w) = leg.weight %}
+          {% if leg.in_zone == Some(true) %}<span class="zone in">{{ w }}</span>{% else %}<span class="zone out" title="Outside the reward zone — earning nothing right now">out</span>{% endif %}
+        {% else %}<span class="faint">—</span>{% endif %}
+        {% match leg.scoring %}{% when Some(true) %}<span class="check" title="Polymarket: scoring">✓</span>{% when Some(false) %}<span class="cross" title="Polymarket: not scoring">✗</span>{% when None %}{% endmatch %}
+        </span>
+      </td>
+      <td class="nowrap muted">{{ leg.peg }}{% if let Some(v) = leg.auto_pause %} <span class="tag" title="Auto-pauses if the best bid moves {{ v }} from where it started">±{{ v }}</span>{% endif %}</td>
+      <td class="num"><div class="cell-stack"><span>{{ leg.size }}</span>{% if let Some(s) = leg.shares %}<small>{{ s }}</small>{% endif %}</div></td>
+      <td class="num">{{ leg.min_depth }}</td>
+      <td class="nowrap"><span class="{% if leg.status_class == "expired" %}neg{% else %}muted{% endif %}" title="{{ leg.expires_title }}">{{ leg.expires }}</span></td>
       <td>
-        {% for leg in row.legs %}
-        <div class="leg-line leg-actions">
+        <div class="row-actions">
           {% if leg.paused %}
-          <button class="btn ghost sm" hx-post="/markets/{{ leg.id }}/resume" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none">Resume</button>
+          <button class="btn ghost icon" title="Resume" hx-post="/markets/{{ leg.id }}/resume" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#markets-panel"><svg class="i sm"><use href="#i-play"/></svg></button>
           {% else %}
-          <button class="btn ghost sm" hx-post="/markets/{{ leg.id }}/pause" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none">Pause</button>
+          <button class="btn ghost icon" title="Pause (cancels its order)" hx-post="/markets/{{ leg.id }}/pause" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#markets-panel"><svg class="i sm"><use href="#i-pause"/></svg></button>
           {% endif %}
-          <button class="btn ghost sm" hx-post="/markets/{{ leg.id }}/remove" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-swap="none"
-                  hx-confirm="Remove the {{ leg.side_label }} order on “{{ row.label }}”? Its resting order will be cancelled.">Remove</button>
+          <button class="btn ghost icon" title="Edit" hx-get="/markets/{{ leg.id }}/edit" hx-target="#pf-drawer"><svg class="i sm"><use href="#i-edit"/></svg></button>
+          <button class="btn ghost icon danger" title="Remove" hx-post="/markets/{{ leg.id }}/remove" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#markets-panel"
+                  hx-confirm="Remove the {{ leg.side_label }} leg of “{{ row.label }}”? Its resting order is cancelled."><svg class="i sm"><use href="#i-trash"/></svg></button>
         </div>
-        {% endfor %}
       </td>
     </tr>
     {% endfor %}
-    {% if rows.is_empty() %}
-    <tr><td colspan="6"><div class="empty">No markets configured yet. <a href="/markets/browse">Browse reward-eligible markets</a> or <a href="/markets/add">add one by URL</a>.</div></td></tr>
-    {% endif %}
   </tbody>
+  {% endfor %}
 </table>
+</div>
+{% endif %}

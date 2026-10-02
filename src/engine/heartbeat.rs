@@ -29,6 +29,7 @@ pub fn spawn(
                                 info!("Heartbeat recovered after {} failures", failures);
                             }
                             failures = 0;
+                            state.write().await.last_heartbeat_ok = Some(std::time::Instant::now());
 
                             // Clear pause flag if heartbeat recovers
                             let was_paused = {

@@ -1,46 +1,35 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>polyfarmer · browse markets</title>
-  <link rel="stylesheet" href="/assets/app.css" />
-  <script src="/assets/htmx.min.js" defer></script>
-</head>
-<body>
-  <div class="app">
-    {% include "_sidebar.html" %}
-
-    <div class="main">
-      <header class="topbar">
-        <h1>Browse reward-eligible markets</h1>
-        <a class="btn ghost" href="/markets">&larr; Markets</a>
-      </header>
-
-      <div class="content">
-        <form id="browse-form" class="row" style="gap:10px;margin-top:0"
-              hx-get="/markets/browse/results" hx-target="#browse-results" hx-swap="innerHTML"
-              hx-trigger="input changed delay:300ms from:#browse-q, change from:#browse-sort, change from:#browse-dir">
-          <input class="inp" type="text" name="q" id="browse-q" placeholder="Search markets&hellip;" value="{{ q }}" style="flex:1" />
-          <select class="inp" name="sort" id="browse-sort" style="width:auto">
-            <option value="rate_per_day" selected={{ sort == "rate_per_day" }}>Daily pool</option>
-            <option value="spread" selected={{ sort == "spread" }}>Tightest spread</option>
-            <option value="volume_24hr" selected={{ sort == "volume_24hr" }}>24h volume</option>
-            <option value="competitiveness" selected={{ sort == "competitiveness" }}>Least crowded</option>
-          </select>
-          <select class="inp" name="dir" id="browse-dir" style="width:auto">
-            <option value="DESC" selected={{ dir == "DESC" }}>High to low</option>
-            <option value="ASC" selected={{ dir == "ASC" }}>Low to high</option>
-          </select>
-        </form>
-
-        <div id="browse-results" class="panel" style="margin-top:18px"
-             hx-get="/markets/browse/results?sort={{ sort }}&dir={{ dir }}" hx-trigger="load" hx-swap="innerHTML">
-          <div class="empty">Loading&hellip;</div>
-        </div>
-      </div>
-    </div>
+{% extends "base.html" %}
+{% block title %}Find markets{% endblock %}
+{% block content %}
+<a class="crumb" href="/markets"><svg class="i sm"><use href="#i-back"/></svg>Markets</a>
+<div class="page-head">
+  <div>
+    <h1>Reward-eligible markets</h1>
+    <div class="sub">Polymarket pays makers daily on these. Bigger pool and fewer competitors = more for you.</div>
   </div>
-  {% include "_toasts.html" %}
-</body>
-</html>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <form id="browse-form" class="toolbar" style="flex:1"
+          hx-get="/markets/browse/results" hx-target="#browse-results" hx-swap="innerHTML"
+          hx-trigger="input changed delay:300ms from:#browse-q, change from:#browse-sort, change from:#browse-dir">
+      <div class="affix" style="flex:1;max-width:420px"><input class="input" type="search" name="q" id="browse-q" placeholder="Search markets…" value="{{ q }}" style="height:30px" /></div>
+      <select class="input" name="sort" id="browse-sort" style="width:auto;height:30px">
+        <option value="rate_per_day" {% if sort == "rate_per_day" %}selected{% endif %}>Daily pool</option>
+        <option value="competitiveness" {% if sort == "competitiveness" %}selected{% endif %}>Competition</option>
+        <option value="spread" {% if sort == "spread" %}selected{% endif %}>Spread</option>
+        <option value="volume_24hr" {% if sort == "volume_24hr" %}selected{% endif %}>24h volume</option>
+        <option value="end_date" {% if sort == "end_date" %}selected{% endif %}>End date</option>
+      </select>
+      <select class="input" name="dir" id="browse-dir" style="width:auto;height:30px">
+        <option value="DESC" {% if dir == "DESC" %}selected{% endif %}>High → low</option>
+        <option value="ASC" {% if dir == "ASC" %}selected{% endif %}>Low → high</option>
+      </select>
+    </form>
+  </div>
+  <div id="browse-results" hx-get="/markets/browse/results?sort={{ sort }}&dir={{ dir }}&q={{ q|urlencode }}" hx-trigger="load" hx-swap="innerHTML">
+    <div class="skel-rows"><span class="faint">Loading reward markets from Polymarket — the first load can take a few seconds…</span><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>
+  </div>
+</section>
+{% endblock %}
