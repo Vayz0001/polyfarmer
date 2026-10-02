@@ -165,8 +165,11 @@ pub async fn set_wallet(
 
     match state.store.set_wallet(key, wallet) {
         Ok(_) => {
-            state.set_wallet_address(Some(wallet.to_string()));
             if first_time {
+                // Only show the new address once the engine is (re)starting on
+                // it. While an engine is Running on the old wallet, the
+                // dashboard must keep describing that wallet until a restart.
+                state.set_wallet_address(Some(wallet.to_string()));
                 // Wake the parked boot task so it starts the engine now, and
                 // hand off to the launch screen, which polls the engine up and
                 // flows straight into the dashboard — no restart.

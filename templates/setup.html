@@ -19,12 +19,12 @@
         <div class="wallet-box"><svg class="i sm"><use href="#i-positions"/></svg><span>{{ w }}</span></div>
       </div>
       {% endif %}
-      <p class="muted">{% if has_wallet %}Replace the wallet below. Switching wallets takes effect after a restart, so no open orders are orphaned.{% else %}Paste the private key of the wallet you trade with. It's encrypted on this machine and never sent anywhere — only its public address is used to look up your Polymarket wallet.{% endif %}</p>
+      <p class="muted">{% if has_wallet %}Replacing the wallet takes effect after a restart. <b>Pause or remove all markets first</b> — orders on the old account aren't cancelled automatically.{% else %}Paste the private key of the wallet you trade with. It's encrypted on this machine and never sent anywhere — only its public address is used to look up your Polymarket wallet.{% endif %}</p>
 
       <form class="stack" method="post" action="/setup/wallet" hx-post="/setup/wallet" hx-target="#save-region" hx-swap="innerHTML">
         <input type="hidden" name="csrf" value="{{ csrf_token }}" />
         <div class="field">
-          <label class="label" for="private_key">Private key</label>
+          <label class="label" for="private_key">Private key{% if has_wallet %} <span class="tip left" tabindex="0" data-tip="Before changing accounts: pause or remove every market so no orders are left resting on the old account. They are NOT cancelled automatically, and the new account starts from the saved market list. Restart the bot after saving.">i</span>{% endif %}</label>
           <div class="affix">
             <input class="input mono" type="password" name="private_key" id="private_key" placeholder="0x…" required maxlength="66" autocomplete="off" spellcheck="false"
                    data-keycheck
