@@ -1,43 +1,48 @@
 {% if let Some(e) = error %}
-<div class="err">{{ e }}</div>
+<div class="panel-body"><div class="alert err"><svg class="i"><use href="#i-warn"/></svg>{{ e }}</div></div>
 {% else %}
-<table>
+{% if !append %}
+<table class="tbl" id="browse-table">
   <thead>
-    <tr><th>Market</th><th>Daily pool</th><th>Qualify</th><th>Spread now</th><th>24h volume</th><th></th></tr>
+    <tr><th>Market</th><th class="num">Daily pool</th><th class="num">Zone</th><th class="num">Min size</th><th class="num">Spread now</th><th class="num">24h vol</th><th>Ends</th><th></th></tr>
   </thead>
-  <tbody>
+  <tbody id="browse-body">
+{% endif %}
     {% for row in rows %}
     <tr>
       <td class="mkt">
-        {{ row.question }}
-        <small>
-          {% for (o, p) in row.outcomes.iter().zip(row.prices_cents.iter()) %}{{ o }} {{ p }}&cent;{% if !loop.last %} &middot; {% endif %}{% endfor %}
-        </small>
+        <div class="mkt-title">
+          {% if let Some(img) = row.image %}<img class="thumb" src="{{ img }}" alt="" loading="lazy" />{% endif %}
+          <div style="min-width:0">
+            <a class="name" href="/markets/view?slug={{ row.market_slug }}" title="{{ row.question }}">{{ row.question }}</a>
+            <div class="mkt-sub">
+              {% for (o, p) in row.outcomes.iter().zip(row.prices_cents.iter()) %}{{ o }} <span class="num">{{ p }}¢</span>{% if !loop.last %} · {% endif %}{% endfor %}
+              {% if row.needs_two_sided %} · <span class="tag warn" title="Midpoint is outside 10–90¢: only two-sided liquidity scores">2-sided only</span>{% endif %}
+              {% if row.farming %} · <span class="tag accent">farming</span>{% endif %}
+            </div>
+          </div>
+        </div>
       </td>
-      <td class="num">{{ row.daily_pool }}</td>
-      <td>
-        <span class="pill {% if row.qualifies_now %}live{% else %}paused{% endif %}">
-          {% if row.qualifies_now %}<span class="dot live"></span>{% endif %}
-          {{ row.min_size }} min &middot; {{ row.max_spread }} max
-        </span>
-      </td>
-      <td class="num">{{ row.spread_now }}</td>
+      <td class="num"><b>{{ row.daily_pool }}</b></td>
+      <td class="num">{{ row.max_spread }}</td>
+      <td class="num">{{ row.min_size }} sh</td>
+      <td class="num"><span class="{% if row.qualifies_now %}pos{% else %}faint{% endif %}" title="{% if row.qualifies_now %}Current spread is inside the reward zone{% else %}Spread is wider than the reward zone right now{% endif %}">{{ row.spread_now }}</span></td>
       <td class="num">{{ row.volume_24hr }}</td>
-      <td>
-        <a class="btn ghost sm" href="/markets/view?slug={{ row.market_slug }}">Configure &rarr;</a>
-      </td>
+      <td class="nowrap muted">{{ row.ends }}</td>
+      <td class="right"><a class="btn sm" href="/markets/view?slug={{ row.market_slug }}">Open<svg class="i sm"><use href="#i-chev"/></svg></a></td>
     </tr>
     {% endfor %}
-    {% if rows.is_empty() %}
-    <tr><td colspan="6"><div class="empty">No reward-eligible markets matched.</div></td></tr>
+    {% if rows.is_empty() && !append %}
+    <tr><td colspan="8"><div class="empty">No reward-eligible markets matched.</div></td></tr>
     {% endif %}
+    {% if has_more %}
+    <tr id="browse-more"><td colspan="8" class="right" style="text-align:center">
+      <button class="btn sm" hx-get="/markets/browse/results?q={{ q|urlencode }}&sort={{ sort }}&dir={{ dir }}&cursor={{ next_cursor|urlencode }}"
+              hx-target="#browse-more" hx-swap="outerHTML">Load more</button>
+    </td></tr>
+    {% endif %}
+{% if !append %}
   </tbody>
 </table>
-{% if has_more %}
-<div style="margin-top:12px">
-  <button class="btn ghost sm"
-          hx-get="/markets/browse/results?q={{ q }}&sort={{ sort }}&dir={{ dir }}&cursor={{ next_cursor }}"
-          hx-target="#browse-results" hx-swap="innerHTML">Load more</button>
-</div>
 {% endif %}
 {% endif %}

@@ -1,107 +1,80 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>polyfarmer · setup</title>
-  <link rel="stylesheet" href="/assets/app.css" />
-  <script src="/assets/htmx.min.js" defer></script>
-  <script>
-    // Pure client-side format check — instant, no network round-trip.
-    // A private key is exactly 64 hex chars, optionally 0x-prefixed.
-    // 'partial' covers a key that's still being typed/pasted (or edited
-    // down to nothing) — it's not wrong yet, so we stay quiet rather than
-    // flashing "invalid" on every keystroke.
-    function pfKeyState(v) {
-      const body = v.trim().replace(/^0[xX]/, '');
-      if (body.length === 0) return 'empty';
-      if (!/^[0-9a-fA-F]*$/.test(body)) return 'invalid';
-      if (body.length < 64) return 'partial';
-      if (body.length === 64) return 'complete';
-      return 'invalid';
-    }
-    function pfKeyLooksValid(v) {
-      return pfKeyState(v) === 'complete';
-    }
-    function pfToggleKeyVisibility(btn) {
-      const el = document.getElementById('private_key');
-      const show = el.type === 'password';
-      el.type = show ? 'text' : 'password';
-      btn.classList.toggle('is-shown', show);
-      btn.setAttribute('aria-label', show ? 'Hide private key' : 'Show private key');
-      btn.setAttribute('aria-pressed', show ? 'true' : 'false');
-    }
-    function pfOnKeyInput(el) {
-      const state = pfKeyState(el.value);
-      const status = document.getElementById('wallet-detect-status');
-      const wrap = document.getElementById('wallet-field-wrap');
-      if (state !== 'complete') {
-        wrap.classList.add('pf-collapse');
-        wrap.classList.remove('pf-expand');
-      }
-      // No entrance animation here on purpose — these are transient,
-      // instant, client-only states. The one animated moment is reserved
-      // for the server-confirmed result swapped in below.
-      if (state === 'empty' || state === 'partial') {
-        status.innerHTML = '';
-      } else if (state === 'invalid') {
-        status.innerHTML = '<div class="muted" style="margin-top:6px">Invalid private key</div>';
-      } else {
-        status.innerHTML = '<div class="muted" style="margin-top:6px">Checking on-chain…</div>';
-      }
-    }
-  </script>
-</head>
-<body>
-  <main class="wrap">
-    <div class="card setup">
-      <div class="setup-head">
-        <div class="brand"><span class="logo">P</span> polyfarmer <span class="v">setup</span></div>
-        <form method="post" action="/logout">
-          <button class="icon-btn" type="submit" aria-label="Log out">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
-          </button>
-        </form>
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Settings</h1><div class="sub">Wallet, access and display preferences.</div></div>
+</div>
+<div class="settings">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Wallet</h2>
+      <span id="key-badge">{% if has_wallet %}<span class="pill ok">Configured</span>{% else %}<span class="pill warn">Not set</span>{% endif %}</span>
+    </div>
+    <div class="panel-body stack">
+      {% if let Some(n) = notice %}<div class="alert ok">{{ n }}</div>{% endif %}
+      {% if let Some(e) = error %}<div class="alert err">{{ e }}</div>{% endif %}
+      {% if let Some(w) = wallet_addr %}
+      <div class="field">
+        <span class="label">Trading as</span>
+        <div class="wallet-box"><svg class="i sm"><use href="#i-positions"/></svg><span>{{ w }}</span></div>
       </div>
+      {% endif %}
+      <p class="muted">{% if has_wallet %}Replace the wallet below. Switching wallets takes effect after a restart, so no open orders are orphaned.{% else %}Paste the private key of the wallet you trade with. It's encrypted on this machine and never sent anywhere — only its public address is used to look up your Polymarket wallet.{% endif %}</p>
 
-      {% if let Some(n) = notice %}<div class="ok">{{ n }}</div>{% endif %}
-      {% if let Some(e) = error %}<div class="err">{{ e }}</div>{% endif %}
-
-      <form class="stack section" method="post" action="/setup/wallet"
-            hx-post="/setup/wallet" hx-target="#save-region" hx-swap="innerHTML">
-        <div class="lbl-row">
-          <label class="h" for="private_key">Private Key</label>
-          <span id="key-badge">{% if has_wallet %}<span class="ok-inline">✓ configured</span>{% endif %}</span>
-        </div>
+      <form class="stack" method="post" action="/setup/wallet" hx-post="/setup/wallet" hx-target="#save-region" hx-swap="innerHTML">
         <input type="hidden" name="csrf" value="{{ csrf_token }}" />
-        <div class="inp-wrap">
-          <input class="inp" type="password" name="private_key" id="private_key" placeholder="0x…" required
-                 maxlength="66" oninput="pfOnKeyInput(this)" style="padding-right:42px"
-                 hx-post="/setup/wallet/detect" hx-trigger="input changed delay:150ms[pfKeyLooksValid(this.value)]"
-                 hx-target="#wallet-detect-status" hx-swap="innerHTML" />
-          <button type="button" class="inp-action" aria-label="Show private key" aria-pressed="false" onclick="pfToggleKeyVisibility(this)">
-            <svg class="ico-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-            <svg class="ico-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
-          </button>
+        <div class="field">
+          <label class="label" for="private_key">Private key</label>
+          <div class="affix">
+            <input class="input mono" type="password" name="private_key" id="private_key" placeholder="0x…" required maxlength="66" autocomplete="off" spellcheck="false"
+                   data-keycheck
+                   hx-post="/setup/wallet/detect" hx-trigger="input changed delay:150ms[PF.keyLooksValid(this.value)]"
+                   hx-target="#wallet-detect-status" hx-swap="innerHTML" hx-include="[name='csrf']" />
+            <button type="button" class="btn ghost icon act" data-action="reveal" aria-label="Show private key" aria-pressed="false"><svg class="i sm"><use href="#i-eye"/></svg></button>
+          </div>
         </div>
         <div id="wallet-detect-status"></div>
         <div id="wallet-field-wrap" class="pf-collapse">
-          <div class="lbl-row">
-            <label class="h" for="proxy_wallet">Wallet Address</label>
-          </div>
-          <input class="inp" type="text" name="proxy_wallet" id="proxy_wallet"
-                 placeholder="0x…" required />
+          <label class="label" for="proxy_wallet">Polymarket wallet address</label>
+          <input class="input mono" type="text" name="proxy_wallet" id="proxy_wallet" placeholder="0x…" required />
         </div>
-        <p class="muted">Private, encrypted, never leaves your device.</p>
-        <div id="save-region">
-          <button class="btn" type="submit">Save</button>
-        </div>
+        <div id="save-region"><button class="btn primary" type="submit">Save wallet</button></div>
       </form>
+    </div>
+  </section>
 
-      <div class="row">
-        <a class="btn ghost" href="/">← Dashboard</a>
+  <section class="panel">
+    <div class="panel-head"><h2>Dashboard password</h2></div>
+    <div class="panel-body">
+      <form class="stack" method="post" action="/setup/password" style="max-width:380px">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+        {% if let Some(n) = pw_notice %}<div class="alert ok">{{ n }}</div>{% endif %}
+        {% if let Some(e) = pw_error %}<div class="alert err">{{ e }}</div>{% endif %}
+        <div class="field"><label class="label" for="pw-current">Current password</label><input class="input" type="password" id="pw-current" name="current" autocomplete="current-password" required /></div>
+        <div class="field"><label class="label" for="pw-new">New password <span class="hint">8+ characters</span></label><input class="input" type="password" id="pw-new" name="password" autocomplete="new-password" minlength="8" required /></div>
+        <div class="field"><label class="label" for="pw-confirm">Confirm new password</label><input class="input" type="password" id="pw-confirm" name="confirm" autocomplete="new-password" minlength="8" required /></div>
+        <div><button class="btn" type="submit">Change password</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Display</h2><span class="meta">saved in this browser</span></div>
+    <div class="panel-body stack">
+      <div class="kv-row"><span class="k">Theme</span>
+        <div class="seg sm" id="pref-theme">
+          <button type="button" data-action="pref-theme" data-value="dark">Dark</button>
+          <button type="button" data-action="pref-theme" data-value="light">Light</button>
+        </div>
+      </div>
+      <div class="kv-row"><span class="k">Pop-up toasts</span>
+        <div class="seg sm" id="pref-toasts">
+          <button type="button" data-action="pref-toasts" data-value="important">Fills, warnings &amp; errors</button>
+          <button type="button" data-action="pref-toasts" data-value="all">Everything</button>
+          <button type="button" data-action="pref-toasts" data-value="none">Off</button>
+        </div>
       </div>
     </div>
-  </main>
-</body>
-</html>
+  </section>
+</div>
+{% endblock %}

@@ -13,6 +13,10 @@ use polymarket_client_sdk_v2::gamma::types::request::{EventBySlugRequest, Market
 use polymarket_client_sdk_v2::gamma::types::response::Market;
 use polymarket_client_sdk_v2::gamma::Client as GammaClient;
 use rust_decimal::Decimal;
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
+
+use crate::cache::TtlCache;
 
 // ── New resolution model (binary-market-aware, outcome-agnostic) ─────────────
 // Every tradeable CLOB market is binary (exactly 2 outcome tokens); a
@@ -103,13 +107,34 @@ pub enum Resolved {
     Multiple(Vec<MarketRef>),
 }
 
-/// Load one binary market by its market slug (the detail view's loader).
+/// One shared Gamma client (connection reuse) for every lookup.
+static GAMMA: LazyLock<GammaClient> = LazyLock::new(GammaClient::default);
+
+/// Market metadata barely changes (question, tokens, tick, reward params), but
+/// the market view, its live book, the placement preview and the markets table
+/// all need it — cache it so none of them re-hit Gamma on every request.
+const MARKET_TTL: Duration = Duration::from_secs(60);
+static MARKETS: LazyLock<Arc<TtlCache<MarketRef>>> =
+    LazyLock::new(|| Arc::new(TtlCache::new(MARKET_TTL)));
+
+/// Load one binary market by its market slug — always a fresh Gamma call.
 pub async fn market_by_slug(slug: &str) -> Result<MarketRef> {
-    let gamma = GammaClient::default();
-    let m = gamma
+    let m = GAMMA
         .market_by_slug(&MarketBySlugRequest::builder().slug(slug.to_string()).build())
         .await?;
     MarketRef::from_market(m)
+}
+
+/// [`market_by_slug`] through the shared TTL cache (stale value on upstream error).
+pub async fn market_by_slug_cached(slug: &str) -> Result<MarketRef> {
+    MARKETS.get_or_fetch(slug, || market_by_slug(slug)).await
+}
+
+/// Non-blocking cache read for render paths that must not wait on Gamma (the
+/// markets table): returns what's cached now and refreshes in the background.
+pub fn market_by_slug_swr(slug: &str) -> Option<MarketRef> {
+    let owned = slug.to_string();
+    MARKETS.get_swr(slug, move || async move { market_by_slug(&owned).await })
 }
 
 /// Resolve a pasted Polymarket URL. A market-slug URL → `Single`; an
@@ -117,7 +142,7 @@ pub async fn market_by_slug(slug: &str) -> Result<MarketRef> {
 /// `Multiple` (the candidate list for the picker).
 pub async fn resolve_url(url: &str) -> Result<Resolved> {
     let slug = extract_slug(url)?;
-    let gamma = GammaClient::default();
+    let gamma = &*GAMMA;
 
     if let Ok(m) = gamma
         .market_by_slug(&MarketBySlugRequest::builder().slug(slug.clone()).build())

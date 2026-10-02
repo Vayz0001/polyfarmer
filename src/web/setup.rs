@@ -1,5 +1,6 @@
-//! First-run / settings: change the admin password and enter the wallet
-//! credentials (validated, then encrypted to the store).
+//! Settings (also the first-run wallet step): enter the wallet credentials
+//! (validated, then encrypted to the store), change the admin password, and
+//! client-side display preferences.
 
 use alloy::primitives::Address;
 use alloy::signers::local::PrivateKeySigner;
@@ -14,21 +15,29 @@ use serde::Deserialize;
 use tower_sessions::Session;
 
 use super::auth::{csrf_token, verify_csrf};
+use super::shell::{render as render_tpl, shell, Shell};
 use super::state::WebState;
 use crate::types::EnginePhase;
 
 #[derive(Template)]
 #[template(path = "setup.html")]
 struct SetupTemplate {
+    shell: Shell,
     csrf_token: String,
     has_wallet: bool,
+    /// Configured Polymarket wallet address (public), for display.
+    wallet_addr: Option<String>,
     notice: Option<String>,
     error: Option<String>,
+    pw_notice: Option<String>,
+    pw_error: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct PasswordForm {
     csrf: String,
+    #[serde(default)]
+    current: String,
     password: String,
     confirm: String,
 }
@@ -82,31 +91,30 @@ pub async fn page(State(state): State<WebState>, session: Session) -> Html<Strin
     render(&state, &session, None, None).await
 }
 
+async fn render_pw(state: &WebState, session: &Session, notice: Option<String>, error: Option<String>) -> Response {
+    render_full(state, session, None, None, notice, error).await.into_response()
+}
+
 pub async fn set_password(
     State(state): State<WebState>,
     session: Session,
     Form(form): Form<PasswordForm>,
 ) -> Response {
     if !verify_csrf(&session, &form.csrf).await {
-        return render(&state, &session, None, Some("Invalid session — retry.".into()))
-            .await
-            .into_response();
+        return render_pw(&state, &session, None, Some("Invalid session — retry.".into())).await;
+    }
+    if !state.store.verify_login(&form.current).unwrap_or(false) {
+        return render_pw(&state, &session, None, Some("Current password is incorrect.".into())).await;
     }
     if form.password.len() < 8 {
-        return render(&state, &session, None, Some("Password must be at least 8 characters.".into()))
-            .await
-            .into_response();
+        return render_pw(&state, &session, None, Some("New password must be at least 8 characters.".into())).await;
     }
     if form.password != form.confirm {
-        return render(&state, &session, None, Some("Passwords do not match.".into()))
-            .await
-            .into_response();
+        return render_pw(&state, &session, None, Some("New passwords do not match.".into())).await;
     }
     match state.store.set_password(&form.password) {
-        Ok(_) => Redirect::to("/setup").into_response(),
-        Err(e) => render(&state, &session, None, Some(format!("Failed to save: {e}")))
-            .await
-            .into_response(),
+        Ok(_) => render_pw(&state, &session, Some("Password changed.".into()), None).await,
+        Err(e) => render_pw(&state, &session, None, Some(format!("Failed to save: {e}"))).await,
     }
 }
 
@@ -157,6 +165,7 @@ pub async fn set_wallet(
 
     match state.store.set_wallet(key, wallet) {
         Ok(_) => {
+            state.set_wallet_address(Some(wallet.to_string()));
             if first_time {
                 // Wake the parked boot task so it starts the engine now, and
                 // hand off to the launch screen, which polls the engine up and
@@ -308,11 +317,29 @@ async fn render(
     notice: Option<String>,
     error: Option<String>,
 ) -> Html<String> {
-    let tpl = SetupTemplate {
+    render_full(state, session, notice, error, None, None).await
+}
+
+async fn render_full(
+    state: &WebState,
+    session: &Session,
+    notice: Option<String>,
+    error: Option<String>,
+    pw_notice: Option<String>,
+    pw_error: Option<String>,
+) -> Html<String> {
+    let wallet_addr = state.wallet_address().or_else(|| {
+        // Before the engine has booted, read the (public) address from the store.
+        state.store.load_wallet().ok().flatten().map(|w| w.proxy_wallet)
+    });
+    render_tpl(&SetupTemplate {
+        shell: shell(session, "settings").await,
         csrf_token: csrf_token(session).await,
         has_wallet: state.store.has_wallet(),
+        wallet_addr,
         notice,
         error,
-    };
-    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
+        pw_notice,
+        pw_error,
+    })
 }

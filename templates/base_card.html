@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}{% endblock %} · polyfarmer</title>
+  <script>try{var t=localStorage.getItem("pf-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+  <link rel="stylesheet" href="/assets/app.css" />
+  <script src="/assets/htmx.min.js" defer></script>
+</head>
+<body>
+  {% include "_icons.html" %}
+  <main class="card-wrap">
+    <div class="card">
+      <div class="brand"><svg class="logo"><use href="#i-logo"/></svg>polyfarmer</div>
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

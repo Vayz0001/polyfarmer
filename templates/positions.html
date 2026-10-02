@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Positions{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Positions</h1>
+    <div class="sub">What your wallet holds. A farming bid that gets filled becomes a position here.</div>
+  </div>
+  {% if has_wallet %}<div class="actions"><span class="faint num" title="Polymarket wallet">{{ wallet }}</span></div>{% endif %}
+</div>
+{% if !has_wallet %}
+<div class="alert info"><svg class="i"><use href="#i-info"/></svg><span>Configure your wallet in <a href="/setup">Settings</a> to see positions and fills.</span></div>
+{% else %}
+<section class="panel">
+  <div class="panel-head">
+    <div class="seg sm" id="pos-tabs">
+      <button type="button" class="selected" hx-get="/positions/table?tab=open" hx-target="#pos-body" data-action="tab">Open positions</button>
+      <button type="button" hx-get="/positions/table?tab=trades" hx-target="#pos-body" data-action="tab">Recent trades</button>
+    </div>
+    <span class="meta">Polymarket Data API · refreshed every 15s</span>
+  </div>
+  <div id="pos-body" hx-get="/positions/table?tab=open" hx-trigger="load" hx-swap="innerHTML">
+    <div class="skel-rows"><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

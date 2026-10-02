@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}{% endblock %} · polyfarmer</title>
+  <script>try{var t=localStorage.getItem("pf-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+  <link rel="stylesheet" href="/assets/app.css" />
+  <script src="/assets/htmx.min.js" defer></script>
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  {% include "_icons.html" %}
+  <div class="app">
+    <aside class="sidebar">
+      <a class="brand" href="/"><svg class="logo"><use href="#i-logo"/></svg>polyfarmer</a>
+      <nav class="nav">
+        <a href="/" class="{% if shell.active == "overview" %}active{% endif %}"><svg class="i"><use href="#i-overview"/></svg>Overview</a>
+        <a href="/markets" class="{% if shell.active == "markets" %}active{% endif %}"><svg class="i"><use href="#i-markets"/></svg>Markets</a>
+        <a href="/positions" class="{% if shell.active == "positions" %}active{% endif %}"><svg class="i"><use href="#i-positions"/></svg>Positions</a>
+        <a href="/rewards" class="{% if shell.active == "rewards" %}active{% endif %}"><svg class="i"><use href="#i-rewards"/></svg>Rewards</a>
+        <a href="/activity" class="{% if shell.active == "activity" %}active{% endif %}"><svg class="i"><use href="#i-activity"/></svg>Activity</a>
+      </nav>
+      <div class="nav-sep"></div>
+      <nav class="nav">
+        <a href="/setup" class="{% if shell.active == "settings" %}active{% endif %}"><svg class="i"><use href="#i-settings"/></svg>Settings</a>
+      </nav>
+      <div class="spacer"></div>
+      <div class="side-foot nav">
+        <button type="button" class="nav-btn" data-action="theme"><svg class="i"><use href="#i-sun"/></svg><span>Toggle theme</span></button>
+        <form method="post" action="/logout"><button class="nav-btn" type="submit"><svg class="i"><use href="#i-logout"/></svg>Log out</button></form>
+        <div class="foot-note">Self-hosted · your keys never leave this machine</div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <div class="strip">
+        <div id="status-strip" hx-get="/status/strip" hx-trigger="load, pf:state from:body, every 10s" hx-swap="innerHTML">
+          <div class="strip-items"><span class="skel" style="width:280px"></span></div>
+        </div>
+        <button type="button" class="bell" id="pf-bell" aria-label="Alerts"><svg class="i sm"><use href="#i-bell"/></svg>Alerts<span class="badge-count" id="pf-bell-count" hidden>0</span></button>
+      </div>
+      <main class="page">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+  {% include "_overlays.html" %}
+  {% block scripts %}{% endblock %}
+</body>
+</html>

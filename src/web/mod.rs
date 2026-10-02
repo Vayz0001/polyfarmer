@@ -7,12 +7,17 @@
 mod activity;
 mod assets;
 mod auth;
+pub mod book_hub;
 mod dashboard;
+pub mod events;
 mod markets;
+mod positions;
 mod rewards;
 mod router;
 mod setup;
+mod shell;
 mod state;
 
+pub use markets::prewarm_browse;
 pub use router::router;
 pub use state::{EngineHandle, WebState};

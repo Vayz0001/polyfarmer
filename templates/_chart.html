@@ -1,0 +1,5 @@
+<div class="chart-wrap">
+  {{ svg|safe }}
+  {% if !hi.is_empty() %}<div class="chart-ax"><span>{{ hi }}</span><span>{{ lo }}</span></div>{% endif %}
+</div>
+<div class="help" style="margin-top:8px">{{ caption }}</div>

@@ -1,62 +1,26 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>polyfarmer · activity</title>
-  <link rel="stylesheet" href="/assets/app.css" />
-  <script src="/assets/htmx.min.js" defer></script>
-</head>
-<body>
-  <div class="app">
-    {% include "_sidebar.html" %}
-
-    <div class="main">
-      <header class="topbar">
-        <h1>Activity</h1>
-        {% if engine_running %}
-          <span class="pill live"><span class="dot live"></span> Engine running</span>
-        {% else %}
-          <span class="pill idle"><span class="dot off"></span> Engine idle</span>
-        {% endif %}
-      </header>
-
-      <div class="content">
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Event log</h2>
-            <div class="act-filters" id="act-filters">
-              <button type="button" class="chip selected" data-level="all" onclick="pfSetActFilter('all')">All</button>
-              <button type="button" class="chip" data-level="info" onclick="pfSetActFilter('info')">Info</button>
-              <button type="button" class="chip" data-level="warn" onclick="pfSetActFilter('warn')">Warnings</button>
-              <button type="button" class="chip" data-level="error" onclick="pfSetActFilter('error')">Errors</button>
-            </div>
-          </div>
-
-          <div id="activity-feed" class="activity-feed pf-feed">
-            {% include "_activity_feed.html" %}
-          </div>
-        </section>
-      </div>
+{% extends "base.html" %}
+{% block title %}Activity{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Activity</h1><div class="sub">Everything the engine did, newest first — streams live.</div></div>
+</div>
+<section class="panel">
+  <div class="panel-head">
+    <div class="filters" id="act-level">
+      <button type="button" class="chip selected" data-action="filter" data-kind="level" data-value="all">All</button>
+      <button type="button" class="chip" data-action="filter" data-kind="level" data-value="warn">Warnings</button>
+      <button type="button" class="chip" data-action="filter" data-kind="level" data-value="error">Errors</button>
+    </div>
+    <div class="filters" id="act-cat">
+      <button type="button" class="chip selected" data-action="filter" data-kind="cat" data-value="all">Any type</button>
+      <button type="button" class="chip" data-action="filter" data-kind="cat" data-value="order">Orders</button>
+      <button type="button" class="chip" data-action="filter" data-kind="cat" data-value="market">Markets</button>
+      <button type="button" class="chip" data-action="filter" data-kind="cat" data-value="connection">Connection</button>
+      <button type="button" class="chip" data-action="filter" data-kind="cat" data-value="engine">Engine</button>
     </div>
   </div>
-
-  {% include "_toasts.html" %}
-  <script>
-    var pfActFilter = "all";
-    window.pfApplyActFilter = function () {
-      document.querySelectorAll("#activity-feed .act-row").forEach(function (r) {
-        r.style.display = (pfActFilter === "all" || r.classList.contains(pfActFilter)) ? "" : "none";
-      });
-    };
-    function pfSetActFilter(lv) {
-      pfActFilter = lv;
-      document.querySelectorAll("#act-filters .chip").forEach(function (c) {
-        c.classList.toggle("selected", c.dataset.level === lv);
-      });
-      window.pfApplyActFilter();
-    }
-    if (window.pfRelTime) window.pfRelTime();
-  </script>
-</body>
-</html>
+  <div id="activity-feed" class="feed pf-feed">
+    {% include "_activity_feed.html" %}
+  </div>
+</section>
+{% endblock %}

@@ -1,18 +1,14 @@
 {% if !has_any %}
-<div class="act-empty">No activity yet. Events show up here as the bot starts, places orders, pauses, or hits an issue &mdash; live.</div>
+<div class="feed-empty">No activity yet. Events show up here live as the bot starts, places orders, pauses, or hits an issue.</div>
 {% else %}
 {% for g in groups %}
-<div class="act-day" data-day="{{ g.label }}">{{ g.label }}</div>
+<div class="feed-day" data-day="{{ g.label }}">{{ g.label }}</div>
 {% for a in g.items %}
-<div class="act-row {{ a.level }} tone-{{ a.tone }}" data-cat="{{ a.category }}">
-  <span class="act-dot"></span>
-  <div class="act-body">
-    <div class="act-top">
-      <span class="act-cat">{{ a.category }}</span>
-      <span class="act-time" data-ts="{{ a.ts_iso }}">{{ a.time_hm }}</span>
-    </div>
-    <div class="act-msg">{{ a.message }}</div>
-  </div>
+<div class="feed-row {{ a.level }} tone-{{ a.tone }}" data-cat="{{ a.category }}" data-level="{{ a.level }}">
+  <span class="dot"></span>
+  <span class="feed-cat tag">{{ a.category }}</span>
+  <div><div class="feed-title">{{ a.title }}</div>{% if !a.body.is_empty() %}<div class="feed-body">{{ a.body }}</div>{% endif %}</div>
+  <span class="feed-time" data-ts="{{ a.ts_iso }}" title="{{ a.ts_iso }}">{{ a.time_hm }}</span>
 </div>
 {% endfor %}
 {% endfor %}

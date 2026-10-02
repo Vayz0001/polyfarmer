@@ -1,26 +1,17 @@
 {% if let Some(e) = error %}
-<div class="err pf-rise">{{ e }}</div>
+<div class="alert err"><svg class="i"><use href="#i-warn"/></svg>{{ e }}</div>
 {% else if !has_rewards %}
-<div class="warn pf-rise">No active reward program right now. You can still place the order, it just won't earn rewards.</div>
+<div class="alert warn"><svg class="i"><use href="#i-warn"/></svg><span>This market has no active reward program — the order would rest but earn nothing.</span></div>
 {% else %}
-<div class="order-summary pf-rise">
-  <div class="sum-row">
-    <span class="label">Distance from midpoint</span>
-    <span class="value">{{ cents_from_mid }}&cent;</span>
-  </div>
-  <div class="sum-row">
-    <span class="label">Fill risk <span class="tip" tabindex="0" data-tip="How likely your order gets taken. If filled, you hold the position instead of farming. Closer to the midpoint = more reward but higher fill risk.">&#9432;</span></span>
-    <span class="value risk-{{ fill_risk }}">{{ fill_risk }}</span>
-  </div>
-  <div class="sum-row {% if !per_side_meets_min %}warn{% endif %}">
-    <span class="label">Resting per side</span>
-    <span class="value">{{ per_side_shares }} shares &middot; {{ per_side_size }}{% if !per_side_meets_min %} &middot; below {{ min_size }}-share min{% endif %}</span>
-  </div>
+<div class="kv">
+  <div class="kv-row {{ effective_tone }}"><span class="k">Effective reward weight <span class="tip left" tabindex="0" data-tip="After Polymarket's two-sided rule and the size minimum. Server-checked against the live book.">i</span></span><span class="v">{{ effective_pct }}</span></div>
+  <div class="kv-row"><span class="k">This leg</span><span class="v">{{ weight_pct }} · {{ cents_from_mid }}¢ under mid</span></div>
+  {% if let Some(b) = below_bid %}<div class="kv-row"><span class="k">Pegged below best bid</span><span class="v">{{ b }}¢</span></div>{% endif %}
+  <div class="kv-row {% if !per_side_meets_min %}bad{% endif %}"><span class="k">Resting per side</span><span class="v">{{ per_side_shares }} sh · {{ per_side_size }}{% if !per_side_meets_min %} · under {{ min_size }} min{% endif %}</span></div>
+  <div class="kv-row"><span class="k">Fill risk <span class="tip left" tabindex="0" data-tip="How much bid depth sits ahead of you (it fills first). If you're filled you hold the position instead of farming.">i</span></span><span class="v risk-{{ fill_risk }}">{{ fill_risk }}</span></div>
   {% if let Some(o) = other_leg %}
-  <div class="sum-row {% if o.qualifies %}ok{% else %}bad{% endif %}">
-    <span class="label">Other side · {{ o.label }} <span class="tip" tabindex="0" data-tip="You set one price; the other side mirrors the same distance below its own best bid. This is where it lands.">&#9432;</span></span>
-    <span class="value">rests {{ o.price_cents }}&cent; · {% if o.qualifies %}&check; qualifies{% else %}&times; {{ o.shares }} sh{% if !o.meets_min %} under min{% endif %}{% endif %}</span>
-  </div>
+  <div class="kv-row {% if !o.meets_min %}bad{% endif %}"><span class="k">Other leg · {{ o.label }}</span><span class="v">{{ o.price_cents }}¢ · {{ o.weight_pct }}{% if !o.meets_min %} · {{ o.shares }} sh under min{% endif %}</span></div>
   {% endif %}
+  <div class="help">{{ sided_note }}</div>
 </div>
 {% endif %}

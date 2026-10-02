@@ -1,0 +1,35 @@
+{% if let Some(e) = error %}
+<div class="panel-body"><div class="alert {% if e.contains("No wallet") %}info{% else %}err{% endif %}">{{ e }}</div></div>
+{% else if rows.is_empty() %}
+<div class="feed-empty">No trades yet. When one of your resting bids gets hit, it shows up here.</div>
+{% else %}
+<div class="tbl-wrap">
+<table class="tbl">
+  <thead>
+    <tr>
+      <th>Time</th><th>Market</th>
+      {% if !compact %}<th>Side</th><th>Outcome</th><th class="num">Shares</th>{% endif %}
+      <th class="num">Price</th><th class="num">USDC</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for f in rows %}
+    <tr>
+      <td class="nowrap"><span class="feed-time" data-ts="{{ f.ts_iso }}">{{ f.time }}</span></td>
+      <td class="mkt">
+        <div class="mkt-title">{% if f.tracked %}<span class="tag accent" title="A market this bot farms — likely one of your resting bids filled">bot</span>{% endif %}<a class="name" href="/markets/view?slug={{ f.slug }}" title="{{ f.title }}">{{ f.title }}</a></div>
+        {% if compact %}<div class="mkt-sub"><span class="{% if f.side == "BUY" %}pos{% else %}neg{% endif %}">{{ f.side }}</span> {{ f.size }} {{ f.outcome }}</div>{% endif %}
+      </td>
+      {% if !compact %}
+      <td><span class="{% if f.side == "BUY" %}pos{% else %}neg{% endif %}">{{ f.side }}</span></td>
+      <td>{{ f.outcome }}</td>
+      <td class="num">{{ f.size }}</td>
+      {% endif %}
+      <td class="num">{{ f.price }}¢</td>
+      <td class="num">{{ f.usdc }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}

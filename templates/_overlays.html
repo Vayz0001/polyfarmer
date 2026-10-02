@@ -1,0 +1,23 @@
+<div id="pf-toasts" class="toasts" aria-live="polite"></div>
+
+<div id="pf-win" class="win" hidden>
+  <div class="win-bar" id="pf-win-bar">
+    <span class="t">Alerts</span>
+    <a href="/activity">View all</a>
+    <button type="button" class="btn ghost icon" id="pf-win-x" aria-label="Close"><svg class="i sm"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="win-body"><div class="feed compact pf-feed" id="pf-win-feed"></div></div>
+</div>
+
+<div id="pf-modal" class="modal" hidden>
+  <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="pf-modal-q">
+    <p id="pf-modal-q"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="pf-modal-cancel">Cancel</button>
+      <button type="button" class="btn danger solid" id="pf-modal-ok">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="pf-drawer-scrim" class="drawer-scrim" hidden></div>
+<aside id="pf-drawer" class="drawer" aria-hidden="true"></aside>

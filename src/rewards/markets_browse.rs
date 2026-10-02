@@ -11,7 +11,7 @@ use std::time::Duration;
 const REWARDS_MULTI_URL: &str = "https://clob.polymarket.com/rewards/markets/multi";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RewardsMultiResponse {
     pub count: u32,
     pub next_cursor: Option<String>,
@@ -53,7 +53,7 @@ pub struct RewardsMultiConfig {
 /// `order_by`: one of "rate_per_day" | "competitiveness" | "spread" |
 /// "volume_24hr" | "one_day_price_change" | "end_date" | "question" | ... per
 /// the official API reference. `position`: "ASC" | "DESC".
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct BrowseQuery {
     pub q: Option<String>,
     pub order_by: Option<String>,

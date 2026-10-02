@@ -1,0 +1,10 @@
+<div class="strip-items">
+  <span class="strip-item" title="Trading engine"><span class="dot {{ st.phase_tone }}"></span>Engine <b>{{ st.phase_label }}</b></span>
+  <span class="strip-sep"></span>
+  <span class="strip-item" title="Engine's market data WebSocket"><span class="dot {{ st.ws_tone }}"></span>Feed <b>{{ st.ws_label }}</b></span>
+  <span class="strip-item" title="Auth heartbeat to Polymarket (every 5s)"><span class="dot {{ st.hb_tone }}"></span>Heartbeat <b>{{ st.hb_label }}</b></span>
+  <span class="strip-sep"></span>
+  <span class="strip-item">Live orders <b class="num">{{ st.live_orders }}</b></span>
+  <span class="strip-item">Markets <b class="num">{{ st.markets }}</b>{% if st.paused_legs > 0 %}<span class="faint">({{ st.paused_legs }} paused)</span>{% endif %}</span>
+  <span class="strip-item">pUSD <b class="num">{% if let Some(b) = balance %}{{ b }}{% else %}—{% endif %}</b></span>
+</div>

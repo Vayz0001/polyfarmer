@@ -87,6 +87,13 @@ pub async fn run() -> Result<()> {
                 );
                 let ready = Arc::clone(&web_state.wallet_ready);
                 let handle = web_state.engine_handle.clone();
+                // Show the configured wallet's public address to read-only
+                // dashboard lookups (positions / fills) from the start.
+                if let Ok(Some(w)) = store.load_wallet() {
+                    web_state.set_wallet_address(Some(w.proxy_wallet));
+                }
+                crate::web::events::spawn_state_watcher(web_state.clone());
+                crate::web::prewarm_browse();
                 let svc = crate::web::router(web_state)
                     .into_make_service_with_connect_info::<std::net::SocketAddr>();
                 tokio::spawn(async move {
@@ -412,7 +419,7 @@ async fn evaluate_all_markets(
                                 s.place_failures.remove(&config_id); // reset on success
                                 drop(s);
                                 alert2.info(format!(
-                                    "Order Placed: `{}`\nBUY {} {} Shares @ {}c for {}$",
+                                    "Order placed · {}\nBUY {} {} shares @ {}¢ (${})",
                                     label,
                                     shares,
                                     token_label,
@@ -440,7 +447,7 @@ async fn evaluate_all_markets(
                             }
 
                             error!("Timer place failed: {}", e);
-                            alert2.error(format!("Timer place failed: {}", e));
+                            alert2.error(format!("Order placement failed: {}", e));
 
                             let auto_remove = {
                                 let mut s = state2.write().await;
@@ -612,7 +619,7 @@ async fn evaluate_all_markets(
                                 s.order_status.insert(config_id, OrderStatus::Live { order_id: oid, price: fresh_price });
                                 drop(s);
                                 alert2.info(format!(
-                                    "Order Replaced: `{}`\nBUY {} {} Shares @ {}c for {}$",
+                                    "Order replaced · {}\nBUY {} {} shares @ {}¢ (${})",
                                     label,
                                     shares,
                                     token_label,
@@ -627,7 +634,7 @@ async fn evaluate_all_markets(
                         }
                         Err(e) => {
                             error!("Timer replace failed: {}", e);
-                            alert2.error(format!("Timer replace failed: {}", e));
+                            alert2.error(format!("Replace order failed: {}", e));
                             let mut s = state2.write().await;
                             if matches!(s.order_status.get(&config_id),
                                 Some(OrderStatus::Cancelling { order_id: existing, .. }) if existing == &order_id)
@@ -660,7 +667,7 @@ async fn evaluate_all_markets(
                         error!("Failed to save markets after volatility pause of '{}': {}", label, e);
                     }
                     alerter.warn(format!(
-                        "Market Auto-Paused: `{}`\nVolatility threshold exceeded — use /resume-market to re-enable",
+                        "Auto-paused · {}\nBest bid moved past your volatility limit — resume from Markets when stable",
                         label
                     ));
                 } else {
@@ -669,11 +676,11 @@ async fn evaluate_all_markets(
                         .map(|c| c.label.clone())
                         .unwrap_or_else(|| config_id.clone());
                     let (title, msg) = match reason {
-                        DeactivateReason::Paused     => ("Market Paused", "Order cancelled — use /resume-market to re-enable"),
-                        DeactivateReason::Expired    => ("Market Expired", "Config expired and has been deactivated"),
+                        DeactivateReason::Paused     => ("Paused", "Order cancelled — resume from Markets"),
+                        DeactivateReason::Expired    => ("Expired", "Expiry reached — stopped quoting"),
                         DeactivateReason::Volatility => unreachable!(),
                     };
-                    alerter.info(format!("{}: `{}`\n{}", title, label, msg));
+                    alerter.info(format!("{} · {}\n{}", title, label, msg));
                 }
 
                 match order_id {

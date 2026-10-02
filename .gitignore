@@ -10,6 +10,7 @@
 
 # Runtime state (gitignored): markets, alerts, encrypted creds, sessions
 /data/
+/data-demo/
 markets.json
 alerts.json
 

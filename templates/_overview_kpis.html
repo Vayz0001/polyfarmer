@@ -1,0 +1,27 @@
+<div class="kpis">
+  <div class="kpi">
+    <div class="k">pUSD available</div>
+    <div class="v">{% if let Some(b) = balance %}{{ b }}{% else %}—{% endif %}</div>
+    <div class="s">{% if running %}collateral for new orders{% else %}engine not running{% endif %}</div>
+  </div>
+  <div class="kpi">
+    <div class="k">Resting in orders</div>
+    <div class="v">{{ in_orders }}</div>
+    <div class="s">{{ live_legs }} live bid{% if live_legs != 1 %}s{% endif %}</div>
+  </div>
+  <div class="kpi">
+    <div class="k">Positions value</div>
+    <div class="v">{% if let Some(v) = portfolio_value %}{{ v }}{% else %}—{% endif %}</div>
+    <div class="s"><a href="/positions">inventory from fills →</a></div>
+  </div>
+  <div class="kpi">
+    <div class="k">Rewards today</div>
+    <div class="v pos">{% if let Some(r) = rewards_today %}{{ r }}{% else %}—{% endif %}</div>
+    <div class="s">accruing · paid after midnight UTC</div>
+  </div>
+  <div class="kpi">
+    <div class="k">Markets</div>
+    <div class="v">{{ markets }}</div>
+    <div class="s">{% if paused_legs > 0 %}{{ paused_legs }} leg{% if paused_legs != 1 %}s{% endif %} paused{% else %}all legs active{% endif %}</div>
+  </div>
+</div>

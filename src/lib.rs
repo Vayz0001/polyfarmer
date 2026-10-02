@@ -4,6 +4,7 @@
 //! in one process. Exposed as a library so the router and engine are testable.
 
 pub mod app;
+pub mod cache;
 pub mod config;
 pub mod creds;
 pub mod engine;

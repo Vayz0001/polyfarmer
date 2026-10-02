@@ -1,0 +1,35 @@
+{% if let Some(e) = error %}
+<div class="panel-body"><div class="alert err"><svg class="i"><use href="#i-warn"/></svg>{{ e }}</div></div>
+{% else %}
+<div class="book-info">
+  <span>Value <b class="num">{{ total_value }}</b></span>
+  <span>Unrealized P&amp;L <b class="num {{ pnl_tone }}">{{ total_pnl }}</b></span>
+  {% if tracked_count > 0 %}<span class="tag warn" title="Inventory on markets this bot is farming — usually from a filled bid">{{ tracked_count }} from farmed markets</span>{% endif %}
+</div>
+{% if rows.is_empty() %}
+<div class="empty"><h3>No open positions</h3><div>Clean book — none of your farming bids are currently filled.</div></div>
+{% else %}
+<table class="tbl">
+  <thead><tr><th>Market</th><th>Outcome</th><th class="num">Shares</th><th class="num">Avg</th><th class="num">Now</th><th class="num">Value</th><th class="num">P&amp;L</th></tr></thead>
+  <tbody>
+    {% for p in rows %}
+    <tr>
+      <td class="mkt">
+        <div class="mkt-title">
+          {% if p.tracked %}<span class="tag accent" title="A market this bot farms">bot</span>{% endif %}
+          <a class="name" href="/markets/view?slug={{ p.slug }}" title="{{ p.title }}">{{ p.title }}</a>
+          {% if p.redeemable %}<span class="tag warn">redeemable</span>{% endif %}
+        </div>
+      </td>
+      <td>{{ p.outcome }}</td>
+      <td class="num">{{ p.size }}</td>
+      <td class="num">{{ p.avg }}¢</td>
+      <td class="num">{{ p.current }}¢</td>
+      <td class="num">{{ p.value }}</td>
+      <td class="num {{ p.pnl_tone }}">{{ p.pnl }} <small class="faint">{{ p.pnl_pct }}</small></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endif %}

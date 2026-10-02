@@ -1,30 +1,22 @@
-<div class="panel-head">
-  <h2>Your reward-eligible markets</h2>
-  {% if let Some(t) = today_total %}
-  <span class="hint">Today so far: {{ t }} (still accruing, finalizes after midnight UTC)</span>
-  {% endif %}
-</div>
 {% if !engine_running %}
-<div class="empty">Engine is not running yet. Configure your wallet first.</div>
+<div class="empty"><h3>Engine not running</h3><div>Reward data needs your authenticated wallet. <a href="/setup">Configure it in Settings</a>.</div></div>
 {% else if let Some(e) = error %}
-<div class="err" style="margin:16px">{{ e }}</div>
+<div class="panel-body"><div class="alert err"><svg class="i"><use href="#i-warn"/></svg>{{ e }}</div></div>
 {% else %}
-<table>
-  <thead>
-    <tr><th>Market</th><th>Your share</th><th>Earned today</th><th>Qualify</th></tr>
-  </thead>
+{% if let Some(t) = today_total %}<div class="book-info"><span>Accrued so far today <b class="num pos">{{ t }}</b></span><span class="faint">not final until after midnight UTC</span></div>{% endif %}
+<table class="tbl">
+  <thead><tr><th>Market</th><th class="num">Your share</th><th class="num">Earned today</th><th class="num">Min size</th><th class="num">Zone</th></tr></thead>
   <tbody>
     {% for row in rows %}
     <tr>
-      <td class="mkt">{{ row.label }}</td>
-      <td class="num">{{ row.percentage }}</td>
-      <td class="num">{{ row.earnings_today }}</td>
-      <td class="muted">{{ row.min_size }} min &middot; {{ row.max_spread }} max spread</td>
+      <td class="mkt"><div class="mkt-title">{% if row.tracked %}<span class="tag accent">bot</span>{% endif %}<span class="name" title="{{ row.label }}">{{ row.label }}</span></div></td>
+      <td class="num"><b>{{ row.percentage }}</b></td>
+      <td class="num pos">{{ row.earnings_today }}</td>
+      <td class="num muted">{{ row.min_size }}</td>
+      <td class="num muted">±{{ row.max_spread }}</td>
     </tr>
     {% endfor %}
-    {% if rows.is_empty() %}
-    <tr><td colspan="4"><div class="empty">No reward data yet. Add a reward-eligible market and place a resting order.</div></td></tr>
-    {% endif %}
+    {% if rows.is_empty() %}<tr><td colspan="5"><div class="feed-empty">No reward share yet today. A qualifying order needs to rest in the zone for Polymarket's per-minute samples.</div></td></tr>{% endif %}
   </tbody>
 </table>
 {% endif %}
