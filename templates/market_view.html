@@ -118,7 +118,7 @@
           <div class="why" id="score-why"></div>
         </div>
 
-        <div id="placement-preview" hx-post="/markets/view/preview" hx-trigger="load, pf:preview delay:300ms" hx-include="#order-form" hx-swap="innerHTML"></div>
+        <div id="placement-preview" hx-target="this" hx-post="/markets/view/preview" hx-trigger="load, pf:preview delay:300ms" hx-include="#order-form" hx-swap="innerHTML"></div>
 
         <details class="adv">
           <summary><svg class="i sm"><use href="#i-chev"/></svg>Safety &amp; expiry</summary>
