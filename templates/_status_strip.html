@@ -6,5 +6,5 @@
   <span class="strip-sep"></span>
   <span class="strip-item">Live orders <b class="num">{{ st.live_orders }}</b></span>
   <span class="strip-item">Markets <b class="num">{{ st.markets }}</b>{% if st.paused_legs > 0 %}<span class="faint">({{ st.paused_legs }} paused)</span>{% endif %}</span>
-  <span class="strip-item">pUSD <b class="num">{% if let Some(b) = balance %}{{ b }}{% else %}—{% endif %}</b></span>
+  <span class="strip-item" title="Spendable pUSD in your Polymarket wallet">Balance <b class="num">{% if let Some(b) = balance %}{{ b }}{% else %}—{% endif %}</b></span>
 </div>

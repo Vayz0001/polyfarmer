@@ -1,6 +1,6 @@
 <div class="kpis">
   <div class="kpi">
-    <div class="k">pUSD available</div>
+    <div class="k" title="Spendable pUSD in your Polymarket wallet">Available balance</div>
     <div class="v">{% if let Some(b) = balance %}{{ b }}{% else %}—{% endif %}</div>
     <div class="s">{% if running %}collateral for new orders{% else %}engine not running{% endif %}</div>
   </div>
