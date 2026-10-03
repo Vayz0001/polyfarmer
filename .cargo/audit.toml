@@ -1,0 +1,20 @@
+# cargo-audit policy. `cargo deny check` (deny.toml) is the CI gate because it
+# only looks at crates that are really compiled; cargo-audit scans every entry in
+# Cargo.lock, including optional-feature crates that are never built. Keep the
+# two in step.
+
+[advisories]
+ignore = [
+    # Compiled and accepted (the first two: reasons in deny.toml).
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0173",
+    # lru unsoundness needs a key type whose Drop panics. alloy-provider only keys
+    # its caches by u64 block numbers and B256 hashes, which cannot panic on drop,
+    # so it is not reachable. Fixed in lru >= 0.18.2, which needs a newer alloy.
+    "RUSTSEC-2026-0253",
+    # Lockfile only: optional dependencies of rust_decimal (rkyv feature) and
+    # ark-ff (via alloy) that no enabled feature compiles. Verify with
+    # `cargo tree -i rkyv` / `cargo tree -i derivative` ("nothing to print").
+    "RUSTSEC-2026-0235",
+    "RUSTSEC-2024-0388",
+]

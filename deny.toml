@@ -1,0 +1,51 @@
+# cargo-deny policy: run `cargo deny check` (see README "Development").
+# Supply-chain guardrails for a program that holds a trading key.
+
+[graph]
+# Check every platform we might be built on, not just the host.
+all-features = false
+
+[advisories]
+version = 2
+# Yanked releases are pulled by their maintainers (often for a defect or a
+# security problem) -- never build against one.
+yanked = "deny"
+# Every accepted advisory is a decision, not a suppression: it names the path
+# it arrives by, why it is acceptable, and when to look again. All remaining
+# entries are transitive through `alloy`, whose major version is pinned by
+# polymarket_client_sdk_v2, so they can only clear when that SDK moves.
+# (cargo-deny only reports `unsound` crates that are direct dependencies, so the
+# transitive lru issue is documented in .cargo/audit.toml.)
+# Review all of them by 2027-01-31, or whenever alloy / the SDK is upgraded.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained but finished: a compile-time proc-macro used by alloy-primitives. It never runs in the shipped binary and has no known vulnerability." },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is unmaintained: compile-time only (alloy-sol-macro), no vulnerability, absent from the shipped binary." },
+]
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+    "OpenSSL",
+    "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+# Only crates.io: no git dependencies, no alternate registries.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
