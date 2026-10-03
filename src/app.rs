@@ -82,6 +82,9 @@ pub async fn run() -> Result<()> {
         match tokio::net::TcpListener::bind(&bind).await {
             Ok(listener) => {
                 info!("Dashboard on http://{}", bind);
+                for w in crate::config::exposure_warnings(&bind, config.secure_cookies) {
+                    warn!("{w}");
+                }
                 let web_state = crate::web::WebState::with_config(
                     Arc::clone(&store),
                     Arc::clone(&state),
@@ -90,7 +93,8 @@ pub async fn run() -> Result<()> {
                     alert_tx.clone(),
                     config.alerts_file.clone(),
                     Arc::clone(&quote_nudge),
-                );
+                )
+                .with_secure_cookies(config.secure_cookies);
                 let ready = Arc::clone(&web_state.wallet_ready);
                 let handle = web_state.engine_handle.clone();
                 // Show the configured wallet's public address to read-only

@@ -71,6 +71,8 @@ pub struct WebState {
     /// Live order books for the market view (its own WS connection — never the
     /// engine's, whose disconnect handling cancels live orders).
     pub book_hub: BookHub,
+    /// Mark the session cookie `Secure` (see `Config::secure_cookies`).
+    pub secure_cookies: bool,
 }
 
 pub struct Caches {
@@ -192,7 +194,14 @@ impl WebState {
             proxy_wallet: Arc::new(std::sync::RwLock::new(None)),
             caches: Arc::new(Caches::default()),
             book_hub: BookHub::new(),
+            secure_cookies: false,
         }
+    }
+
+    /// Set the `Secure` attribute on the session cookie (HTTPS-only deployments).
+    pub fn with_secure_cookies(mut self, secure: bool) -> Self {
+        self.secure_cookies = secure;
+        self
     }
 
     /// The configured Polymarket wallet address, if known.

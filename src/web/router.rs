@@ -14,11 +14,12 @@ use super::{activity, assets, auth, dashboard, events, markets, positions, rewar
 /// Build the dashboard router with shared [`WebState`].
 pub fn router(state: WebState) -> Router {
     // In-memory sessions: fine for a single-user self-hosted app (re-login on
-    // restart). `secure` is off for localhost http; set true behind HTTPS.
+    // restart). `Secure` is opt-in (DASHBOARD_SECURE_COOKIES): off for plain
+    // http://localhost, on when served over HTTPS (Tailscale Serve, a proxy).
     let session_layer = SessionManagerLayer::new(MemoryStore::default())
         .with_http_only(true)
         .with_same_site(SameSite::Lax)
-        .with_secure(false);
+        .with_secure(state.secure_cookies);
 
     let protected: Router<WebState> = Router::new()
         .route("/", get(dashboard::overview))

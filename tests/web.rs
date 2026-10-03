@@ -450,3 +450,23 @@ async fn repeated_wrong_passwords_lock_out_login() {
     assert_eq!(res.status(), StatusCode::OK, "no redirect while locked");
     assert!(body_string(res).await.contains("Too many attempts"));
 }
+
+/// The `Set-Cookie` header of GET /login on a router built with `secure`.
+async fn login_cookie_header(secure: bool) -> String {
+    let store = CredentialStore::open(unique_dir()).unwrap();
+    store.set_password("test-password-123").unwrap();
+    let app = router(WebState::new(Arc::new(store), empty_engine()).with_secure_cookies(secure));
+    let res = app.oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
+    res.headers().get(header::SET_COOKIE).expect("session cookie").to_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn session_cookie_is_secure_only_when_enabled() {
+    let plain = login_cookie_header(false).await;
+    assert!(!plain.contains("Secure"), "plain http must keep working: {plain}");
+    assert!(plain.contains("HttpOnly") && plain.contains("SameSite=Lax"));
+
+    let secure = login_cookie_header(true).await;
+    assert!(secure.contains("Secure"), "{secure}");
+    assert!(secure.contains("HttpOnly") && secure.contains("SameSite=Lax"));
+}
