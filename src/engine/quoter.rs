@@ -183,9 +183,8 @@ mod tests {
     }
 
     fn book_with_depth(best_bid: Decimal, depth_usdc: Decimal, distance: Decimal) -> TokenBook {
-        let mut book = TokenBook::default();
-        book.best_bid = Some(best_bid);
-        book.best_ask = Some(best_bid + dec!(0.01));
+        let mut book =
+            TokenBook { best_bid: Some(best_bid), best_ask: Some(best_bid + dec!(0.01)), ..Default::default() };
         // Place depth at best_bid - distance/2 (between target and best_bid)
         let mid_price = best_bid - distance / dec!(2);
         let size = depth_usdc / mid_price;
@@ -238,9 +237,7 @@ mod tests {
         // Expects Replace to 0.23 (move closer to maintain spread).
         let cfg = config(dec!(0.02), dec!(100));
         // Place depth at 0.24 (between new target 0.23 and best_bid 0.25) and at 0.22 (between old 0.19 and 0.25)
-        let mut book = TokenBook::default();
-        book.best_bid = Some(dec!(0.25));
-        book.best_ask = Some(dec!(0.26));
+        let mut book = TokenBook { best_bid: Some(dec!(0.25)), best_ask: Some(dec!(0.26)), ..Default::default() };
         book.bids.insert(dec!(0.24), dec!(600)); // $144 depth between 0.23 and 0.25
         book.bids.insert(dec!(0.22), dec!(600)); // also between 0.19 and 0.25
         let status = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };
@@ -253,9 +250,7 @@ mod tests {
         // best_bid moved to 0.25, our order at 0.19 still protected by depth at 0.22.
         // But target (0.23) has no depth yet — should Hold, keep existing order.
         let cfg = config(dec!(0.02), dec!(100));
-        let mut book = TokenBook::default();
-        book.best_bid = Some(dec!(0.25));
-        book.best_ask = Some(dec!(0.26));
+        let mut book = TokenBook { best_bid: Some(dec!(0.25)), best_ask: Some(dec!(0.26)), ..Default::default() };
         // depth only between 0.19 and 0.23 (protects current order), NOT between 0.23 and 0.25
         book.bids.insert(dec!(0.22), dec!(600));
         let status = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };

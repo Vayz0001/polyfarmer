@@ -152,7 +152,7 @@ async fn main() -> Result<()> {
         "type": "market",
         "custom_feature_enabled": true
     });
-    write.send(Message::Text(subscribe_msg.to_string().into())).await?;
+    write.send(Message::Text(subscribe_msg.to_string())).await?;
     info!("Subscription sent. Waiting for events...\n");
 
     // Heartbeat: PING every 10s
@@ -309,7 +309,7 @@ async fn main() -> Result<()> {
         }
 
         let total: u32 = event_counts.values().sum();
-        if total % 20 == 0 {
+        if total.is_multiple_of(20) {
             info!("--- counts: {:?} ---", event_counts);
         }
     }

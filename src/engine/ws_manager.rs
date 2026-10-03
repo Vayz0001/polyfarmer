@@ -108,7 +108,7 @@ pub fn spawn(
                 // Log once every ~30s so the operator knows the bot is alive but idle
                 static IDLE_LOG_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
                 let count = IDLE_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if count % 10 == 0 {
+                if count.is_multiple_of(10) {
                     info!("WS manager: no markets configured, waiting... (add one from the dashboard)");
                 }
                 tokio::select! {
@@ -147,7 +147,7 @@ pub fn spawn(
                     "custom_feature_enabled": true
                 });
                 info!("WS sending subscribe: {}", sub);
-                if let Err(e) = write.send(Message::Text(sub.to_string().into())).await {
+                if let Err(e) = write.send(Message::Text(sub.to_string())).await {
                     error!("WS initial subscribe failed: {}", e);
                     continue;
                 }
@@ -222,7 +222,7 @@ pub fn spawn(
                                         "operation": "subscribe",
                                         "custom_feature_enabled": true
                                     });
-                                    if write.send(Message::Text(msg.to_string().into())).await.is_err() {
+                                    if write.send(Message::Text(msg.to_string())).await.is_err() {
                                         break "subscribe send failed".to_string();
                                     }
                                     new.iter().for_each(|t| { subscribed.insert(t.clone()); });
@@ -235,7 +235,7 @@ pub fn spawn(
                                     .collect();
                                 if !to_remove.is_empty() {
                                     let msg = json!({ "assets_ids": to_remove, "operation": "unsubscribe" });
-                                    if write.send(Message::Text(msg.to_string().into())).await.is_err() {
+                                    if write.send(Message::Text(msg.to_string())).await.is_err() {
                                         break "unsubscribe send failed".to_string();
                                     }
                                     to_remove.iter().for_each(|t| { subscribed.remove(t); });

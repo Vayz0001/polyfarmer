@@ -82,9 +82,10 @@ impl MarketConfig {
 
 // ── Runtime order status (in-memory only) ─────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum OrderStatus {
     /// No order on book — conditions not met or not yet evaluated
+    #[default]
     Idle,
     /// HTTP place call is in-flight; real order_id not yet known.
     /// Quoter returns Hold — do not cancel or replace until resolved.
@@ -94,12 +95,6 @@ pub enum OrderStatus {
     /// Cancel has been dispatched; waiting for confirmation before re-evaluating.
     /// `since` is used by the 30s timer to detect and recover from hung cancels.
     Cancelling { order_id: String, since: std::time::Instant },
-}
-
-impl Default for OrderStatus {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 // ── Engine lifecycle phase (in-memory only) ───────────────────────────────────
