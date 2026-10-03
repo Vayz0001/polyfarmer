@@ -91,6 +91,24 @@ pub fn exposure_warnings(bind: &str, secure_cookies: bool) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    /// `.env.example` is the user-facing list of settings: every variable the code
+    /// reads must be documented there, so the two cannot drift apart.
+    #[test]
+    fn every_variable_the_config_reads_is_documented_in_env_example() {
+        let example = include_str!("../.env.example");
+        let source = include_str!("config.rs");
+        let mut names = Vec::new();
+        for part in source.split("env::var(\"").skip(1) {
+            if let Some(name) = part.split('"').next() {
+                names.push(name.to_string());
+            }
+        }
+        assert!(names.len() >= 7, "expected to find the config variables, found {names:?}");
+        for name in names {
+            assert!(example.contains(&format!("# {name}=")), "{name} is read by Config but missing from .env.example");
+        }
+    }
+
     use super::*;
 
     #[test]

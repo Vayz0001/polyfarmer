@@ -106,18 +106,10 @@ before exiting.
 
 ## Configuration
 
-Everything is optional; copy [`.env.example`](.env.example) to `.env` to change anything.
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `DASHBOARD_BIND` | `127.0.0.1:8080` | Address the dashboard listens on |
-| `DASHBOARD_SECURE_COOKIES` | off | HTTPS-only session cookie. Turn on when served over HTTPS |
-| `DATA_DIR` | `data` | Encrypted wallet, admin password hash, setup code |
-| `MARKETS_FILE` | `data/markets.json` | Your tracked markets |
-| `ALERTS_FILE` | `data/alerts.json` | Activity log |
-| `REWARD_HISTORY_FILE` | `data/reward_history.json` | Daily reward snapshots |
-| `POLYGON_RPC_URL` | public list | RPC for the balance and wallet detection |
-| `RUST_LOG` | `polyfarmer=info` | Log level |
+Everything is optional and has a default. [`.env.example`](.env.example) lists every setting with its
+default and what it does; copy it to `.env` and uncomment what you want to change. The ones you are most
+likely to need are `DASHBOARD_BIND` and `DASHBOARD_SECURE_COOKIES` (remote access, see above) and
+`POLYGON_RPC_URL` (a reliable RPC for the balance and wallet detection).
 
 Your private key is **not** configured here; it is entered in Settings.
 
