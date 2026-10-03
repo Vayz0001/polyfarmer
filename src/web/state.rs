@@ -132,11 +132,7 @@ impl EngineHandle {
     /// before returning, so callers never hold it across an `.await`.
     /// Returns `None` if the engine hasn't reached `Running` yet.
     pub async fn get(&self) -> Option<(Arc<Executor>, mpsc::Sender<WsCommand>)> {
-        self.inner
-            .read()
-            .await
-            .as_ref()
-            .map(|h| (Arc::clone(&h.executor), h.ws_cmd_tx.clone()))
+        self.inner.read().await.as_ref().map(|h| (Arc::clone(&h.executor), h.ws_cmd_tx.clone()))
     }
 }
 

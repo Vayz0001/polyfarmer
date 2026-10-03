@@ -191,9 +191,9 @@ pub struct WsBookSnapshot {
 pub struct WsPriceChangeEntry {
     pub asset_id: String,
     pub price: String,
-    pub size: String,       // "0" = level removed
-    pub side: String,       // "BUY" or "SELL"
-    pub best_bid: String,   // authoritative top-of-book after this change
+    pub size: String,     // "0" = level removed
+    pub side: String,     // "BUY" or "SELL"
+    pub best_bid: String, // authoritative top-of-book after this change
     pub best_ask: String,
 }
 

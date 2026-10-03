@@ -5,8 +5,8 @@ use crate::config::Config;
 use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
 use crate::engine::quoter::QuoteAction;
-use crate::engine::{heartbeat, quoter, ws_manager};
 use crate::engine::ws_manager::{AppState, MAX_PLACE_FAILURES};
+use crate::engine::{heartbeat, quoter, ws_manager};
 use crate::storage::{load_markets, save_markets};
 use crate::types::{EnginePhase, OrderStatus, WsCommand};
 
@@ -122,8 +122,7 @@ pub async fn run() -> Result<()> {
                 }
                 crate::web::events::spawn_state_watcher(web_state.clone());
                 crate::web::prewarm_browse();
-                let svc = crate::web::router(web_state)
-                    .into_make_service_with_connect_info::<std::net::SocketAddr>();
+                let svc = crate::web::router(web_state).into_make_service_with_connect_info::<std::net::SocketAddr>();
                 tokio::spawn(async move {
                     if let Err(e) = axum::serve(listener, svc).await {
                         error!("Web server error: {}", e);
@@ -158,7 +157,9 @@ pub async fn run() -> Result<()> {
                     info!("No wallet configured — waiting (configure at http://{})", config.dashboard_bind);
                     waiting_logged = true;
                 }
-                if wait_or_exit(&wallet_ready, WALLET_POLL).await { return Ok(()); }
+                if wait_or_exit(&wallet_ready, WALLET_POLL).await {
+                    return Ok(());
+                }
                 continue;
             }
             Err(e) => {
@@ -177,7 +178,9 @@ pub async fn run() -> Result<()> {
                     failure_alerted = true;
                 }
                 set_phase(&state, EnginePhase::Error).await;
-                if wait_or_exit(&wallet_ready, START_RETRY).await { return Ok(()); }
+                if wait_or_exit(&wallet_ready, START_RETRY).await {
+                    return Ok(());
+                }
                 continue;
             }
         };
@@ -193,7 +196,9 @@ pub async fn run() -> Result<()> {
                     failure_alerted = true;
                 }
                 set_phase(&state, EnginePhase::Error).await;
-                if wait_or_exit(&wallet_ready, START_RETRY).await { return Ok(()); }
+                if wait_or_exit(&wallet_ready, START_RETRY).await {
+                    return Ok(());
+                }
                 continue;
             }
         };
@@ -201,20 +206,20 @@ pub async fn run() -> Result<()> {
         // ── Startup safety: cancel any open orders on tracked markets ─────────
         let startup_tokens: Vec<String> = {
             let s = state.read().await;
-            s.configs.iter()
-                .map(|c| c.token_id.clone())
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .collect()
+            s.configs.iter().map(|c| c.token_id.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect()
         };
         if let Err(e) = executor.cancel_orders_for_tokens(&startup_tokens).await {
             error!("Startup cancel failed — refusing to trade with potentially open orders: {}", e);
             if !failure_alerted {
-                alerter.error("Engine start aborted: could not clear existing orders. It will keep retrying — check logs.");
+                alerter.error(
+                    "Engine start aborted: could not clear existing orders. It will keep retrying — check logs.",
+                );
                 failure_alerted = true;
             }
             set_phase(&state, EnginePhase::Error).await;
-            if wait_or_exit(&wallet_ready, START_RETRY).await { return Ok(()); }
+            if wait_or_exit(&wallet_ready, START_RETRY).await {
+                return Ok(());
+            }
             continue;
         }
 
@@ -232,21 +237,10 @@ pub async fn run() -> Result<()> {
     engine_handle.set(Arc::clone(&executor), ws_cmd_tx.clone()).await;
 
     // ── Spawn: WebSocket manager ──────────────────────────────────────────────
-    ws_manager::spawn(
-        Arc::clone(&state),
-        Arc::clone(&executor),
-        Arc::clone(&alerter),
-        ws_cmd_rx,
-        stop_rx.clone(),
-    );
+    ws_manager::spawn(Arc::clone(&state), Arc::clone(&executor), Arc::clone(&alerter), ws_cmd_rx, stop_rx.clone());
 
     // ── Spawn: Heartbeat ──────────────────────────────────────────────────────
-    heartbeat::spawn(
-        Arc::clone(&executor),
-        Arc::clone(&alerter),
-        Arc::clone(&state),
-        stop_rx.clone(),
-    );
+    heartbeat::spawn(Arc::clone(&executor), Arc::clone(&alerter), Arc::clone(&state), stop_rx.clone());
 
     // ── Spawn: daily reward-history snapshot ──────────────────────────────────
     // markets.json no longer needs a poll loop — web handlers (Segment 5) own
@@ -263,11 +257,11 @@ pub async fn run() -> Result<()> {
 
     // ── Spawn: 30s quote timer (fallback re-evaluation) ───────────────────────
     {
-        let state2   = Arc::clone(&state);
+        let state2 = Arc::clone(&state);
         let executor2 = Arc::clone(&executor);
-        let alerter2  = Arc::clone(&alerter);
-        let nudge     = Arc::clone(&quote_nudge);
-        let mut stop  = stop_rx.clone();
+        let alerter2 = Arc::clone(&alerter);
+        let nudge = Arc::clone(&quote_nudge);
+        let mut stop = stop_rx.clone();
 
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(QUOTE_TIMER_INTERVAL);
@@ -290,9 +284,9 @@ pub async fn run() -> Result<()> {
 
     // ── Spawn: hourly summary ─────────────────────────────────────────────────
     {
-        let state2   = Arc::clone(&state);
-        let alerter2  = Arc::clone(&alerter);
-        let mut stop  = stop_rx.clone();
+        let state2 = Arc::clone(&state);
+        let alerter2 = Arc::clone(&alerter);
+        let mut stop = stop_rx.clone();
 
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(HOURLY_SUMMARY_INTERVAL);
@@ -331,13 +325,13 @@ pub async fn run() -> Result<()> {
     // Include Cancelling — the in-flight cancel may not have completed before shutdown.
     let live_order_ids: Vec<String> = {
         let s = state.read().await;
-        s.order_status.values().filter_map(|status| {
-            match status {
-                OrderStatus::Live { order_id, .. } |
-                OrderStatus::Cancelling { order_id, .. } => Some(order_id.clone()),
+        s.order_status
+            .values()
+            .filter_map(|status| match status {
+                OrderStatus::Live { order_id, .. } | OrderStatus::Cancelling { order_id, .. } => Some(order_id.clone()),
                 _ => None,
-            }
-        }).collect()
+            })
+            .collect()
     };
     if let Err(e) = executor.cancel_orders(&live_order_ids).await {
         error!("Shutdown cancel failed: {}", e);
@@ -413,11 +407,7 @@ async fn wait_or_exit(wallet_ready: &Notify, retry_after: Duration) -> bool {
 
 const CANCEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-async fn evaluate_all_markets(
-    state: &Arc<RwLock<AppState>>,
-    executor: &Arc<Executor>,
-    alerter: &Arc<Alerter>,
-) {
+async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Executor>, alerter: &Arc<Alerter>) {
     // Reset any Cancelling states that have been stuck for longer than CANCEL_TIMEOUT.
     // This recovers from hung HTTP cancel calls so the quoter can re-evaluate the market.
     {
@@ -434,12 +424,15 @@ async fn evaluate_all_markets(
 
     let actions: Vec<(String, QuoteAction, String, rust_decimal::Decimal)> = {
         let s = state.read().await;
-        s.configs.iter().filter_map(|c| {
-            let book = s.books.get(&c.token_id)?;
-            let status = s.order_status.get(&c.id).cloned().unwrap_or_default();
-            let action = quoter::evaluate(c, book, &status);
-            Some((c.id.clone(), action, c.token_id.clone(), c.order_size))
-        }).collect()
+        s.configs
+            .iter()
+            .filter_map(|c| {
+                let book = s.books.get(&c.token_id)?;
+                let status = s.order_status.get(&c.id).cloned().unwrap_or_default();
+                let action = quoter::evaluate(c, book, &status);
+                Some((c.id.clone(), action, c.token_id.clone(), c.order_size))
+            })
+            .collect()
     };
 
     for (config_id, action, token_id, order_size) in actions {
@@ -449,12 +442,16 @@ async fn evaluate_all_markets(
             QuoteAction::Place { price } => {
                 {
                     let mut s = state.write().await;
-                    if s.heartbeat_paused { continue; }
+                    if s.heartbeat_paused {
+                        continue;
+                    }
                     let status = s.order_status.entry(config_id.clone()).or_default();
-                    if *status != OrderStatus::Idle { continue; }
+                    if *status != OrderStatus::Idle {
+                        continue;
+                    }
                     *status = OrderStatus::Placing { price };
                 }
-                let exec2  = Arc::clone(executor);
+                let exec2 = Arc::clone(executor);
                 let state2 = Arc::clone(state);
                 let alert2 = Arc::clone(alerter);
                 tokio::spawn(async move {
@@ -477,7 +474,9 @@ async fn evaluate_all_markets(
                                 Some(OrderStatus::Placing { price: p }) if *p == price
                             );
                             if still_placing {
-                                let (label, token_label) = s.configs.iter()
+                                let (label, token_label) = s
+                                    .configs
+                                    .iter()
                                     .find(|c| c.id == config_id)
                                     .map(|c| (c.label.clone(), c.token_label.clone()))
                                     .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
@@ -526,14 +525,14 @@ async fn evaluate_all_markets(
                                     if *failures < MAX_PLACE_FAILURES {
                                         None
                                     } else {
-                                        let label = s.configs.iter()
+                                        let label = s
+                                            .configs
+                                            .iter()
                                             .find(|c| c.id == config_id)
                                             .map(|c| c.label.clone())
                                             .unwrap_or_else(|| config_id.to_string());
-                                        let remaining: Vec<_> = s.configs.iter()
-                                            .filter(|c| c.id != config_id)
-                                            .cloned()
-                                            .collect();
+                                        let remaining: Vec<_> =
+                                            s.configs.iter().filter(|c| c.id != config_id).cloned().collect();
                                         let markets_file = s.markets_file.clone();
                                         Some((label, remaining, markets_file))
                                     }
@@ -568,14 +567,14 @@ async fn evaluate_all_markets(
             }
 
             QuoteAction::Cancel { order_id, .. } => {
-                let exec2  = Arc::clone(executor);
+                let exec2 = Arc::clone(executor);
                 let state2 = Arc::clone(state);
                 {
                     let mut s = state.write().await;
-                    s.order_status.insert(config_id.clone(), OrderStatus::Cancelling {
-                        order_id: order_id.clone(),
-                        since: std::time::Instant::now(),
-                    });
+                    s.order_status.insert(
+                        config_id.clone(),
+                        OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
+                    );
                 }
                 tokio::spawn(async move {
                     let confirmed = match exec2.cancel_order_verified(&order_id).await {
@@ -603,13 +602,15 @@ async fn evaluate_all_markets(
             QuoteAction::Replace { order_id, new_price } => {
                 {
                     let mut s = state.write().await;
-                    if s.heartbeat_paused { continue; }
-                    s.order_status.insert(config_id.clone(), OrderStatus::Cancelling {
-                        order_id: order_id.clone(),
-                        since: std::time::Instant::now(),
-                    });
+                    if s.heartbeat_paused {
+                        continue;
+                    }
+                    s.order_status.insert(
+                        config_id.clone(),
+                        OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
+                    );
                 }
-                let exec2  = Arc::clone(executor);
+                let exec2 = Arc::clone(executor);
                 let state2 = Arc::clone(state);
                 let alert2 = Arc::clone(alerter);
                 tokio::spawn(async move {
@@ -632,27 +633,25 @@ async fn evaluate_all_markets(
                     let (fresh_price, fresh_size) = {
                         let s = state2.read().await;
                         match (s.books.get(&token_id), s.configs.iter().find(|c| c.id == config_id)) {
-                            (Some(book), Some(cfg)) => {
-                                match book.best_bid {
-                                    Some(bb) => {
-                                        use crate::engine::orderbook::TokenBook;
-                                        use rust_decimal_macros::dec;
-                                        let raw = bb - cfg.distance;
-                                        if raw <= dec!(0) {
-                                            drop(s);
-                                            let mut s = state2.write().await;
-                                            if matches!(s.order_status.get(&config_id),
+                            (Some(book), Some(cfg)) => match book.best_bid {
+                                Some(bb) => {
+                                    use crate::engine::orderbook::TokenBook;
+                                    use rust_decimal_macros::dec;
+                                    let raw = bb - cfg.distance;
+                                    if raw <= dec!(0) {
+                                        drop(s);
+                                        let mut s = state2.write().await;
+                                        if matches!(s.order_status.get(&config_id),
                                                 Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id)
-                                            {
-                                                s.order_status.insert(config_id, OrderStatus::Idle);
-                                            }
-                                            return;
+                                        {
+                                            s.order_status.insert(config_id, OrderStatus::Idle);
                                         }
-                                        (TokenBook::snap_to_tick(raw, cfg.tick_size), cfg.order_size)
+                                        return;
                                     }
-                                    None => (new_price, order_size),
+                                    (TokenBook::snap_to_tick(raw, cfg.tick_size), cfg.order_size)
                                 }
-                            }
+                                None => (new_price, order_size),
+                            },
                             _ => (new_price, order_size),
                         }
                     };
@@ -678,11 +677,14 @@ async fn evaluate_all_markets(
                                 Some(OrderStatus::Cancelling { order_id: existing, .. }) if existing == &order_id
                             );
                             if still_cancelling {
-                                let (label, token_label) = s.configs.iter()
+                                let (label, token_label) = s
+                                    .configs
+                                    .iter()
                                     .find(|c| c.id == config_id)
                                     .map(|c| (c.label.clone(), c.token_label.clone()))
                                     .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
-                                s.order_status.insert(config_id, OrderStatus::Live { order_id: oid, price: fresh_price });
+                                s.order_status
+                                    .insert(config_id, OrderStatus::Live { order_id: oid, price: fresh_price });
                                 drop(s);
                                 alert2.info(format!(
                                     "Order replaced · {}\nBUY {} {} shares @ {}¢ (${})",
@@ -719,7 +721,9 @@ async fn evaluate_all_markets(
                 if matches!(reason, DeactivateReason::Volatility) {
                     let (markets_file, label) = {
                         let mut s = state.write().await;
-                        let label = s.configs.iter()
+                        let label = s
+                            .configs
+                            .iter()
                             .find(|c| c.id == config_id)
                             .map(|c| c.label.clone())
                             .unwrap_or_else(|| config_id.clone());
@@ -737,13 +741,17 @@ async fn evaluate_all_markets(
                         label
                     ));
                 } else {
-                    let label = state.read().await.configs.iter()
+                    let label = state
+                        .read()
+                        .await
+                        .configs
+                        .iter()
                         .find(|c| c.id == config_id)
                         .map(|c| c.label.clone())
                         .unwrap_or_else(|| config_id.clone());
                     let (title, msg) = match reason {
-                        DeactivateReason::Paused     => ("Paused", "Order cancelled — resume from Markets"),
-                        DeactivateReason::Expired    => ("Expired", "Expiry reached — stopped quoting"),
+                        DeactivateReason::Paused => ("Paused", "Order cancelled — resume from Markets"),
+                        DeactivateReason::Expired => ("Expired", "Expiry reached — stopped quoting"),
                         DeactivateReason::Volatility => unreachable!(),
                     };
                     alerter.info(format!("{} · {}\n{}", title, label, msg));
@@ -753,12 +761,12 @@ async fn evaluate_all_markets(
                     Some(oid) => {
                         {
                             let mut s = state.write().await;
-                            s.order_status.insert(config_id.clone(), OrderStatus::Cancelling {
-                                order_id: oid.clone(),
-                                since: std::time::Instant::now(),
-                            });
+                            s.order_status.insert(
+                                config_id.clone(),
+                                OrderStatus::Cancelling { order_id: oid.clone(), since: std::time::Instant::now() },
+                            );
                         }
-                        let exec2  = Arc::clone(executor);
+                        let exec2 = Arc::clone(executor);
                         let state2 = Arc::clone(state);
                         tokio::spawn(async move {
                             let _ = exec2.cancel_order_verified(&oid).await;

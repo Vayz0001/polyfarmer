@@ -41,7 +41,12 @@ pub(super) fn category_for(msg: &str) -> &'static str {
         "wallet"
     } else if m.contains("pause") || m.contains("expire") || m.contains("market") || m.contains("volatil") {
         "market"
-    } else if m.contains("bot ") || m.contains("started") || m.contains("shutting") || m.contains("engine") || m.contains("summary") {
+    } else if m.contains("bot ")
+        || m.contains("started")
+        || m.contains("shutting")
+        || m.contains("engine")
+        || m.contains("summary")
+    {
         "engine"
     } else {
         "event"
@@ -57,8 +62,12 @@ pub(super) fn tone_for(level: &AlertLevel, msg: &str) -> &'static str {
         AlertLevel::Warn => "caution",
         AlertLevel::Info => {
             let m = msg.lines().next().unwrap_or("").to_lowercase();
-            if m.contains("pause") || m.contains("cancel") || m.contains("expire")
-                || m.contains("disconnect") || m.contains("shutting") || m.contains("stop")
+            if m.contains("pause")
+                || m.contains("cancel")
+                || m.contains("expire")
+                || m.contains("disconnect")
+                || m.contains("shutting")
+                || m.contains("stop")
             {
                 "caution"
             } else {
@@ -166,11 +175,7 @@ pub async fn recent(State(state): State<WebState>) -> Html<String> {
 /// GET /activity — the full event-log timeline.
 pub async fn page(State(state): State<WebState>, session: Session) -> Html<String> {
     let groups = group_by_day(read_recent_alerts(&state.alerts_file, FEED_LIMIT));
-    render(&ActivityTemplate {
-        shell: shell(&session, "activity").await,
-        has_any: !groups.is_empty(),
-        groups,
-    })
+    render(&ActivityTemplate { shell: shell(&session, "activity").await, has_any: !groups.is_empty(), groups })
 }
 
 #[cfg(test)]
@@ -180,7 +185,10 @@ mod tests {
     #[test]
     fn categories_follow_the_title_line() {
         assert_eq!(category_for("Order placed · Will X?\nBUY 100 Yes shares @ 45¢ ($45)"), "order");
-        assert_eq!(category_for("Order cancelled · Will X?\n$45 of Yes — depth ahead fell below your minimum"), "order");
+        assert_eq!(
+            category_for("Order cancelled · Will X?\n$45 of Yes — depth ahead fell below your minimum"),
+            "order"
+        );
         assert_eq!(category_for("Auto-paused · Will X?\nBest bid moved"), "market");
         assert_eq!(category_for("Expired · Will X?\nExpiry reached — stopped quoting"), "market");
         assert_eq!(category_for("WS connected"), "connection");

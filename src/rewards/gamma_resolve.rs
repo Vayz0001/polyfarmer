@@ -38,8 +38,8 @@ pub struct MarketRef {
     /// binaries are just `/event/{market_slug}` (event_slug == market_slug).
     pub event_slug: String,
     pub image: Option<String>,
-    pub outcomes: Vec<String>,      // exactly 2
-    pub token_ids: Vec<String>,     // exactly 2, aligned with `outcomes`
+    pub outcomes: Vec<String>,  // exactly 2
+    pub token_ids: Vec<String>, // exactly 2, aligned with `outcomes`
     pub outcome_prices: Vec<Decimal>,
     pub tick_size: Decimal,
     pub rewards_min_size: Option<Decimal>,
@@ -53,25 +53,17 @@ pub struct MarketRef {
 
 impl MarketRef {
     fn from_market(m: Market) -> Result<Self> {
-        let event_slug = m
-            .events
-            .as_ref()
-            .and_then(|evs| evs.first())
-            .and_then(|ev| ev.slug.clone())
-            .unwrap_or_default();
+        let event_slug =
+            m.events.as_ref().and_then(|evs| evs.first()).and_then(|ev| ev.slug.clone()).unwrap_or_default();
         let outcomes = m.outcomes.unwrap_or_default();
-        let token_ids: Vec<String> =
-            m.clob_token_ids.unwrap_or_default().iter().map(|t| t.to_string()).collect();
+        let token_ids: Vec<String> = m.clob_token_ids.unwrap_or_default().iter().map(|t| t.to_string()).collect();
         if outcomes.len() != 2 || token_ids.len() != 2 {
             eyre::bail!("market is not a tradeable binary market (outcomes/tokens != 2)");
         }
-        let condition_id = m
-            .condition_id
-            .ok_or_else(|| eyre::eyre!("market has no condition id (not tradeable yet?)"))?
-            .to_string();
-        let tick_size = m
-            .order_price_min_tick_size
-            .ok_or_else(|| eyre::eyre!("market has no tick size (not tradeable yet?)"))?;
+        let condition_id =
+            m.condition_id.ok_or_else(|| eyre::eyre!("market has no condition id (not tradeable yet?)"))?.to_string();
+        let tick_size =
+            m.order_price_min_tick_size.ok_or_else(|| eyre::eyre!("market has no tick size (not tradeable yet?)"))?;
         Ok(Self {
             condition_id,
             question: m.question.unwrap_or_default(),
@@ -114,14 +106,11 @@ static GAMMA: LazyLock<GammaClient> = LazyLock::new(GammaClient::default);
 /// the market view, its live book, the placement preview and the markets table
 /// all need it — cache it so none of them re-hit Gamma on every request.
 const MARKET_TTL: Duration = Duration::from_secs(60);
-static MARKETS: LazyLock<Arc<TtlCache<MarketRef>>> =
-    LazyLock::new(|| Arc::new(TtlCache::new(MARKET_TTL)));
+static MARKETS: LazyLock<Arc<TtlCache<MarketRef>>> = LazyLock::new(|| Arc::new(TtlCache::new(MARKET_TTL)));
 
 /// Load one binary market by its market slug — always a fresh Gamma call.
 pub async fn market_by_slug(slug: &str) -> Result<MarketRef> {
-    let m = GAMMA
-        .market_by_slug(&MarketBySlugRequest::builder().slug(slug.to_string()).build())
-        .await?;
+    let m = GAMMA.market_by_slug(&MarketBySlugRequest::builder().slug(slug.to_string()).build()).await?;
     MarketRef::from_market(m)
 }
 
@@ -144,19 +133,14 @@ pub async fn resolve_url(url: &str) -> Result<Resolved> {
     let slug = extract_slug(url)?;
     let gamma = &*GAMMA;
 
-    if let Ok(m) = gamma
-        .market_by_slug(&MarketBySlugRequest::builder().slug(slug.clone()).build())
-        .await
-    {
+    if let Ok(m) = gamma.market_by_slug(&MarketBySlugRequest::builder().slug(slug.clone()).build()).await {
         if let Ok(mr) = MarketRef::from_market(m) {
             return Ok(Resolved::Single(Box::new(mr)));
         }
     }
 
     // Fall back to treating the slug as an event (multi-market).
-    let event = gamma
-        .event_by_slug(&EventBySlugRequest::builder().slug(slug).build())
-        .await?;
+    let event = gamma.event_by_slug(&EventBySlugRequest::builder().slug(slug).build()).await?;
     let mut refs: Vec<MarketRef> = event
         .markets
         .unwrap_or_default()

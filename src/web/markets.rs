@@ -229,7 +229,8 @@ struct MarketViewErrorTemplate {
 }
 
 async fn view_error(session: &Session, message: &str) -> Response {
-    render(&MarketViewErrorTemplate { shell: shell(session, "markets").await, message: message.to_string() }).into_response()
+    render(&MarketViewErrorTemplate { shell: shell(session, "markets").await, message: message.to_string() })
+        .into_response()
 }
 
 /// GET /markets/view?slug=&side=&sides= — the trading-terminal-style view.
@@ -248,7 +249,11 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
 
     // Binary books mirror: the other outcome's bid = 1 − this ask, mid = 1 − mid.
     let side_data = |i: usize| -> (Decimal, Option<Decimal>) {
-        if i == side { (mid, bb) } else { (dec!(1) - mid, ba.map(|a| dec!(1) - a)) }
+        if i == side {
+            (mid, bb)
+        } else {
+            (dec!(1) - mid, ba.map(|a| dec!(1) - a))
+        }
     };
     let sides: Vec<SideView> = mr
         .outcomes
@@ -268,7 +273,14 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
     let default_price_cents = sides[side].default_price_cents.clone();
 
     let ladder = match &book {
-        Some(b) => market_data::build_ladder(b, mid, max_spread, LADDER_LEVELS, &live_mine(&state, &mr.token_ids[side]).await, mr.tick_size),
+        Some(b) => market_data::build_ladder(
+            b,
+            mid,
+            max_spread,
+            LADDER_LEVELS,
+            &live_mine(&state, &mr.token_ids[side]).await,
+            mr.tick_size,
+        ),
         None => empty_ladder(mid),
     };
 
@@ -285,13 +297,24 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
         group_item_title: mr.group_item_title.clone().filter(|g| !g.is_empty()),
         has_rewards: mr.has_rewards(),
         reward_min: mr.rewards_min_size.map(|s| format!("{} shares", s.normalize())).unwrap_or_else(|| "—".to_string()),
-        reward_max_spread: mr.rewards_max_spread.map(|s| format!("±{}¢", s.normalize())).unwrap_or_else(|| "—".to_string()),
+        reward_max_spread: mr
+            .rewards_max_spread
+            .map(|s| format!("±{}¢", s.normalize()))
+            .unwrap_or_else(|| "—".to_string()),
         volume_24hr: mr.volume_24hr.filter(|v| *v > dec!(0)).map(market_data::fmt_usd),
         liquidity: mr.liquidity.filter(|l| *l > dec!(0)).map(market_data::fmt_usd),
         resolves: mr.end_date.map(|d| d.format("%b %-d, %Y").to_string()),
         countdown: mr.end_date.map(|d| {
             let days = (d - now).num_days();
-            if days > 1 { format!("{days}d left") } else if days == 1 { "1d left".into() } else if days == 0 { "ends today".into() } else { "ended".into() }
+            if days > 1 {
+                format!("{days}d left")
+            } else if days == 1 {
+                "1d left".into()
+            } else if days == 0 {
+                "ends today".into()
+            } else {
+                "ended".into()
+            }
         }),
         farming,
         selected_label: mr.outcomes.get(side).cloned().unwrap_or_default(),
@@ -305,7 +328,10 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
         tick_cents: (mr.tick_size * dec!(100)).normalize().to_string(),
         price_max_cents: ((dec!(1) - mr.tick_size) * dec!(100)).normalize().to_string(),
         reward_min_shares: mr.rewards_min_size.map(|s| s.normalize().to_string()).unwrap_or_default(),
-        reward_max_spread_cents: mr.rewards_max_spread.map(|s| s.normalize().to_string()).unwrap_or_else(|| "0".to_string()),
+        reward_max_spread_cents: mr
+            .rewards_max_spread
+            .map(|s| s.normalize().to_string())
+            .unwrap_or_else(|| "0".to_string()),
     };
     render(&tpl).into_response()
 }
@@ -405,7 +431,13 @@ fn parse_group(raw: Option<&str>, tick: Decimal) -> Decimal {
     input::book_group(raw, tick)
 }
 
-async fn render_ladder(state: &WebState, mr: &MarketRef, side: usize, group: Decimal, book: &market_data::BookSnapshot) -> String {
+async fn render_ladder(
+    state: &WebState,
+    mr: &MarketRef,
+    side: usize,
+    group: Decimal,
+    book: &market_data::BookSnapshot,
+) -> String {
     let mid = midpoint_for(mr, side, Some(book)).await;
     let max_spread = mr.rewards_max_spread.unwrap_or(dec!(0));
     let mine = live_mine(state, &mr.token_ids[side]).await;
@@ -456,10 +488,8 @@ pub async fn view_book_stream(
         let token = mr.token_ids[ctx.side].clone();
         loop {
             if ctx.dirty {
-                let wait = ctx
-                    .last_sent
-                    .map(|t| BOOK_PUSH_MIN_INTERVAL.saturating_sub(t.elapsed()))
-                    .unwrap_or_default();
+                let wait =
+                    ctx.last_sent.map(|t| BOOK_PUSH_MIN_INTERVAL.saturating_sub(t.elapsed())).unwrap_or_default();
                 if wait.is_zero() {
                     ctx.dirty = false;
                     if let Some(book) = ctx.state.book_hub.snapshot(&token, mr.tick_size) {
@@ -577,7 +607,9 @@ pub async fn view_position(State(state): State<WebState>, Query(p): Query<Positi
         .map(|c| {
             let (status, scoring_leg) = match order_status.get(&c.id) {
                 _ if c.paused => ("paused".to_string(), None),
-                Some(OrderStatus::Live { order_id, price }) => (format!("resting {}¢", cents(*price)), scoring.get(order_id).copied()),
+                Some(OrderStatus::Live { order_id, price }) => {
+                    (format!("resting {}¢", cents(*price)), scoring.get(order_id).copied())
+                }
                 Some(OrderStatus::Placing { .. }) => ("placing…".to_string(), None),
                 Some(OrderStatus::Cancelling { .. }) => ("cancelling…".to_string(), None),
                 _ => ("waiting for conditions".to_string(), None),
@@ -662,7 +694,11 @@ fn pct(w: Decimal) -> String {
 /// POST /markets/view/preview — server-side placement feedback (fill risk,
 /// both-sides derivation, true reward weight), debounced as you type. Reads
 /// the hub's live book, so it costs no Polymarket calls once streaming.
-pub async fn view_preview(State(state): State<WebState>, session: Session, Form(form): Form<PlacementPreviewForm>) -> Html<String> {
+pub async fn view_preview(
+    State(state): State<WebState>,
+    session: Session,
+    Form(form): Form<PlacementPreviewForm>,
+) -> Html<String> {
     if !verify_csrf(&session, &form.csrf).await {
         return render(&PlacementPreviewTemplate::message(true, Some("Session expired — reload the page.".into())));
     }
@@ -687,7 +723,10 @@ pub async fn view_preview(State(state): State<WebState>, session: Session, Form(
     let min_size = mr.rewards_min_size.unwrap_or(dec!(0));
 
     let Some(book) = current_book(&state, &mr, side).await else {
-        return render(&PlacementPreviewTemplate::message(true, Some("Order book unavailable right now — try again.".into())));
+        return render(&PlacementPreviewTemplate::message(
+            true,
+            Some("Order book unavailable right now — try again.".into()),
+        ));
     };
     let mid = midpoint_for(&mr, side, Some(&book)).await;
     let eval = market_data::evaluate_placement(&book, mid, max_spread, min_size, price, order_size, both_sides);
@@ -703,14 +742,18 @@ pub async fn view_preview(State(state): State<WebState>, session: Session, Form(
                 let other_mid = dec!(1) - mid;
                 let shares = if op > dec!(0) { (eval.per_side_size / op).round_dp(0) } else { dec!(0) };
                 let meets = shares >= min_size;
-                let w = if op > dec!(0) && meets { market_data::score_weight(other_mid, op, max_spread) } else { dec!(0) };
-                Some((OtherLeg {
-                    label: mr.outcomes.get(1 - side).cloned().unwrap_or_default(),
-                    price_cents: cents(op),
-                    weight_pct: pct(w),
-                    meets_min: meets,
-                    shares: format!("{shares}"),
-                }, w))
+                let w =
+                    if op > dec!(0) && meets { market_data::score_weight(other_mid, op, max_spread) } else { dec!(0) };
+                Some((
+                    OtherLeg {
+                        label: mr.outcomes.get(1 - side).cloned().unwrap_or_default(),
+                        price_cents: cents(op),
+                        weight_pct: pct(w),
+                        meets_min: meets,
+                        shares: format!("{shares}"),
+                    },
+                    w,
+                ))
             }
             _ => None,
         }
@@ -875,11 +918,8 @@ pub async fn start_farming(
     let new_token_ids: Vec<String> = new_configs.iter().map(|c| c.token_id.clone()).collect();
     let (configs_snapshot, newly_subscribed, markets_file) = {
         let mut s = state.engine.write().await;
-        let newly_subscribed: Vec<String> = new_token_ids
-            .iter()
-            .filter(|t| !s.configs.iter().any(|c| &c.token_id == *t))
-            .cloned()
-            .collect();
+        let newly_subscribed: Vec<String> =
+            new_token_ids.iter().filter(|t| !s.configs.iter().any(|c| &c.token_id == *t)).cloned().collect();
         for cfg in &new_configs {
             s.order_status.insert(cfg.id.clone(), OrderStatus::Idle);
         }
@@ -1029,11 +1069,17 @@ pub async fn browse_results(State(state): State<WebState>, Query(params): Query<
         page_size: Some(BROWSE_PAGE_SIZE),
         next_cursor: params.cursor(),
     };
-    let tracked: Vec<String> = state.engine.read().await.configs.iter().map(|c| c.condition_id.to_lowercase()).collect();
+    let tracked: Vec<String> =
+        state.engine.read().await.configs.iter().map(|c| c.condition_id.to_lowercase()).collect();
 
     // Polymarket's browse endpoint takes several seconds; cache each query
     // briefly so paging back / revisiting is instant.
-    let key = browse_key(&params.q(), &params.sort_or_default(), &params.dir_or_default(), params.cursor().as_deref().unwrap_or(""));
+    let key = browse_key(
+        &params.q(),
+        &params.sort_or_default(),
+        &params.dir_or_default(),
+        params.cursor().as_deref().unwrap_or(""),
+    );
     let outcome = match BROWSE.peek(&key) {
         // Cached (fresh or stale): answer now; a stale entry refreshes behind the scenes.
         Some((resp, _)) => {
@@ -1138,7 +1184,9 @@ pub async fn resolve_url(session: Session, Query(p): Query<ResolveUrlParams>) ->
         return view_error(&session, "Paste a Polymarket market or event URL first.").await;
     }
     match tokio::time::timeout(NETWORK_TIMEOUT, gamma_resolve::resolve_url(url)).await {
-        Ok(Ok(gamma_resolve::Resolved::Single(mr))) => Redirect::to(&format!("/markets/view?slug={}", mr.market_slug)).into_response(),
+        Ok(Ok(gamma_resolve::Resolved::Single(mr))) => {
+            Redirect::to(&format!("/markets/view?slug={}", mr.market_slug)).into_response()
+        }
         Ok(Ok(gamma_resolve::Resolved::Multiple(refs))) => {
             let candidates = refs.into_iter().map(to_picker_candidate).collect();
             render(&MarketPickerTemplate { shell: shell(&session, "markets").await, candidates }).into_response()
@@ -1203,7 +1251,10 @@ async fn edit_template(state: &WebState, session: &Session, id: &str, error: Opt
 pub async fn edit_form(State(state): State<WebState>, session: Session, Path(id): Path<String>) -> Html<String> {
     match edit_template(&state, &session, &id, None).await {
         Some(t) => render(&t),
-        None => Html("<div class=\"drawer-body\"><div class=\"alert err\">This market leg no longer exists.</div></div>".to_string()),
+        None => Html(
+            "<div class=\"drawer-body\"><div class=\"alert err\">This market leg no longer exists.</div></div>"
+                .to_string(),
+        ),
     }
 }
 
@@ -1281,7 +1332,10 @@ pub async fn edit_submit(
             Some(bb) => Some(bb),
             None => match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(&token)).await {
                 Ok(Ok(b)) if b.best_bid.is_some() => b.best_bid,
-                _ => return fail("Could not read the current best bid for the auto-pause benchmark — try again.".into()).await,
+                _ => {
+                    return fail("Could not read the current best bid for the auto-pause benchmark — try again.".into())
+                        .await
+                }
             },
         }
     } else {
@@ -1360,7 +1414,8 @@ async fn cancel_leg_order(state: &WebState, id: &str, order_id: &str) {
         let confirmed = executor.cancel_order_verified(order_id).await.unwrap_or(false);
         if confirmed {
             let mut s = state.engine.write().await;
-            if matches!(s.order_status.get(id), Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == order_id) {
+            if matches!(s.order_status.get(id), Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == order_id)
+            {
                 s.order_status.insert(id.to_string(), OrderStatus::Idle);
             }
         }
@@ -1375,7 +1430,9 @@ pub async fn remove_market(
     Form(form): Form<MarketActionForm>,
 ) -> Response {
     if !verify_csrf(&session, &form.csrf).await {
-        return render_markets_table(&state, &session, Some("Invalid session — reload the page.".into())).await.into_response();
+        return render_markets_table(&state, &session, Some("Invalid session — reload the page.".into()))
+            .await
+            .into_response();
     }
 
     let (configs_snapshot, removed, orders_to_cancel, tokens_to_unsubscribe, markets_file) = {
@@ -1470,7 +1527,9 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool) -> Result<(), Str
 
 async fn pause_resume(state: WebState, session: Session, ids: Vec<String>, csrf: &str, pausing: bool) -> Response {
     if !verify_csrf(&session, csrf).await {
-        return render_markets_table(&state, &session, Some("Invalid session — reload the page.".into())).await.into_response();
+        return render_markets_table(&state, &session, Some("Invalid session — reload the page.".into()))
+            .await
+            .into_response();
     }
     let mut flash = None;
     for id in &ids {

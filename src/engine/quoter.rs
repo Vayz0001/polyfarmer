@@ -38,11 +38,7 @@ pub enum DeactivateReason {
 ///   - On a 30s fallback timer for all active configs
 ///
 /// Does NOT perform any I/O — pure logic, returns an action for the caller to execute.
-pub fn evaluate(
-    config: &MarketConfig,
-    book: &TokenBook,
-    status: &OrderStatus,
-) -> QuoteAction {
+pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -> QuoteAction {
     // ── 1. Deactivate checks (highest priority) ────────────────────────────
     // Only emit Deactivate when there is an order to cancel or the status needs
     // transitioning (Live / Cancelling / Placing). If the market is already Idle
@@ -90,10 +86,7 @@ pub fn evaluate(
     if raw_target <= dec!(0) {
         // Degenerate market — best_bid is too low to quote below it
         let order_id = live_order_id(status);
-        return QuoteAction::Cancel {
-            order_id: order_id.unwrap_or_default(),
-            reason: CancelReason::DepthDropped,
-        };
+        return QuoteAction::Cancel { order_id: order_id.unwrap_or_default(), reason: CancelReason::DepthDropped };
     }
     let target = TokenBook::snap_to_tick(raw_target, config.tick_size);
 
@@ -132,10 +125,7 @@ pub fn evaluate(
             // because depth is thin at a position we haven't moved to yet.
             let current_depth = book.bid_depth_between(*current_price, best_bid);
             if current_depth < config.min_depth_between {
-                return QuoteAction::Cancel {
-                    order_id: order_id.clone(),
-                    reason: CancelReason::DepthDropped,
-                };
+                return QuoteAction::Cancel { order_id: order_id.clone(), reason: CancelReason::DepthDropped };
             }
 
             // ── Should we move to follow best_bid? ────────────────────────

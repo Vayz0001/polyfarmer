@@ -41,8 +41,7 @@ async fn fingerprint(state: &WebState) -> u64 {
     let s = state.engine.read().await;
     let mut h = DefaultHasher::new();
     for c in &s.configs {
-        (&c.id, c.paused, c.order_size, c.distance, c.min_depth_between, c.expires_at, c.max_volatility)
-            .hash(&mut h);
+        (&c.id, c.paused, c.order_size, c.distance, c.min_depth_between, c.expires_at, c.max_volatility).hash(&mut h);
     }
     let mut statuses: Vec<String> = s.order_status.iter().map(|(k, v)| format!("{k}{v:?}")).collect();
     statuses.sort_unstable();

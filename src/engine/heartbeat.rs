@@ -1,7 +1,7 @@
 use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
-use crate::types::OrderStatus;
 use crate::engine::ws_manager::AppState;
+use crate::types::OrderStatus;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{watch, RwLock};

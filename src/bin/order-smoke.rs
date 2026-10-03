@@ -4,15 +4,14 @@
 ///   cargo run --bin order-smoke
 ///
 /// Requires .env with POLYMARKET_PRIVATE_KEY and POLYMARKET_PROXY_WALLET.
-
 use alloy::primitives::{Address, U256};
-use alloy::signers::Signer as _;
 use alloy::signers::local::PrivateKeySigner;
+use alloy::signers::Signer as _;
 use eyre::Result;
-use polymarket_client_sdk_v2::auth::Normal;
 use polymarket_client_sdk_v2::auth::state::Authenticated;
-use polymarket_client_sdk_v2::clob::types::SignatureType;
+use polymarket_client_sdk_v2::auth::Normal;
 use polymarket_client_sdk_v2::clob::types::Side;
+use polymarket_client_sdk_v2::clob::types::SignatureType;
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal_macros::dec;
 use std::str::FromStr;
@@ -24,17 +23,14 @@ type AuthClient = Client<Authenticated<Normal>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter("order_smoke=debug,info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("order_smoke=debug,info").init();
 
     dotenvy::dotenv().ok();
 
-    let private_key = std::env::var("POLYMARKET_PRIVATE_KEY")
-        .expect("POLYMARKET_PRIVATE_KEY not set");
-    let proxy_wallet = Address::from_str(
-        &std::env::var("POLYMARKET_PROXY_WALLET").expect("POLYMARKET_PROXY_WALLET not set")
-    ).expect("invalid POLYMARKET_PROXY_WALLET");
+    let private_key = std::env::var("POLYMARKET_PRIVATE_KEY").expect("POLYMARKET_PRIVATE_KEY not set");
+    let proxy_wallet =
+        Address::from_str(&std::env::var("POLYMARKET_PROXY_WALLET").expect("POLYMARKET_PROXY_WALLET not set"))
+            .expect("invalid POLYMARKET_PROXY_WALLET");
 
     let signer: PrivateKeySigner = private_key.parse()?;
     let signer = signer.with_chain_id(Some(POLYGON_CHAIN_ID));
@@ -54,22 +50,15 @@ async fn main() -> Result<()> {
 
     // Place a tiny order well below market (0.01) so it rests and doesn't fill
     let price = dec!(0.01);
-    let size  = dec!(5); // 5 shares
+    let size = dec!(5); // 5 shares
 
     println!("\nPlacing BUY: token={}... @ {} size {}", &token_id[..8], price, size);
 
     let token_id_u256 = U256::from_str(token_id)?;
 
-    let order = client
-        .limit_order()
-        .token_id(token_id_u256)
-        .price(price)
-        .size(size)
-        .side(Side::Buy)
-        .build()
-        .await?;
+    let order = client.limit_order().token_id(token_id_u256).price(price).size(size).side(Side::Buy).build().await?;
 
-    let signed   = client.sign(&signer, order).await?;
+    let signed = client.sign(&signer, order).await?;
     let response = client.post_order(signed).await?;
     let order_id = response.order_id.clone();
 
@@ -93,7 +82,7 @@ async fn main() -> Result<()> {
 
     println!("\n--- GET /order after cancels ---");
     match client.order(&order_id).await {
-        Ok(o)  => println!("Order still exists: id={} status={:?}", o.id, o.status),
+        Ok(o) => println!("Order still exists: id={} status={:?}", o.id, o.status),
         Err(e) => println!("GET /order error (likely gone): {}", e),
     }
 

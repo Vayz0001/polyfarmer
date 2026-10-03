@@ -321,17 +321,23 @@ mod tests {
     fn applies_book_snapshot_then_price_change() {
         let inner = hub_with("T");
         // Single-object `book` event, levels in arbitrary order.
-        handle_message(&inner, r#"{"event_type":"book","asset_id":"T",
+        handle_message(
+            &inner,
+            r#"{"event_type":"book","asset_id":"T",
             "bids":[{"price":"0.48","size":"100"},{"price":"0.47","size":"50"}],
-            "asks":[{"price":"0.52","size":"10"},{"price":"0.51","size":"20"}]}"#);
+            "asks":[{"price":"0.52","size":"10"},{"price":"0.51","size":"20"}]}"#,
+        );
         {
             let books = inner.books.read().unwrap();
             let b = books.get("T").unwrap();
             assert_eq!(b.best_bid, Some(dec!(0.48)));
             assert_eq!(b.best_ask, Some(dec!(0.51)));
         }
-        handle_message(&inner, r#"{"event_type":"price_change","price_changes":[
-            {"asset_id":"T","price":"0.49","size":"5","side":"BUY","best_bid":"0.49","best_ask":"0.51"}]}"#);
+        handle_message(
+            &inner,
+            r#"{"event_type":"price_change","price_changes":[
+            {"asset_id":"T","price":"0.49","size":"5","side":"BUY","best_bid":"0.49","best_ask":"0.51"}]}"#,
+        );
         let books = inner.books.read().unwrap();
         let b = books.get("T").unwrap();
         assert_eq!(b.best_bid, Some(dec!(0.49)));
@@ -341,8 +347,11 @@ mod tests {
     #[test]
     fn ignores_price_changes_before_snapshot() {
         let inner = hub_with("T");
-        handle_message(&inner, r#"{"event_type":"price_change","price_changes":[
-            {"asset_id":"T","price":"0.49","size":"5","side":"BUY","best_bid":"0.49","best_ask":"0.51"}]}"#);
+        handle_message(
+            &inner,
+            r#"{"event_type":"price_change","price_changes":[
+            {"asset_id":"T","price":"0.49","size":"5","side":"BUY","best_bid":"0.49","best_ask":"0.51"}]}"#,
+        );
         assert!(inner.books.read().unwrap().get("T").is_none());
     }
 }

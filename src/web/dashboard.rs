@@ -151,11 +151,8 @@ pub(super) async fn build_rows(state: &WebState) -> Vec<MarketRow> {
     let (configs, order_status, tops) = {
         let s = state.engine.read().await;
         // Top of book per token, from the engine's live WS-fed books.
-        let tops: HashMap<String, (Option<Decimal>, Option<Decimal>)> = s
-            .books
-            .iter()
-            .map(|(t, b)| (t.clone(), (b.best_bid, b.best_ask)))
-            .collect();
+        let tops: HashMap<String, (Option<Decimal>, Option<Decimal>)> =
+            s.books.iter().map(|(t, b)| (t.clone(), (b.best_bid, b.best_ask))).collect();
         (s.configs.clone(), s.order_status.clone(), tops)
     };
 
@@ -520,10 +517,20 @@ mod tests {
     #[test]
     fn shares_follow_the_live_price_or_estimate_from_the_book() {
         let c = MarketConfig {
-            id: "x".into(), url: String::new(), label: String::new(), condition_id: String::new(),
-            token_id: String::new(), token_label: String::new(), tick_size: dec!(0.01),
-            distance: dec!(0.02), min_depth_between: dec!(0), order_size: dec!(100),
-            expires_at: Utc::now(), paused: false, benchmark_bid: None, max_volatility: None,
+            id: "x".into(),
+            url: String::new(),
+            label: String::new(),
+            condition_id: String::new(),
+            token_id: String::new(),
+            token_label: String::new(),
+            tick_size: dec!(0.01),
+            distance: dec!(0.02),
+            min_depth_between: dec!(0),
+            order_size: dec!(100),
+            expires_at: Utc::now(),
+            paused: false,
+            benchmark_bid: None,
+            max_volatility: None,
         };
         // Live at 18c → 100 / 0.18 = 556 shares, exact.
         assert_eq!(shares_label(&c, Some(dec!(0.18)), Some(dec!(0.20))).as_deref(), Some("556 shares"));

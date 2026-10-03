@@ -16,8 +16,8 @@ use tower_sessions::Session;
 use zeroize::Zeroizing;
 
 use super::auth::{
-    csrf_token, refresh_session_after_password_change, set_password_blocking, verify_csrf,
-    verify_password_blocking, AttemptSource, ClientIp,
+    csrf_token, refresh_session_after_password_change, set_password_blocking, verify_csrf, verify_password_blocking,
+    AttemptSource, ClientIp,
 };
 use super::shell::{render as render_tpl, shell, Shell};
 use super::state::WebState;
@@ -133,7 +133,13 @@ pub async fn set_password(
             // Every other session (issued under the old password) is now invalid;
             // keep this one, with a fresh id.
             refresh_session_after_password_change(&session, &state).await;
-            render_pw(&state, &session, Some("Password changed. Other signed-in sessions were signed out.".into()), None).await
+            render_pw(
+                &state,
+                &session,
+                Some("Password changed. Other signed-in sessions were signed out.".into()),
+                None,
+            )
+            .await
         }
         Err(e) => render_pw(&state, &session, None, Some(format!("Failed to save: {e}"))).await,
     }
@@ -195,11 +201,7 @@ pub async fn set_wallet(
                 // hand off to the launch screen, which polls the engine up and
                 // flows straight into the dashboard — no restart.
                 state.wallet_ready.notify_one();
-                return if htmx {
-                    hx_redirect("/launching")
-                } else {
-                    Redirect::to("/launching").into_response()
-                };
+                return if htmx { hx_redirect("/launching") } else { Redirect::to("/launching").into_response() };
             }
             // Wallet change on an already-running engine — switching trading
             // wallets safely needs a restart (avoids orphaning open orders).
@@ -241,20 +243,10 @@ fn hx_redirect(to: &'static str) -> Response {
 
 /// Renders the outcome of a wallet *change* (or an error) for the setup form.
 /// First-run saves never reach here — they redirect to the launch screen.
-async fn save_result(
-    state: &WebState,
-    session: &Session,
-    htmx: bool,
-    saved: bool,
-    message: String,
-) -> Response {
+async fn save_result(state: &WebState, session: &Session, htmx: bool, saved: bool, message: String) -> Response {
     if htmx {
-        let tpl = WalletSaveResultTemplate {
-            saved,
-            message: if saved { String::new() } else { message },
-        };
-        return Html(tpl.render().unwrap_or_else(|e| super::shell::render_failed(&e)))
-            .into_response();
+        let tpl = WalletSaveResultTemplate { saved, message: if saved { String::new() } else { message } };
+        return Html(tpl.render().unwrap_or_else(|e| super::shell::render_failed(&e))).into_response();
     }
     // Non-htmx fallback (JS disabled) — full-page re-render with the notice.
     if saved {
@@ -293,9 +285,7 @@ pub async fn detect_wallet(
         Err(_) => return render_detect(false, "", "Invalid private key".to_string(), false, Vec::new()),
     };
 
-    match crate::wallet_detect::detect_wallets(signer.address(), state.polygon_rpc_url.as_deref())
-        .await
-    {
+    match crate::wallet_detect::detect_wallets(signer.address(), state.polygon_rpc_url.as_deref()).await {
         Ok(candidates) if candidates.len() == 1 => {
             let c = &candidates[0];
             render_detect(true, &c.address.to_string(), String::new(), true, Vec::new())
@@ -307,13 +297,9 @@ pub async fn detect_wallet(
             false,
             candidates.iter().map(|c| c.address.to_string()).collect(),
         ),
-        Ok(_) => render_detect(
-            true,
-            "",
-            "Key looks good. Enter your Polymarket address below.".into(),
-            false,
-            Vec::new(),
-        ),
+        Ok(_) => {
+            render_detect(true, "", "Key looks good. Enter your Polymarket address below.".into(), false, Vec::new())
+        }
         Err(_) => render_detect(
             true,
             "",
@@ -324,23 +310,12 @@ pub async fn detect_wallet(
     }
 }
 
-fn render_detect(
-    reveal: bool,
-    value: &str,
-    message: String,
-    verified: bool,
-    candidates: Vec<String>,
-) -> Html<String> {
+fn render_detect(reveal: bool, value: &str, message: String, verified: bool, candidates: Vec<String>) -> Html<String> {
     let tpl = WalletDetectTemplate { reveal, value: value.to_string(), message, verified, candidates };
     Html(tpl.render().unwrap_or_else(|e| super::shell::render_failed(&e)))
 }
 
-async fn render(
-    state: &WebState,
-    session: &Session,
-    notice: Option<String>,
-    error: Option<String>,
-) -> Html<String> {
+async fn render(state: &WebState, session: &Session, notice: Option<String>, error: Option<String>) -> Html<String> {
     render_full(state, session, notice, error, None, None).await
 }
 

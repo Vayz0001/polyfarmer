@@ -69,19 +69,14 @@ pub fn hash_password(password: &str) -> Result<String> {
     let mut salt_bytes = [0u8; 16];
     OsRng.fill_bytes(&mut salt_bytes);
     let salt = SaltString::encode_b64(&salt_bytes).map_err(|e| eyre!("salt: {e}"))?;
-    let hash = Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .map_err(|e| eyre!("hash: {e}"))?
-        .to_string();
+    let hash = Argon2::default().hash_password(password.as_bytes(), &salt).map_err(|e| eyre!("hash: {e}"))?.to_string();
     Ok(hash)
 }
 
 /// Verify a password against a stored PHC hash. Returns false on mismatch.
 pub fn verify_password(password: &str, phc_hash: &str) -> bool {
     match PasswordHash::new(phc_hash) {
-        Ok(parsed) => Argon2::default()
-            .verify_password(password.as_bytes(), &parsed)
-            .is_ok(),
+        Ok(parsed) => Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok(),
         Err(_) => false,
     }
 }
@@ -93,9 +88,7 @@ pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
     let mut nonce = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce);
-    let ct = cipher
-        .encrypt(Nonce::from_slice(&nonce), plaintext)
-        .map_err(|e| eyre!("encrypt: {e}"))?;
+    let ct = cipher.encrypt(Nonce::from_slice(&nonce), plaintext).map_err(|e| eyre!("encrypt: {e}"))?;
     let mut out = Vec::with_capacity(NONCE_LEN + ct.len());
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&ct);
@@ -109,9 +102,7 @@ pub fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Vec<u8>> {
     }
     let (nonce, ct) = blob.split_at(NONCE_LEN);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-    cipher
-        .decrypt(Nonce::from_slice(nonce), ct)
-        .map_err(|_| eyre!("decrypt failed (wrong key or tampered data)"))
+    cipher.decrypt(Nonce::from_slice(nonce), ct).map_err(|_| eyre!("decrypt failed (wrong key or tampered data)"))
 }
 
 // ── Persisted shapes ──────────────────────────────────────────────────────────
@@ -184,10 +175,18 @@ impl CredentialStore {
         Ok(store)
     }
 
-    fn admin_path(&self) -> PathBuf { self.dir.join("admin.json") }
-    fn master_path(&self) -> PathBuf { self.dir.join("master.key") }
-    fn wallet_path(&self) -> PathBuf { self.dir.join("wallet.enc") }
-    fn setup_code_path(&self) -> PathBuf { self.dir.join("setup.code") }
+    fn admin_path(&self) -> PathBuf {
+        self.dir.join("admin.json")
+    }
+    fn master_path(&self) -> PathBuf {
+        self.dir.join("master.key")
+    }
+    fn wallet_path(&self) -> PathBuf {
+        self.dir.join("wallet.enc")
+    }
+    fn setup_code_path(&self) -> PathBuf {
+        self.dir.join("setup.code")
+    }
 
     fn ensure_master_key(&self) -> Result<()> {
         if !self.master_path().exists() {
@@ -266,10 +265,7 @@ impl CredentialStore {
     /// Set (or change) the admin password.
     pub fn set_password(&self, password: &str) -> Result<()> {
         let next_epoch = self.epoch.load(Ordering::Relaxed).wrapping_add(1);
-        let rec = AdminRecord {
-            password_hash: hash_password(password)?,
-            session_epoch: next_epoch,
-        };
+        let rec = AdminRecord { password_hash: hash_password(password)?, session_epoch: next_epoch };
         write_private_atomic(&self.admin_path(), serde_json::to_string_pretty(&rec)?.as_bytes())?;
         // Only after the file is durably written: every session issued before this
         // point is now invalid.
@@ -411,7 +407,12 @@ mod tests {
             assert_eq!(mode(&dir.join(f)), 0o600, "{f}");
         }
         // No temp files linger after atomic writes.
-        let leftovers: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).filter(|n| n.to_string_lossy().ends_with(".tmp")).collect();
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .filter(|n| n.to_string_lossy().ends_with(".tmp"))
+            .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
         let _ = fs::remove_dir_all(dir.parent().unwrap());
     }

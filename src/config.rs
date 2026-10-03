@@ -35,19 +35,12 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         dotenvy::dotenv().ok();
 
-        let data_dir =
-            PathBuf::from(env::var("DATA_DIR").unwrap_or_else(|_| "data".to_string()));
-        let markets_file = PathBuf::from(
-            env::var("MARKETS_FILE").unwrap_or_else(|_| "data/markets.json".to_string()),
-        );
-        let alerts_file = PathBuf::from(
-            env::var("ALERTS_FILE").unwrap_or_else(|_| "data/alerts.json".to_string()),
-        );
-        let reward_history_file = PathBuf::from(
-            env::var("REWARD_HISTORY_FILE").unwrap_or_else(|_| "data/reward_history.json".to_string()),
-        );
-        let dashboard_bind =
-            env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+        let data_dir = PathBuf::from(env::var("DATA_DIR").unwrap_or_else(|_| "data".to_string()));
+        let markets_file = PathBuf::from(env::var("MARKETS_FILE").unwrap_or_else(|_| "data/markets.json".to_string()));
+        let alerts_file = PathBuf::from(env::var("ALERTS_FILE").unwrap_or_else(|_| "data/alerts.json".to_string()));
+        let reward_history_file =
+            PathBuf::from(env::var("REWARD_HISTORY_FILE").unwrap_or_else(|_| "data/reward_history.json".to_string()));
+        let dashboard_bind = env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
         let secure_cookies = env::var("DASHBOARD_SECURE_COOKIES").map(|v| is_truthy(&v)).unwrap_or(false);
         let polygon_rpc_url = env::var("POLYGON_RPC_URL").ok();
 
@@ -88,7 +81,8 @@ pub fn exposure_warnings(bind: &str, secure_cookies: bool) -> Vec<String> {
         ));
         if !secure_cookies {
             out.push(
-                "Serving over HTTPS? Set DASHBOARD_SECURE_COOKIES=true so the session cookie is HTTPS-only.".to_string(),
+                "Serving over HTTPS? Set DASHBOARD_SECURE_COOKIES=true so the session cookie is HTTPS-only."
+                    .to_string(),
             );
         }
     }

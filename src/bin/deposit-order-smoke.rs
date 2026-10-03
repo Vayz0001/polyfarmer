@@ -12,15 +12,14 @@
 ///                                             check past auth+signature)
 ///   "maker address not allowed" / "signer  → signing still broken
 ///     address has to be the address of…"
-
 use alloy::primitives::{Address, U256};
-use alloy::signers::Signer as _;
 use alloy::signers::local::PrivateKeySigner;
+use alloy::signers::Signer as _;
 use eyre::Result;
-use polymarket_client_sdk_v2::auth::Normal;
 use polymarket_client_sdk_v2::auth::state::Authenticated;
-use polymarket_client_sdk_v2::clob::types::SignatureType;
+use polymarket_client_sdk_v2::auth::Normal;
 use polymarket_client_sdk_v2::clob::types::Side;
+use polymarket_client_sdk_v2::clob::types::SignatureType;
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal_macros::dec;
 use std::str::FromStr;
@@ -36,10 +35,9 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     let private_key = std::env::var("POLYMARKET_PRIVATE_KEY").expect("POLYMARKET_PRIVATE_KEY not set");
-    let proxy_wallet = Address::from_str(
-        &std::env::var("POLYMARKET_PROXY_WALLET").expect("POLYMARKET_PROXY_WALLET not set"),
-    )
-    .expect("invalid POLYMARKET_PROXY_WALLET");
+    let proxy_wallet =
+        Address::from_str(&std::env::var("POLYMARKET_PROXY_WALLET").expect("POLYMARKET_PROXY_WALLET not set"))
+            .expect("invalid POLYMARKET_PROXY_WALLET");
 
     // Default token = the market from the user's recent run (active). Override via argv[1].
     let token_id = std::env::args().nth(1).unwrap_or_else(|| {
@@ -86,7 +84,9 @@ async fn main() -> Result<()> {
             let msg = e.to_string();
             println!("\n post_order returned: {msg}");
             let low = msg.to_lowercase();
-            if low.contains("balance") || low.contains("allowance") || low.contains("funds")
+            if low.contains("balance")
+                || low.contains("allowance")
+                || low.contains("funds")
                 || low.contains("not enough")
             {
                 println!("\n✅ SIGNING WORKS — reached the balance check (order was signature-valid).");

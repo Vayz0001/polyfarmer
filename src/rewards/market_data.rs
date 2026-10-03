@@ -15,9 +15,7 @@ use std::sync::LazyLock;
 
 use alloy::primitives::U256;
 use eyre::Result;
-use polymarket_client_sdk_v2::clob::types::request::{
-    MidpointRequest, OrderBookSummaryRequest, PriceHistoryRequest,
-};
+use polymarket_client_sdk_v2::clob::types::request::{MidpointRequest, OrderBookSummaryRequest, PriceHistoryRequest};
 use polymarket_client_sdk_v2::clob::types::Interval;
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal::prelude::ToPrimitive;
@@ -149,11 +147,7 @@ pub fn evaluate_placement(
     // The reward minimum is a SHARE count, not USD — compare shares
     // (per-side USD / price), not the dollar amount. (Was a units bug: e.g. at
     // 50c, "$200" is 400 shares, but comparing 200 >= 200 mis-qualified.)
-    let per_side_shares = if your_price > dec!(0) {
-        (per_side_size / your_price).round_dp(2)
-    } else {
-        dec!(0)
-    };
+    let per_side_shares = if your_price > dec!(0) { (per_side_size / your_price).round_dp(2) } else { dec!(0) };
     let per_side_meets_min = per_side_shares >= min_size;
 
     // Reward-qualifying: within max_spread of the midpoint (we farm the bid
@@ -187,12 +181,8 @@ fn fill_risk(book: &BookSnapshot, your_price: Decimal, size: Decimal) -> FillRis
         return FillRisk::High;
     }
     // USDC depth strictly above your price, up to and including best bid.
-    let depth_ahead: Decimal = book
-        .bids
-        .iter()
-        .filter(|(p, _)| *p > your_price && *p <= best_bid)
-        .map(|(p, s)| p * s)
-        .sum();
+    let depth_ahead: Decimal =
+        book.bids.iter().filter(|(p, _)| *p > your_price && *p <= best_bid).map(|(p, s)| p * s).sum();
     if size <= dec!(0) {
         return FillRisk::Medium;
     }
@@ -269,7 +259,7 @@ pub fn placement_presets(
 ) -> Vec<Preset> {
     // 1 − √target, precomputed (rust_decimal has no sqrt without `maths`).
     const TARGETS: [(&str, &str, Decimal); 3] = [
-        ("safer", "Safer", dec!(0.5)),             // 25% weight
+        ("safer", "Safer", dec!(0.5)),              // 25% weight
         ("balanced", "Balanced", dec!(0.29289322)), // 50%
         ("tight", "Tight", dec!(0.13397460)),       // 75%
     ];
@@ -326,14 +316,14 @@ pub fn snapshot_from_token_book(book: &TokenBook, tick_size: Decimal) -> BookSna
 // ── Order-book ladder view-model (presentation) ──────────────────────────────
 
 pub struct LadderRow {
-    pub price_cents: String,  // "34.0"
-    pub price_raw: String,    // "0.34" — the value click-to-set writes
-    pub size: String,         // shares at this level, compact
-    pub total: String,        // cumulative shares from the best level, compact
-    pub total_usd: String,    // cumulative USD depth (Σ price × size) from the best level
-    pub depth_pct: u32,       // 0-100, cumulative-depth bar width
-    pub side: &'static str,   // "ask" | "bid"
-    pub in_band: bool,        // within the reward-qualifying zone
+    pub price_cents: String, // "34.0"
+    pub price_raw: String,   // "0.34" — the value click-to-set writes
+    pub size: String,        // shares at this level, compact
+    pub total: String,       // cumulative shares from the best level, compact
+    pub total_usd: String,   // cumulative USD depth (Σ price × size) from the best level
+    pub depth_pct: u32,      // 0-100, cumulative-depth bar width
+    pub side: &'static str,  // "ask" | "bid"
+    pub in_band: bool,       // within the reward-qualifying zone
     pub is_best: bool,
     /// One of YOUR live engine orders rests at this level (solid marker; the
     /// dashed placement preview is drawn client-side).
@@ -396,7 +386,8 @@ pub fn build_ladder(
     let bid_all = bucketize(&book.bids, true);
     let ask_all = bucketize(&book.asks, false);
     // Your live orders are bids — bucket them the same way bid levels are.
-    let mine: Vec<Decimal> = live_mine.iter()
+    let mine: Vec<Decimal> = live_mine
+        .iter()
         .map(|y| if group > dec!(0) { ((y / group).floor() * group).normalize() } else { y.normalize() })
         .collect();
 
@@ -411,22 +402,37 @@ pub fn build_ladder(
     // levels to invisible slivers once many levels are shown).
     let cum = |levels: &[(Decimal, Decimal)]| -> Vec<Decimal> {
         let mut acc = dec!(0);
-        levels.iter().map(|(_, s)| { acc += s; acc }).collect()
+        levels
+            .iter()
+            .map(|(_, s)| {
+                acc += s;
+                acc
+            })
+            .collect()
     };
     let bid_cum = cum(&bid_levels);
     let ask_cum = cum(&ask_levels);
     // Cumulative USD depth: what it would cost / is resting from the best level out.
     let cum_usd = |levels: &[(Decimal, Decimal)]| -> Vec<Decimal> {
         let mut acc = dec!(0);
-        levels.iter().map(|(p, s)| { acc += p * s; acc }).collect()
+        levels
+            .iter()
+            .map(|(p, s)| {
+                acc += p * s;
+                acc
+            })
+            .collect()
     };
     let bid_usd = cum_usd(&bid_levels);
     let ask_usd = cum_usd(&ask_levels);
-    let max_level = bid_levels.iter().chain(ask_levels.iter())
-        .map(|(_, s)| *s).fold(dec!(0), Decimal::max);
+    let max_level = bid_levels.iter().chain(ask_levels.iter()).map(|(_, s)| *s).fold(dec!(0), Decimal::max);
 
     let pct = |s: Decimal| -> u32 {
-        if max_level <= dec!(0) { 0 } else { ((s / max_level) * dec!(100)).round().to_u32().unwrap_or(0).min(100) }
+        if max_level <= dec!(0) {
+            0
+        } else {
+            ((s / max_level) * dec!(100)).round().to_u32().unwrap_or(0).min(100)
+        }
     };
     let row = |p: Decimal, s: Decimal, cumv: Decimal, usd: Decimal, side: &'static str, is_best: bool| LadderRow {
         price_cents: format!("{:.1}", p * dec!(100)),
@@ -442,11 +448,19 @@ pub fn build_ladder(
     };
 
     // asks displayed high→low so the best ask sits just above the midpoint line.
-    let asks: Vec<LadderRow> = ask_levels.iter().zip(ask_cum.iter()).zip(ask_usd.iter()).enumerate()
+    let asks: Vec<LadderRow> = ask_levels
+        .iter()
+        .zip(ask_cum.iter())
+        .zip(ask_usd.iter())
+        .enumerate()
         .map(|(i, (((p, s), c), u))| row(*p, *s, *c, *u, "ask", i == 0))
         .rev()
         .collect();
-    let bids: Vec<LadderRow> = bid_levels.iter().zip(bid_cum.iter()).zip(bid_usd.iter()).enumerate()
+    let bids: Vec<LadderRow> = bid_levels
+        .iter()
+        .zip(bid_cum.iter())
+        .zip(bid_usd.iter())
+        .enumerate()
         .map(|(i, (((p, s), c), u))| row(*p, *s, *c, *u, "bid", i == 0))
         .collect();
 
@@ -459,7 +473,10 @@ pub fn build_ladder(
     // Qualifying liquidity in the reward band — the full book within
     // [mid − max_spread, mid + max_spread], both sides, in USDC notional. A
     // factual read on how crowded the reward zone already is.
-    let in_zone: Decimal = book.bids.iter().chain(book.asks.iter())
+    let in_zone: Decimal = book
+        .bids
+        .iter()
+        .chain(book.asks.iter())
         .filter(|(p, _)| *p > band_lo && *p < band_hi)
         .map(|(p, s)| p * s)
         .sum();
@@ -509,16 +526,16 @@ pub fn history_range(points: &[(i64, Decimal)]) -> Option<(String, String, Strin
     let mut lo = points[0].1;
     let mut hi = points[0].1;
     for (_, p) in points {
-        if *p < lo { lo = *p; }
-        if *p > hi { hi = *p; }
+        if *p < lo {
+            lo = *p;
+        }
+        if *p > hi {
+            hi = *p;
+        }
     }
     let change = (points[points.len() - 1].1 - points[0].1) * dec!(100);
     let sign = if change >= dec!(0) { "+" } else { "" };
-    Some((
-        format!("{:.1}", lo * dec!(100)),
-        format!("{:.1}", hi * dec!(100)),
-        format!("{sign}{:.1}", change),
-    ))
+    Some((format!("{:.1}", lo * dec!(100)), format!("{:.1}", hi * dec!(100)), format!("{sign}{:.1}", change)))
 }
 
 /// Caption for the chart, labelled by range (e.g. "All-time +2.3¢ · range 8.0–22.0¢").
@@ -555,19 +572,23 @@ pub fn price_chart_svg(points: &[(i64, Decimal)]) -> String {
     let prices: Vec<f64> = if points.len() > MAX_POINTS {
         let stride = points.len().div_ceil(MAX_POINTS);
         let last = points.len() - 1;
-        points.iter().enumerate()
-            .filter(|(i, _)| i % stride == 0 || *i == last)
-            .map(|(_, (_, p))| to_f(*p))
-            .collect()
+        points.iter().enumerate().filter(|(i, _)| i % stride == 0 || *i == last).map(|(_, (_, p))| to_f(*p)).collect()
     } else {
         points.iter().map(|(_, p)| to_f(*p)).collect()
     };
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-    for &p in &prices { lo = lo.min(p); hi = hi.max(p); }
-    if (hi - lo).abs() < f64::EPSILON { lo -= 0.01; hi += 0.01; }
+    for &p in &prices {
+        lo = lo.min(p);
+        hi = hi.max(p);
+    }
+    if (hi - lo).abs() < f64::EPSILON {
+        lo -= 0.01;
+        hi += 0.01;
+    }
     // Pad the value range ~10% each side so the line never hugs the edges.
     let pad = (hi - lo) * 0.10;
-    lo -= pad; hi += pad;
+    lo -= pad;
+    hi += pad;
     let span = hi - lo;
 
     // NB: plot over the (possibly downsampled) `prices`, so `n` must be its
@@ -577,7 +598,9 @@ pub fn price_chart_svg(points: &[(i64, Decimal)]) -> String {
     let x = |i: usize| (i as f64) / (n - 1.0) * W;
     let y = |p: f64| PAD_Y + (1.0 - (p - lo) / span) * (H - 2.0 * PAD_Y);
 
-    let line: String = prices.iter().enumerate()
+    let line: String = prices
+        .iter()
+        .enumerate()
         .map(|(i, &p)| format!("{}{:.1},{:.1}", if i == 0 { "M" } else { "L" }, x(i), y(p)))
         .collect::<Vec<_>>()
         .join(" ");

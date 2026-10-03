@@ -156,8 +156,13 @@ async fn seed_demo(state: &WebState, dir: &str) {
     }
     let alerts_path = std::path::PathBuf::from(format!("{dir}/alerts.json"));
     if !alerts_path.exists() {
-        let label = state.engine.read().await.configs.first().map(|c| c.label.clone()).unwrap_or_else(|| "Demo market".into());
-        let mk = |mins: i64, level: AlertLevel, msg: String| Alert { ts: Utc::now() - Duration::minutes(mins), level, message: msg };
+        let label =
+            state.engine.read().await.configs.first().map(|c| c.label.clone()).unwrap_or_else(|| "Demo market".into());
+        let mk = |mins: i64, level: AlertLevel, msg: String| Alert {
+            ts: Utc::now() - Duration::minutes(mins),
+            level,
+            message: msg,
+        };
         for a in [
             mk(400, AlertLevel::Info, "Bot started".into()),
             mk(399, AlertLevel::Info, "WS connected".into()),

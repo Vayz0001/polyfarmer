@@ -1,10 +1,8 @@
 use alloy::primitives::{Address, U256};
-use alloy::signers::Signer as _;
 use alloy::signers::local::PrivateKeySigner;
+use alloy::signers::Signer as _;
 use chrono::NaiveDate;
 use eyre::Result;
-use std::collections::HashMap;
-use std::str::FromStr;
 use polymarket_client_sdk_v2::auth::state::Authenticated;
 use polymarket_client_sdk_v2::auth::Normal;
 use polymarket_client_sdk_v2::clob::types::request::UserRewardsEarningRequest;
@@ -15,6 +13,8 @@ use polymarket_client_sdk_v2::clob::types::response::{
 use polymarket_client_sdk_v2::clob::types::SignatureType;
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal::Decimal;
+use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
@@ -88,26 +88,14 @@ impl Executor {
 
     /// Place a resting GTC BUY order. Returns the order ID.
     /// Price must already be snapped to tick size before calling.
-    pub async fn place_buy_order(
-        &self,
-        token_id: &str,
-        price: Decimal,
-        size: Decimal,
-    ) -> Result<String> {
+    pub async fn place_buy_order(&self, token_id: &str, price: Decimal, size: Decimal) -> Result<String> {
         use polymarket_client_sdk_v2::clob::types::Side;
 
         // SDK V2 builders take a typed U256 token id; our token_id is a decimal string.
-        let token_id_u256 = U256::from_str(token_id)
-            .map_err(|e| eyre::eyre!("invalid token_id {token_id}: {e}"))?;
+        let token_id_u256 = U256::from_str(token_id).map_err(|e| eyre::eyre!("invalid token_id {token_id}: {e}"))?;
 
-        let order = self.client
-            .limit_order()
-            .token_id(token_id_u256)
-            .price(price)
-            .size(size)
-            .side(Side::Buy)
-            .build()
-            .await?;
+        let order =
+            self.client.limit_order().token_id(token_id_u256).price(price).size(size).side(Side::Buy).build().await?;
 
         let signed = self.client.sign(&self.signer, order).await?;
         let response = self.client.post_order(signed).await?;
@@ -128,17 +116,15 @@ impl Executor {
             match self.client.cancel_orders(&[order_id]).await {
                 Ok(response) => {
                     let id_lower = order_id.to_lowercase();
-                    let cancelled = response.canceled.iter()
-                        .any(|id| id.to_lowercase() == id_lower);
+                    let cancelled = response.canceled.iter().any(|id| id.to_lowercase() == id_lower);
                     if cancelled {
                         return Ok(true);
                     }
 
                     // Look for the order ID as the key (normal Polymarket response).
-                    let keyed_reason = response.not_canceled.get(order_id)
-                        .or_else(|| response.not_canceled.iter()
-                            .find(|(k, _)| k.to_lowercase() == id_lower)
-                            .map(|(_, v)| v));
+                    let keyed_reason = response.not_canceled.get(order_id).or_else(|| {
+                        response.not_canceled.iter().find(|(k, _)| k.to_lowercase() == id_lower).map(|(_, v)| v)
+                    });
 
                     if let Some(reason) = keyed_reason {
                         // "already canceled or matched" means the order is gone — treat as success.
@@ -154,8 +140,10 @@ impl Executor {
                     // with an empty-string key ("can't be found") even for orders that are
                     // still active on the CLOB. Do NOT treat as confirmed cancel here.
                     // Callers that need certainty should use cancel_order_verified().
-                    warn!("Order {} status unclear — canceled={:?} not_canceled={:?}",
-                        order_id, response.canceled, response.not_canceled);
+                    warn!(
+                        "Order {} status unclear — canceled={:?} not_canceled={:?}",
+                        order_id, response.canceled, response.not_canceled
+                    );
                     return Ok(false);
                 }
                 Err(e) => {
@@ -253,11 +241,8 @@ impl Executor {
     async fn fetch_open_order_ids(&self, token_id: &str) -> Result<Vec<String>> {
         use polymarket_client_sdk_v2::clob::types::request::OrdersRequest;
         // SDK V2: asset_id is a typed U256; parse our decimal-string token id.
-        let asset_id = U256::from_str(token_id)
-            .map_err(|e| eyre::eyre!("invalid token_id {token_id}: {e}"))?;
-        let req = OrdersRequest::builder()
-            .asset_id(asset_id)
-            .build();
+        let asset_id = U256::from_str(token_id).map_err(|e| eyre::eyre!("invalid token_id {token_id}: {e}"))?;
+        let req = OrdersRequest::builder().asset_id(asset_id).build();
         let mut ids = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
@@ -303,7 +288,9 @@ impl Executor {
                     info!("  token {}...: {} open orders", token_id.get(..8).unwrap_or(token_id), ids.len());
                     all_ids.extend(ids);
                 }
-                Err(e) => error!("Failed to fetch orders for token {}...: {}", token_id.get(..8).unwrap_or(token_id), e),
+                Err(e) => {
+                    error!("Failed to fetch orders for token {}...: {}", token_id.get(..8).unwrap_or(token_id), e)
+                }
             }
         }
         self.cancel_orders(&all_ids).await
@@ -343,10 +330,7 @@ impl Executor {
     }
 
     /// Total reward earnings (by asset) for a single UTC date.
-    pub async fn total_earnings_for_user_for_day(
-        &self,
-        date: NaiveDate,
-    ) -> Result<Vec<TotalUserEarningResponse>> {
+    pub async fn total_earnings_for_user_for_day(&self, date: NaiveDate) -> Result<Vec<TotalUserEarningResponse>> {
         Ok(self.client.total_earnings_for_user_for_day(date).await?)
     }
 
@@ -380,16 +364,10 @@ impl Executor {
     /// so a cold/empty wallet can't hang on an exhaustive walk. Filtering to
     /// "markets I'm actually tracking" is still done by the caller against
     /// `AppState.configs`.
-    pub async fn user_earnings_and_markets_config(
-        &self,
-        date: NaiveDate,
-    ) -> Result<Vec<UserRewardsEarningResponse>> {
+    pub async fn user_earnings_and_markets_config(&self, date: NaiveDate) -> Result<Vec<UserRewardsEarningResponse>> {
         const MAX_PAGES: u32 = 5;
-        let request = UserRewardsEarningRequest::builder()
-            .date(date)
-            .order_by("earning_percentage")
-            .position("DESC")
-            .build();
+        let request =
+            UserRewardsEarningRequest::builder().date(date).order_by("earning_percentage").position("DESC").build();
         let mut all = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..MAX_PAGES {

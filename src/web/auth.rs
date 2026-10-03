@@ -79,9 +79,10 @@ pub struct LoginForm {
 
 /// Message for a locked-out source, or `None` if it may try.
 fn lockout_message(state: &WebState, source: Source) -> Option<String> {
-    state.limiter.check(source).map(|wait| {
-        format!("Too many attempts — try again in {} seconds.", wait.as_secs().max(1))
-    })
+    state
+        .limiter
+        .check(source)
+        .map(|wait| format!("Too many attempts — try again in {} seconds.", wait.as_secs().max(1)))
 }
 
 /// Verify the admin password on the blocking pool (argon2 is deliberately slow
@@ -89,9 +90,7 @@ fn lockout_message(state: &WebState, source: Source) -> Option<String> {
 pub async fn verify_password_blocking(state: &WebState, password: &str) -> bool {
     let store = Arc::clone(&state.store);
     let password = password.to_string();
-    tokio::task::spawn_blocking(move || store.verify_login(&password).unwrap_or(false))
-        .await
-        .unwrap_or(false)
+    tokio::task::spawn_blocking(move || store.verify_login(&password).unwrap_or(false)).await.unwrap_or(false)
 }
 
 /// Set the admin password on the blocking pool.
@@ -113,11 +112,7 @@ pub async fn csrf_token(session: &Session) -> String {
     if let Ok(Some(token)) = session.get::<String>(SESSION_CSRF).await {
         return token;
     }
-    let token: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(32)
-        .map(char::from)
-        .collect();
+    let token: String = rand::thread_rng().sample_iter(&Alphanumeric).take(32).map(char::from).collect();
     let _ = session.insert(SESSION_CSRF, token.clone()).await;
     token
 }
@@ -210,11 +205,7 @@ pub struct WelcomeQuery {
     code: String,
 }
 
-pub async fn welcome_form(
-    State(state): State<WebState>,
-    session: Session,
-    Query(q): Query<WelcomeQuery>,
-) -> Response {
+pub async fn welcome_form(State(state): State<WebState>, session: Session, Query(q): Query<WelcomeQuery>) -> Response {
     if state.store.is_initialized() {
         return Redirect::to("/login").into_response();
     }
@@ -258,8 +249,7 @@ pub async fn welcome_submit(
             .into_response();
     }
     if let Err(e) = set_password_blocking(&state, &form.password).await {
-        return render_welcome(csrf_token(&session).await, Some(format!("Failed to save: {e}")), &code)
-            .into_response();
+        return render_welcome(csrf_token(&session).await, Some(format!("Failed to save: {e}")), &code).into_response();
     }
     state.limiter.success(source);
     // Log them straight in, then on to wallet setup.
@@ -284,8 +274,7 @@ pub async fn login_submit(
     }
 
     if !verify_csrf(&session, &form.csrf).await {
-        return render_login(csrf_token(&session).await, Some("Invalid session — retry.".into()))
-            .into_response();
+        return render_login(csrf_token(&session).await, Some("Invalid session — retry.".into())).into_response();
     }
 
     let ok = verify_password_blocking(&state, &form.password).await;
@@ -299,8 +288,7 @@ pub async fn login_submit(
         Redirect::to(dest).into_response()
     } else {
         state.limiter.fail(source);
-        render_login(csrf_token(&session).await, Some("Incorrect password.".into()))
-            .into_response()
+        render_login(csrf_token(&session).await, Some("Incorrect password.".into())).into_response()
     }
 }
 
@@ -321,12 +309,7 @@ pub async fn logout(session: Session, Form(form): Form<LogoutForm>) -> Redirect 
 }
 
 /// Route guard: first-run → /welcome, unauthenticated → /login, else proceed.
-pub async fn require_auth(
-    State(state): State<WebState>,
-    session: Session,
-    req: Request,
-    next: Next,
-) -> Response {
+pub async fn require_auth(State(state): State<WebState>, session: Session, req: Request, next: Next) -> Response {
     if !state.store.is_initialized() {
         return Redirect::to("/welcome").into_response();
     }

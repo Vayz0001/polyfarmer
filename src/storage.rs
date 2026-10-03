@@ -30,9 +30,7 @@ fn load_markets_inner(path: &Path) -> Result<Vec<MarketConfig>> {
         return Ok(Vec::new());
     }
     let configs: Vec<MarketConfig> = serde_json::from_str(&raw)?;
-    let (valid, invalid): (Vec<_>, Vec<_>) = configs
-        .into_iter()
-        .partition(|c| c.validate().is_ok());
+    let (valid, invalid): (Vec<_>, Vec<_>) = configs.into_iter().partition(|c| c.validate().is_ok());
     for c in &invalid {
         if let Err(e) = c.validate() {
             tracing::warn!("Skipping invalid market config: {}", e);
@@ -127,12 +125,8 @@ pub fn read_recent_alerts(path: &Path, limit: usize) -> Vec<Alert> {
         let text = String::from_utf8_lossy(&buf);
         // A tail that doesn't begin at the file start begins mid-line: drop that fragment.
         let text: &str = if start > 0 { text.split_once('\n').map(|(_, rest)| rest).unwrap_or("") } else { &text };
-        let alerts: Vec<Alert> = text
-            .lines()
-            .rev()
-            .filter_map(|l| serde_json::from_str::<Alert>(l.trim()).ok())
-            .take(limit)
-            .collect();
+        let alerts: Vec<Alert> =
+            text.lines().rev().filter_map(|l| serde_json::from_str::<Alert>(l.trim()).ok()).take(limit).collect();
         // Enough alerts, or we have read the whole file: done (newest first).
         if alerts.len() >= limit || start == 0 {
             return alerts;
@@ -153,7 +147,12 @@ mod tail_tests {
         use std::io::Write;
         let mut f = fs::File::create(path).unwrap();
         for i in 0..n {
-            writeln!(f, "{}", serde_json::to_string(&Alert::info(format!("event {i} — some typical message text here"))).unwrap()).unwrap();
+            writeln!(
+                f,
+                "{}",
+                serde_json::to_string(&Alert::info(format!("event {i} — some typical message text here"))).unwrap()
+            )
+            .unwrap();
         }
     }
 

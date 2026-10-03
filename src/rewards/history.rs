@@ -24,12 +24,7 @@ const MIN_HOUR_UTC: u32 = 1;
 /// Spawn the daily reward-history poller. Runs one immediate check on boot
 /// (so a restart at any time of day catches up quickly, rather than waiting
 /// up to an hour) then re-checks hourly until shutdown.
-pub fn spawn(
-    executor: Arc<Executor>,
-    alerter: Arc<Alerter>,
-    path: PathBuf,
-    mut stop_rx: watch::Receiver<bool>,
-) {
+pub fn spawn(executor: Arc<Executor>, alerter: Arc<Alerter>, path: PathBuf, mut stop_rx: watch::Receiver<bool>) {
     tokio::spawn(async move {
         maybe_snapshot(&executor, &alerter, &path).await;
         loop {
@@ -70,16 +65,10 @@ async fn maybe_snapshot(executor: &Arc<Executor>, alerter: &Arc<Alerter>, path: 
     match executor.total_earnings_for_user_for_day(yesterday).await {
         Ok(entries) => {
             let total: rust_decimal::Decimal = entries.iter().map(|e| e.earnings).sum();
-            history.snapshots.push(RewardSnapshot {
-                date: yesterday,
-                total_earnings: total,
-                captured_at: now,
-            });
+            history.snapshots.push(RewardSnapshot { date: yesterday, total_earnings: total, captured_at: now });
             if let Err(e) = save_reward_history(path, &history) {
                 tracing::error!("reward history: failed to save {}: {}", path.display(), e);
-                alerter.error(format!(
-                    "Reward snapshot for {yesterday} computed but saving it failed: {e}"
-                ));
+                alerter.error(format!("Reward snapshot for {yesterday} computed but saving it failed: {e}"));
             }
         }
         Err(e) => {

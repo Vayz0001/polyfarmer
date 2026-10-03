@@ -32,11 +32,8 @@ use std::time::Duration;
 
 /// Default public Polygon RPC endpoints, tried in order until one responds.
 /// Overridable/extendable via `POLYGON_RPC_URL` (tried first if set).
-pub const DEFAULT_RPC_URLS: &[&str] = &[
-    "https://polygon-bor-rpc.publicnode.com",
-    "https://polygon.drpc.org",
-    "https://polygon.meowrpc.com",
-];
+pub const DEFAULT_RPC_URLS: &[&str] =
+    &["https://polygon-bor-rpc.publicnode.com", "https://polygon.drpc.org", "https://polygon.meowrpc.com"];
 
 const DEPOSIT_WALLET_FACTORY: &str = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07";
 const DEPOSIT_WALLET_BEACON: &str = "0x7A18EDfe055488A3128f01F563e5B479D92ffc3a";
@@ -91,8 +88,8 @@ fn predict_wallet_calldata(implementation: Address, wallet_id: [u8; 32]) -> Vec<
 
 /// Decode a 32-byte ABI-encoded `address` return value (last 20 bytes).
 fn decode_address_result(hex_result: &str) -> Result<Address> {
-    let bytes = hex::decode(hex_result.trim_start_matches("0x"))
-        .map_err(|e| eyre!("bad hex in eth_call result: {e}"))?;
+    let bytes =
+        hex::decode(hex_result.trim_start_matches("0x")).map_err(|e| eyre!("bad hex in eth_call result: {e}"))?;
     if bytes.len() < 20 {
         return Err(eyre!("eth_call result too short for an address"));
     }
@@ -169,17 +166,12 @@ impl Rpc {
     }
 
     async fn eth_call(&self, to: Address, data: &[u8]) -> Result<String> {
-        self.call(
-            "eth_call",
-            json!([{"to": to.to_string(), "data": format!("0x{}", hex::encode(data))}, "latest"]),
-        )
-        .await
+        self.call("eth_call", json!([{"to": to.to_string(), "data": format!("0x{}", hex::encode(data))}, "latest"]))
+            .await
     }
 
     async fn get_code(&self, addr: Address) -> Result<bool> {
-        let code = self
-            .call("eth_getCode", json!([addr.to_string(), "latest"]))
-            .await?;
+        let code = self.call("eth_getCode", json!([addr.to_string(), "latest"])).await?;
         Ok(!code.trim_start_matches("0x").is_empty())
     }
 }
@@ -300,9 +292,7 @@ async fn detect_wallets_inner(eoa: Address, configured_rpc: Option<&str>) -> Res
     // Likewise, check all candidates' on-chain code concurrently.
     let code_futs = raw_candidates.iter().map(|&(address, kind)| {
         let rpc = &rpc;
-        async move {
-            rpc.get_code(address).await.unwrap_or(false).then_some(WalletCandidate { address, kind })
-        }
+        async move { rpc.get_code(address).await.unwrap_or(false).then_some(WalletCandidate { address, kind }) }
     });
     let confirmed = futures_util::future::join_all(code_futs).await.into_iter().flatten().collect();
     Ok(confirmed)
@@ -330,8 +320,7 @@ mod tests {
     #[test]
     fn calldata_layout_matches_known_call() {
         // Reproduces the exact calldata verified against the live factory.
-        let implementation =
-            Address::from_str("0x7A18EDfe055488A3128f01F563e5B479D92ffc3a").unwrap();
+        let implementation = Address::from_str("0x7A18EDfe055488A3128f01F563e5B479D92ffc3a").unwrap();
         let eoa = Address::from_str("0xe2d1DB006b8042c99AA8Ae31a0ada8D9b7f11c4E").unwrap();
         let data = predict_wallet_calldata(implementation, left_pad_32(eoa));
         assert_eq!(
@@ -345,10 +334,7 @@ mod tests {
     fn decode_address_result_takes_last_20_bytes() {
         let result = "0x00000000000000000000000078f3fbbad90d9076126e05cb4b834c074a84cfb0";
         let addr = decode_address_result(result).unwrap();
-        assert_eq!(
-            addr,
-            Address::from_str("0x78f3fbbaD90D9076126E05Cb4b834C074a84CFb0").unwrap()
-        );
+        assert_eq!(addr, Address::from_str("0x78f3fbbaD90D9076126E05Cb4b834C074a84CFb0").unwrap());
     }
 
     #[test]
@@ -365,10 +351,7 @@ mod tests {
         let owner = Address::from_str("0xe2d1DB006b8042c99AA8Ae31a0ada8D9b7f11c4E").unwrap();
         let mut data = BALANCE_OF_SELECTOR.to_vec();
         data.extend_from_slice(&left_pad_32(owner));
-        assert_eq!(
-            hex::encode(&data),
-            "70a08231000000000000000000000000e2d1db006b8042c99aa8ae31a0ada8d9b7f11c4e"
-        );
+        assert_eq!(hex::encode(&data), "70a08231000000000000000000000000e2d1db006b8042c99aa8ae31a0ada8d9b7f11c4e");
     }
 
     #[test]

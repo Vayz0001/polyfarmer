@@ -15,12 +15,8 @@ use serde::Deserialize;
 const DATA_API: &str = "https://data-api.polymarket.com/v2";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .expect("static reqwest config")
-});
+static HTTP: LazyLock<reqwest::Client> =
+    LazyLock::new(|| reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("static reqwest config"));
 
 #[derive(Debug, Deserialize)]
 struct Page<T> {
@@ -191,12 +187,7 @@ pub async fn positions(user: &str, limit: u32) -> Result<Vec<Position>> {
 
 /// Marked value of all open positions, in USDC.
 pub async fn value(user: &str) -> Result<Decimal> {
-    let resp = HTTP
-        .get(format!("{DATA_API}/value"))
-        .query(&[("user", user)])
-        .send()
-        .await?
-        .error_for_status()?;
+    let resp = HTTP.get(format!("{DATA_API}/value")).query(&[("user", user)]).send().await?.error_for_status()?;
     Ok(resp.json::<ValueResp>().await?.data.value)
 }
 

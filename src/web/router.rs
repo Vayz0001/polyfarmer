@@ -76,10 +76,7 @@ pub fn router(state: WebState) -> Router {
         .route("/setup/engine-status", get(setup::engine_status))
         .route("/launching", get(setup::launching))
         .route("/logout", post(auth::logout))
-        .route_layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth::require_auth,
-        ));
+        .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::require_auth));
 
     let public: Router<WebState> = Router::new()
         .route("/welcome", get(auth::welcome_form).post(auth::welcome_submit))
@@ -87,11 +84,7 @@ pub fn router(state: WebState) -> Router {
         .route("/assets/{*path}", get(assets::serve));
 
     let https = state.secure_cookies;
-    let app = Router::new()
-        .merge(protected)
-        .merge(public)
-        .layer(session_layer)
-        .with_state(state);
+    let app = Router::new().merge(protected).merge(public).layer(session_layer).with_state(state);
     // Security headers + CSP, cross-site write filter, body cap, panic containment.
     harden(app, https)
 }

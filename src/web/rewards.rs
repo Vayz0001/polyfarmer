@@ -118,7 +118,10 @@ pub async fn page(State(state): State<WebState>, session: Session) -> Html<Strin
         best_day: format!("${best:.2}"),
         rows: snaps
             .into_iter()
-            .map(|s| HistoryRow { date: s.date.format("%a %b %-d, %Y").to_string(), total: format!("${:.4}", s.total_earnings) })
+            .map(|s| HistoryRow {
+                date: s.date.format("%a %b %-d, %Y").to_string(),
+                total: format!("${:.4}", s.total_earnings),
+            })
             .collect(),
         history_error,
     })
@@ -192,9 +195,15 @@ struct RewardsTableTemplate {
 /// GET /rewards/table — today's per-market share + earnings.
 pub async fn table(State(state): State<WebState>) -> Html<String> {
     let Some((executor, _)) = state.engine_handle.get().await else {
-        return render(&RewardsTableTemplate { engine_running: false, rows: Vec::new(), today_total: None, error: None });
+        return render(&RewardsTableTemplate {
+            engine_running: false,
+            rows: Vec::new(),
+            today_total: None,
+            error: None,
+        });
     };
-    let tracked: Vec<String> = state.engine.read().await.configs.iter().map(|c| c.condition_id.to_lowercase()).collect();
+    let tracked: Vec<String> =
+        state.engine.read().await.configs.iter().map(|c| c.condition_id.to_lowercase()).collect();
     let today = Utc::now().date_naive();
 
     let rows_fut = tokio::time::timeout(MARKETS_CONFIG_TIMEOUT, executor.user_earnings_and_markets_config(today));
@@ -258,7 +267,11 @@ mod tests {
         let h = RewardHistoryFile {
             snapshots: vec![
                 RewardSnapshot { date: yesterday, total_earnings: dec!(2), captured_at: Utc::now() },
-                RewardSnapshot { date: yesterday - chrono::Duration::days(10), total_earnings: dec!(5), captured_at: Utc::now() },
+                RewardSnapshot {
+                    date: yesterday - chrono::Duration::days(10),
+                    total_earnings: dec!(5),
+                    captured_at: Utc::now(),
+                },
             ],
         };
         let s = history_series(&h, 30);

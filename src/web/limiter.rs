@@ -176,7 +176,15 @@ impl AttemptLimiter {
         self.lock().ips.len()
     }
 
-    fn register(b: &mut Bucket, now: Instant, max_fails: u32, base: Duration, cap: Duration, escalate: bool, forget: Duration) {
+    fn register(
+        b: &mut Bucket,
+        now: Instant,
+        max_fails: u32,
+        base: Duration,
+        cap: Duration,
+        escalate: bool,
+        forget: Duration,
+    ) {
         // Old history is forgotten once the source has been quiet for a while.
         if now.duration_since(b.last_fail) > forget && b.remaining(now).is_none() {
             *b = Bucket::new(now);
@@ -205,7 +213,9 @@ impl AttemptLimiter {
     /// Drop stale entries; if still full, drop the least recently failing one.
     fn make_room(map: &mut HashMap<IpAddr, Bucket>, now: Instant, forget: Duration) {
         map.retain(|_, b| b.remaining(now).is_some() || now.duration_since(b.last_fail) <= forget);
-        if let Some(oldest) = map.iter().filter(|(_, b)| b.remaining(now).is_none()).min_by_key(|(_, b)| b.last_fail).map(|(ip, _)| *ip) {
+        if let Some(oldest) =
+            map.iter().filter(|(_, b)| b.remaining(now).is_none()).min_by_key(|(_, b)| b.last_fail).map(|(ip, _)| *ip)
+        {
             map.remove(&oldest);
         } else if let Some(any) = map.keys().next().copied() {
             map.remove(&any);
@@ -221,7 +231,12 @@ mod tests {
         Source::Ip(IpAddr::from([203, 0, 113, n]))
     }
     fn fast() -> Policy {
-        Policy { base_lock: Duration::from_millis(60), max_lock: Duration::from_millis(500), global_lock: Duration::from_millis(60), ..Policy::default() }
+        Policy {
+            base_lock: Duration::from_millis(60),
+            max_lock: Duration::from_millis(500),
+            global_lock: Duration::from_millis(60),
+            ..Policy::default()
+        }
     }
 
     #[test]

@@ -9,7 +9,6 @@
 ///
 /// Test market: "US forces enter Iran by March 31?"
 ///   URL: https://polymarket.com/event/us-forces-enter-iran-by/us-forces-enter-iran-by-march-31-222-191-243-517-878-439-519
-
 use eyre::Result;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -20,10 +19,8 @@ use tracing::{error, info, warn};
 
 const WS_URL: &str = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 
-const YES_TOKEN: &str =
-    "42750054381142639205639663180818682570869285140532640407891991570656047928885";
-const NO_TOKEN: &str =
-    "81697486240392901899167649997008736380137911909662773455994395620863894931973";
+const YES_TOKEN: &str = "42750054381142639205639663180818682570869285140532640407891991570656047928885";
+const NO_TOKEN: &str = "81697486240392901899167649997008736380137911909662773455994395620863894931973";
 
 // ── WS message structs (kept for documentation — all fields match the API) ───
 
@@ -51,8 +48,8 @@ struct BookEvent {
 struct PriceChangeEntry {
     asset_id: String,
     price: String,
-    size: String,     // "0" = level removed
-    side: String,     // "BUY" or "SELL"
+    size: String, // "0" = level removed
+    side: String, // "BUY" or "SELL"
     hash: String,
     best_bid: String,
     best_ask: String,
@@ -115,8 +112,7 @@ impl TokenBook {
         map.clear();
         for lvl in levels_json {
             let price = lvl.get("price").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let size: f64 = lvl.get("size").and_then(|v| v.as_str())
-                .and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            let size: f64 = lvl.get("size").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0.0);
             if !price.is_empty() && size > 0.0 {
                 map.insert(price, size);
             }
@@ -137,14 +133,12 @@ impl TokenBook {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter("ws_smoke=debug,info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("ws_smoke=debug,info").init();
 
     info!("=== Polymarket WS Smoke Test ===");
     info!("Market: US forces enter Iran by March 31?");
-    info!("YES token: {}...{}", &YES_TOKEN[..8], &YES_TOKEN[YES_TOKEN.len()-4..]);
-    info!("NO  token: {}...{}", &NO_TOKEN[..8],  &NO_TOKEN[NO_TOKEN.len()-4..]);
+    info!("YES token: {}...{}", &YES_TOKEN[..8], &YES_TOKEN[YES_TOKEN.len() - 4..]);
+    info!("NO  token: {}...{}", &NO_TOKEN[..8], &NO_TOKEN[NO_TOKEN.len() - 4..]);
     info!("");
 
     info!("Connecting to {}...", WS_URL);
@@ -180,14 +174,20 @@ async fn main() -> Result<()> {
     while let Some(msg) = read.next().await {
         let msg = match msg {
             Ok(m) => m,
-            Err(e) => { error!("WS error: {}", e); break; }
+            Err(e) => {
+                error!("WS error: {}", e);
+                break;
+            }
         };
 
         let Message::Text(text) = msg else {
             match msg {
                 Message::Ping(d) => info!("[PING from server] {} bytes", d.len()),
                 Message::Pong(_) => info!("[PONG from server]"),
-                Message::Close(f) => { warn!("[CLOSE] {:?}", f); break; }
+                Message::Close(f) => {
+                    warn!("[CLOSE] {:?}", f);
+                    break;
+                }
                 _ => {}
             }
             continue;
@@ -221,15 +221,13 @@ async fn main() -> Result<()> {
                 }
 
                 let label = token_label(asset_id);
-                info!("[SNAPSHOT/{label}] {} bid levels, {} ask levels",
-                    book.bids.len(), book.asks.len());
+                info!("[SNAPSHOT/{label}] {} bid levels, {} ask levels", book.bids.len(), book.asks.len());
                 print_book(label, book, &HashSet::new(), &HashSet::new());
             }
             continue;
         }
 
-        let event_type = value.get("event_type")
-            .and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+        let event_type = value.get("event_type").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
         *event_counts.entry(event_type.clone()).or_insert(0) += 1;
 
         match event_type.as_str() {
@@ -246,17 +244,14 @@ async fn main() -> Result<()> {
                             book.apply_change(&change.price, size, &change.side);
 
                             if change.side == "BUY" {
-                                changed_bids.entry(change.asset_id.clone())
-                                    .or_default().insert(change.price.clone());
+                                changed_bids.entry(change.asset_id.clone()).or_default().insert(change.price.clone());
                             } else {
-                                changed_asks.entry(change.asset_id.clone())
-                                    .or_default().insert(change.price.clone());
+                                changed_asks.entry(change.asset_id.clone()).or_default().insert(change.price.clone());
                             }
                         }
 
                         // Reprint book for each affected token
-                        let affected: HashSet<String> = pc.price_changes.iter()
-                            .map(|c| c.asset_id.clone()).collect();
+                        let affected: HashSet<String> = pc.price_changes.iter().map(|c| c.asset_id.clone()).collect();
 
                         for asset_id in &affected {
                             let label = token_label(asset_id);
@@ -273,43 +268,44 @@ async fn main() -> Result<()> {
                 }
             }
 
-            "last_trade_price" => {
-                match serde_json::from_str::<LastTradePriceEvent>(&text) {
-                    Ok(t) => {
-                        let label = token_label(&t.asset_id);
-                        info!("[TRADE/{label}] side={} price={} size={} fee_bps={}",
-                            t.side, t.price, t.size, t.fee_rate_bps);
-                    }
-                    Err(e) => warn!("[TRADE] parse error: {}", e),
+            "last_trade_price" => match serde_json::from_str::<LastTradePriceEvent>(&text) {
+                Ok(t) => {
+                    let label = token_label(&t.asset_id);
+                    info!(
+                        "[TRADE/{label}] side={} price={} size={} fee_bps={}",
+                        t.side, t.price, t.size, t.fee_rate_bps
+                    );
                 }
-            }
+                Err(e) => warn!("[TRADE] parse error: {}", e),
+            },
 
-            "best_bid_ask" => {
-                match serde_json::from_str::<BestBidAskEvent>(&text) {
-                    Ok(bba) => {
-                        let label = token_label(&bba.asset_id);
-                        let bid: f64 = bba.best_bid.parse().unwrap_or(0.0);
-                        let ask: f64 = bba.best_ask.parse().unwrap_or(0.0);
-                        info!("[BBA/{label}] bid={} ask={} spread={} mid={:.4}",
-                            bba.best_bid, bba.best_ask, bba.spread, (bid + ask) / 2.0);
-                    }
-                    Err(e) => warn!("[BBA] parse error: {}", e),
+            "best_bid_ask" => match serde_json::from_str::<BestBidAskEvent>(&text) {
+                Ok(bba) => {
+                    let label = token_label(&bba.asset_id);
+                    let bid: f64 = bba.best_bid.parse().unwrap_or(0.0);
+                    let ask: f64 = bba.best_ask.parse().unwrap_or(0.0);
+                    info!(
+                        "[BBA/{label}] bid={} ask={} spread={} mid={:.4}",
+                        bba.best_bid,
+                        bba.best_ask,
+                        bba.spread,
+                        (bid + ask) / 2.0
+                    );
                 }
-            }
+                Err(e) => warn!("[BBA] parse error: {}", e),
+            },
 
-            "tick_size_change" => {
-                match serde_json::from_str::<TickSizeChangeEvent>(&text) {
-                    Ok(t) => {
-                        let label = token_label(&t.asset_id);
-                        info!("[TICK_SIZE/{label}] {} → {}", t.old_tick_size, t.new_tick_size);
-                    }
-                    Err(e) => warn!("[TICK_SIZE] parse error: {}", e),
+            "tick_size_change" => match serde_json::from_str::<TickSizeChangeEvent>(&text) {
+                Ok(t) => {
+                    let label = token_label(&t.asset_id);
+                    info!("[TICK_SIZE/{label}] {} → {}", t.old_tick_size, t.new_tick_size);
                 }
-            }
+                Err(e) => warn!("[TICK_SIZE] parse error: {}", e),
+            },
 
-            "new_market"      => info!("[NEW MARKET]\n{}", pretty(&value)),
+            "new_market" => info!("[NEW MARKET]\n{}", pretty(&value)),
             "market_resolved" => info!("[MARKET RESOLVED]\n{}", pretty(&value)),
-            other             => warn!("[UNKNOWN event_type={other}]\n{}", pretty(&value)),
+            other => warn!("[UNKNOWN event_type={other}]\n{}", pretty(&value)),
         }
 
         let total: u32 = event_counts.values().sum();
@@ -331,26 +327,21 @@ async fn main() -> Result<()> {
 ///   ASKS  worst → best  (highest price at top, best ask closest to spread)
 ///   ── spread ──
 ///   BIDS  best → worst  (best bid closest to spread, lowest price at bottom)
-fn print_book(
-    label: &str,
-    book: &TokenBook,
-    updated_bids: &HashSet<String>,
-    updated_asks: &HashSet<String>,
-) {
-    let header  = format!("  {:>6} | {:>12} | {:>12}", "Price", "Shares", "USD Depth");
+fn print_book(label: &str, book: &TokenBook, updated_bids: &HashSet<String>, updated_asks: &HashSet<String>) {
+    let header = format!("  {:>6} | {:>12} | {:>12}", "Price", "Shares", "USD Depth");
     let divider = format!("  {}-+-{}-+-{}", "------", "------------", "------------");
 
     // ── Asks: sort ascending, take 4 lowest (closest to spread), display reversed ──
-    let mut ask_levels: Vec<(f64, &str, f64)> = book.asks.iter()
-        .filter_map(|(p, &s)| p.parse::<f64>().ok().map(|pf| (pf, p.as_str(), s)))
-        .collect();
+    let mut ask_levels: Vec<(f64, &str, f64)> =
+        book.asks.iter().filter_map(|(p, &s)| p.parse::<f64>().ok().map(|pf| (pf, p.as_str(), s))).collect();
     ask_levels.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap()); // ascending
     let ask_closest: Vec<_> = ask_levels.iter().take(4).collect(); // 4 best asks
 
     info!("  [{label}] ASKS (worst → best, 4 closest to spread):");
     info!("{header}");
     info!("{divider}");
-    for (price_f, price_s, size) in ask_closest.iter().rev() { // reverse = worst on top
+    for (price_f, price_s, size) in ask_closest.iter().rev() {
+        // reverse = worst on top
         let usd = price_f * size;
         let marker = if updated_asks.contains(*price_s) { " (updated)" } else { "" };
         info!("  {price_s:>6} | {size:>12.2} | ${usd:>11.2}{marker}");
@@ -359,9 +350,8 @@ fn print_book(
     info!("  ── spread ──");
 
     // ── Bids: sort descending, take 4 highest (closest to spread) ──
-    let mut bid_levels: Vec<(f64, &str, f64)> = book.bids.iter()
-        .filter_map(|(p, &s)| p.parse::<f64>().ok().map(|pf| (pf, p.as_str(), s)))
-        .collect();
+    let mut bid_levels: Vec<(f64, &str, f64)> =
+        book.bids.iter().filter_map(|(p, &s)| p.parse::<f64>().ok().map(|pf| (pf, p.as_str(), s))).collect();
     bid_levels.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap()); // descending
     let bid_closest: Vec<_> = bid_levels.iter().take(4).collect(); // 4 best bids
 
@@ -376,10 +366,9 @@ fn print_book(
 
     // Summary line
     if let (Some(best_bid), Some(best_ask)) = (bid_closest.first(), ask_closest.first()) {
-        let mid    = (best_bid.0 + best_ask.0) / 2.0;
+        let mid = (best_bid.0 + best_ask.0) / 2.0;
         let spread = best_ask.0 - best_bid.0;
-        info!("  best_bid={} best_ask={} mid={mid:.4} spread={spread:.4}",
-            best_bid.1, best_ask.1);
+        info!("  best_bid={} best_ask={} mid={mid:.4} spread={spread:.4}", best_bid.1, best_ask.1);
     }
 }
 
@@ -388,8 +377,8 @@ fn print_book(
 fn token_label(asset_id: &str) -> &'static str {
     match asset_id {
         YES_TOKEN => "YES",
-        NO_TOKEN  => "NO",
-        _         => "UNKNOWN",
+        NO_TOKEN => "NO",
+        _ => "UNKNOWN",
     }
 }
 

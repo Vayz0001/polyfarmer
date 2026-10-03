@@ -33,7 +33,9 @@ impl TokenBook {
 
         for lvl in &snap.bids {
             match (Decimal::from_str(&lvl.price), Decimal::from_str(&lvl.size)) {
-                (Ok(p), Ok(s)) if s > dec!(0) => { self.bids.insert(p, s); }
+                (Ok(p), Ok(s)) if s > dec!(0) => {
+                    self.bids.insert(p, s);
+                }
                 (Err(_), _) => warn!("Snapshot: unparseable bid price {:?}", lvl.price),
                 (_, Err(_)) => warn!("Snapshot: unparseable bid size  {:?}", lvl.size),
                 _ => {}
@@ -41,7 +43,9 @@ impl TokenBook {
         }
         for lvl in &snap.asks {
             match (Decimal::from_str(&lvl.price), Decimal::from_str(&lvl.size)) {
-                (Ok(p), Ok(s)) if s > dec!(0) => { self.asks.insert(p, s); }
+                (Ok(p), Ok(s)) if s > dec!(0) => {
+                    self.asks.insert(p, s);
+                }
                 (Err(_), _) => warn!("Snapshot: unparseable ask price {:?}", lvl.price),
                 (_, Err(_)) => warn!("Snapshot: unparseable ask size  {:?}", lvl.size),
                 _ => {}
@@ -49,17 +53,15 @@ impl TokenBook {
         }
 
         // Best bid = last item (ascending), best ask = last item (descending)
-        self.best_bid = snap.bids.last()
-            .and_then(|l| Decimal::from_str(&l.price).ok());
-        self.best_ask = snap.asks.last()
-            .and_then(|l| Decimal::from_str(&l.price).ok());
+        self.best_bid = snap.bids.last().and_then(|l| Decimal::from_str(&l.price).ok());
+        self.best_ask = snap.asks.last().and_then(|l| Decimal::from_str(&l.price).ok());
     }
 
     /// Apply a single price_change entry, updating levels and top-of-book.
     /// Returns the parsed (price, size) for the caller to use if needed.
     pub fn apply_change(&mut self, entry: &WsPriceChangeEntry) -> Option<(Decimal, Decimal)> {
         let price = Decimal::from_str(&entry.price).ok()?;
-        let size  = Decimal::from_str(&entry.size).ok()?;
+        let size = Decimal::from_str(&entry.size).ok()?;
 
         let map = if entry.side == "BUY" { &mut self.bids } else { &mut self.asks };
 

@@ -20,9 +20,7 @@ fn unique_dir() -> std::path::PathBuf {
 }
 
 fn empty_engine() -> Arc<tokio::sync::RwLock<polyfarmer::engine::ws_manager::AppState>> {
-    Arc::new(tokio::sync::RwLock::new(
-        polyfarmer::engine::ws_manager::AppState::new("markets.json".into()),
-    ))
+    Arc::new(tokio::sync::RwLock::new(polyfarmer::engine::ws_manager::AppState::new("markets.json".into())))
 }
 
 /// Router backed by an *initialized* store (password set); returns it + password.
@@ -39,13 +37,7 @@ async fn body_string(res: axum::response::Response) -> String {
 }
 
 fn session_cookie(res: &axum::response::Response) -> Option<String> {
-    res.headers()
-        .get(header::SET_COOKIE)?
-        .to_str()
-        .ok()?
-        .split(';')
-        .next()
-        .map(|s| s.to_string())
+    res.headers().get(header::SET_COOKIE)?.to_str().ok()?.split(';').next().map(|s| s.to_string())
 }
 
 fn extract_csrf(html: &str) -> String {
@@ -58,10 +50,7 @@ fn extract_csrf(html: &str) -> String {
 #[tokio::test]
 async fn unauthenticated_dashboard_redirects_to_login() {
     let (app, _) = test_app();
-    let res = app
-        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let res = app.oneshot(Request::builder().uri("/").body(Body::empty()).unwrap()).await.unwrap();
     assert!(res.status().is_redirection(), "got {}", res.status());
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
 }
@@ -69,10 +58,7 @@ async fn unauthenticated_dashboard_redirects_to_login() {
 #[tokio::test]
 async fn login_page_renders_with_csrf() {
     let (app, _) = test_app();
-    let res = app
-        .oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let res = app.oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_string(res).await;
     assert!(body.contains("polyfarmer"));
@@ -83,17 +69,10 @@ async fn login_page_renders_with_csrf() {
 async fn embedded_assets_are_served() {
     let (app, _) = test_app();
     for path in ["/assets/app.css", "/assets/htmx.min.js"] {
-        let res = app
-            .clone()
-            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+        let res = app.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK, "{path}");
     }
-    let res = app
-        .oneshot(Request::builder().uri("/assets/nope.txt").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let res = app.oneshot(Request::builder().uri("/assets/nope.txt").body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
@@ -102,11 +81,7 @@ async fn full_login_grants_access() {
     let (app, pw) = test_app();
 
     // 1) GET /login → cookie + csrf
-    let res = app
-        .clone()
-        .oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let res = app.clone().oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
     let cookie = session_cookie(&res).expect("session cookie");
     let csrf = extract_csrf(&body_string(res).await);
 
@@ -131,13 +106,7 @@ async fn full_login_grants_access() {
 
     // 3) GET /setup with the authed cookie → 200
     let res = app
-        .oneshot(
-            Request::builder()
-                .uri("/setup")
-                .header(header::COOKIE, &cookie)
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri("/setup").header(header::COOKIE, &cookie).body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -259,11 +228,7 @@ async fn wrong_setup_codes_lock_out_guessing() {
 #[tokio::test]
 async fn wrong_password_is_rejected() {
     let (app, _) = test_app();
-    let res = app
-        .clone()
-        .oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let res = app.clone().oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
     let cookie = session_cookie(&res).expect("cookie");
     let csrf = extract_csrf(&body_string(res).await);
 
@@ -404,7 +369,9 @@ async fn old_reward_history_url_redirects() {
     let (app, pw) = test_app();
     let cookie = login(&app, &pw).await;
     let res = app
-        .oneshot(Request::builder().uri("/rewards/history").header(header::COOKIE, &cookie).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder().uri("/rewards/history").header(header::COOKIE, &cookie).body(Body::empty()).unwrap(),
+        )
         .await
         .unwrap();
     assert!(res.status().is_redirection());
@@ -516,7 +483,11 @@ async fn password_change_signs_out_every_other_session_but_not_this_one() {
 
     let get = |cookie: String, uri: &'static str| {
         let app = app.clone();
-        async move { app.oneshot(Request::builder().uri(uri).header(header::COOKIE, cookie).body(Body::empty()).unwrap()).await.unwrap() }
+        async move {
+            app.oneshot(Request::builder().uri(uri).header(header::COOKIE, cookie).body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+        }
     };
     assert_eq!(get(a.clone(), "/markets").await.status(), StatusCode::OK);
     assert_eq!(get(b.clone(), "/markets").await.status(), StatusCode::OK);
@@ -547,17 +518,27 @@ async fn password_change_signs_out_every_other_session_but_not_this_one() {
     let res = get(b, "/markets").await;
     assert!(res.status().is_redirection(), "stolen/other session must be signed out, got {}", res.status());
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
-    assert_eq!(get(a_new, "/markets").await.status(), StatusCode::OK, "the session that changed the password stays signed in");
+    assert_eq!(
+        get(a_new, "/markets").await.status(),
+        StatusCode::OK,
+        "the session that changed the password stays signed in"
+    );
 }
 
 #[tokio::test]
 async fn new_passwords_must_meet_the_length_policy() {
     let (app, pw) = test_app();
     let cookie = login(&app, &pw).await;
-    let page = app.clone().oneshot(Request::builder().uri("/setup").header(header::COOKIE, &cookie).body(Body::empty()).unwrap()).await.unwrap();
+    let page = app
+        .clone()
+        .oneshot(Request::builder().uri("/setup").header(header::COOKIE, &cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     let cookie = session_cookie(&page).unwrap_or(cookie);
     let csrf = extract_csrf(&body_string(page).await);
-    for (new, expect) in [("short", "at least 12"), ("elevenchars", "at least 12"), (&"x".repeat(129)[..], "at most 128")] {
+    for (new, expect) in
+        [("short", "at least 12"), ("elevenchars", "at least 12"), (&"x".repeat(129)[..], "at most 128")]
+    {
         let form = format!("csrf={csrf}&current={pw}&password={new}&confirm={new}");
         let res = app
             .clone()
@@ -806,7 +787,11 @@ fn assert_hardened(res: &axum::response::Response, what: &str) {
 #[test]
 fn csp_forbids_inline_script_eval_and_framing() {
     let directive = |name: &str| {
-        CSP.split(';').map(str::trim).find(|d| d.starts_with(name)).unwrap_or_else(|| panic!("no {name} in CSP")).to_string()
+        CSP.split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with(name))
+            .unwrap_or_else(|| panic!("no {name} in CSP"))
+            .to_string()
     };
     let script = directive("script-src");
     assert_eq!(script, "script-src 'self'", "scripts only from our own origin: {script}");
@@ -848,7 +833,14 @@ async fn every_kind_of_response_carries_the_security_headers() {
     // …including errors produced by the layers themselves (403 cross-site, 413 body cap).
     let res = app
         .clone()
-        .oneshot(Request::builder().method("POST").uri("/login").header("sec-fetch-site", "cross-site").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/login")
+                .header("sec-fetch-site", "cross-site")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
@@ -889,13 +881,21 @@ async fn pages_are_never_cached_but_assets_revalidate_with_an_etag() {
     // A matching validator gets a body-less 304; a stale one gets the file.
     let res = app
         .clone()
-        .oneshot(Request::builder().uri("/assets/app.js").header(header::IF_NONE_MATCH, &etag).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder().uri("/assets/app.js").header(header::IF_NONE_MATCH, &etag).body(Body::empty()).unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_MODIFIED);
     assert!(body_string(res).await.is_empty());
     let res = app
-        .oneshot(Request::builder().uri("/assets/app.js").header(header::IF_NONE_MATCH, "\"stale\"").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/assets/app.js")
+                .header(header::IF_NONE_MATCH, "\"stale\"")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -961,7 +961,10 @@ fn templates_are_csp_clean() {
         checked += 1;
 
         // <script> must always have src= (no inline code).
-        for tag in html.match_indices("<script").map(|(i, _)| &html[i..html[i..].find('>').map(|j| i + j).unwrap_or(html.len())]) {
+        for tag in html
+            .match_indices("<script")
+            .map(|(i, _)| &html[i..html[i..].find('>').map(|j| i + j).unwrap_or(html.len())])
+        {
             assert!(tag.contains("src="), "{name}: inline <script> would be blocked by the CSP: {tag}");
         }
         // No inline event handlers (onclick=, onload=, …) and no javascript: URLs.
@@ -969,7 +972,9 @@ fn templates_are_csp_clean() {
         assert!(!html.contains("javascript:"), "{name}: javascript: URL");
         // htmx features that need eval: trigger filters `[expr]`, hx-on, js: values.
         assert!(!html.contains("hx-on"), "{name}: hx-on needs eval");
-        for tr in html.match_indices("hx-trigger=\"").map(|(i, _)| &html[i + 12..i + 12 + html[i + 12..].find('"').unwrap()]) {
+        for tr in
+            html.match_indices("hx-trigger=\"").map(|(i, _)| &html[i + 12..i + 12 + html[i + 12..].find('"').unwrap()])
+        {
             assert!(!tr.contains('['), "{name}: htmx trigger filter needs eval: {tr}");
         }
         assert!(!html.contains("\"js:") && !html.contains("'js:"), "{name}: htmx js: value needs eval");
@@ -979,7 +984,10 @@ fn templates_are_csp_clean() {
     // Base layouts must also switch htmx's own eval / script-tag features off.
     for base in ["base.html", "base_card.html"] {
         let html = std::fs::read_to_string(dir.join(base)).unwrap();
-        assert!(html.contains("\"allowEval\":false") && html.contains("\"allowScriptTags\":false"), "{base}: htmx-config");
+        assert!(
+            html.contains("\"allowEval\":false") && html.contains("\"allowScriptTags\":false"),
+            "{base}: htmx-config"
+        );
         assert!(html.contains("/assets/theme.js"), "{base}: theme loaded from an external file");
     }
 }
@@ -1037,11 +1045,11 @@ async fn start_farming_rejects_hostile_values_with_a_message_not_a_panic() {
     };
     let cases = [
         // (price, size, depth, volatility, expiry) -> text the error must contain
-        (start("18", "100", "0", "", "7日"), "Invalid expiry"),                      // multibyte: used to panic
-        (start("18", "100", "0", "", "99999999999999d"), "Invalid expiry"),          // duration overflow: used to panic
+        (start("18", "100", "0", "", "7日"), "Invalid expiry"), // multibyte: used to panic
+        (start("18", "100", "0", "", "99999999999999d"), "Invalid expiry"), // duration overflow: used to panic
         (start("18", "100", "0", "", "99999999999999999999d"), "Invalid expiry"),
         (start("18", "100", "0", "", "💥"), "Invalid expiry"),
-        (start("18", "79228162514264337593543950335", "0", "", "7d"), "Order size"),  // Decimal-max size
+        (start("18", "79228162514264337593543950335", "0", "", "7d"), "Order size"), // Decimal-max size
         (start("0.0000000000000000000000000001", "100", "0", "", "7d"), "price between"), // size/price overflow
         (start("-5", "100", "0", "", "7d"), "price between"),
         (start("18", "100", "99999999999999999999", "", "7d"), "Min depth"),
@@ -1064,7 +1072,11 @@ async fn edit_rejects_hostile_values_and_leaves_the_config_untouched() {
     let edit = |size: &str, dist: &str, depth: &str, vol: &str, exp: &str| {
         format!(
             "csrf={csrf}&order_size={}&distance_cents={}&min_depth_usd={}&max_volatility_cents={}&expires_in={}",
-            enc(size), enc(dist), enc(depth), enc(vol), enc(exp)
+            enc(size),
+            enc(dist),
+            enc(depth),
+            enc(vol),
+            enc(exp)
         )
     };
     for (body, expect) in [
@@ -1100,5 +1112,8 @@ async fn oversized_free_text_and_odd_parameters_are_bounded() {
     // An unknown sort column falls back to the default rather than going upstream.
     let (status, page, _) = get_authed(&app, &cookie, "/markets/browse?sort=%27%3B%20DROP%20TABLE&dir=sideways").await;
     assert_eq!(status, StatusCode::OK);
-    assert!(page.contains("value=\"rate_per_day\" selected") && page.contains("value=\"DESC\" selected"), "defaults applied");
+    assert!(
+        page.contains("value=\"rate_per_day\" selected") && page.contains("value=\"DESC\" selected"),
+        "defaults applied"
+    );
 }

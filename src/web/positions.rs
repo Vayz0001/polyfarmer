@@ -29,11 +29,7 @@ struct PositionsPageTemplate {
 
 pub async fn page(State(state): State<WebState>, session: Session) -> Html<String> {
     let wallet = state.wallet_address().unwrap_or_default();
-    render(&PositionsPageTemplate {
-        shell: shell(&session, "positions").await,
-        has_wallet: !wallet.is_empty(),
-        wallet,
-    })
+    render(&PositionsPageTemplate { shell: shell(&session, "positions").await, has_wallet: !wallet.is_empty(), wallet })
 }
 
 pub struct PositionRow {
@@ -111,9 +107,7 @@ pub async fn table(State(state): State<WebState>, Query(p): Query<TabParams>) ->
         .caches
         .positions
         .get_or_fetch(&user, || async {
-            tokio::time::timeout(TIMEOUT, portfolio::positions(&user, 200))
-                .await
-                .map_err(|_| eyre::eyre!("timeout"))?
+            tokio::time::timeout(TIMEOUT, portfolio::positions(&user, 200)).await.map_err(|_| eyre::eyre!("timeout"))?
         })
         .await;
     match res {
@@ -130,7 +124,11 @@ pub async fn table(State(state): State<WebState>, Query(p): Query<TabParams>) ->
                     avg: cents(p.avg_price),
                     current: cents(p.current_price),
                     value: usd(p.current_value),
-                    pnl: format!("{}{}", if p.unrealized_pnl >= Decimal::ZERO { "+" } else { "−" }, usd(p.unrealized_pnl.abs())),
+                    pnl: format!(
+                        "{}{}",
+                        if p.unrealized_pnl >= Decimal::ZERO { "+" } else { "−" },
+                        usd(p.unrealized_pnl.abs())
+                    ),
                     pnl_pct: format!("{:+.1}%", p.percent_pnl),
                     pnl_tone: tone(p.unrealized_pnl),
                     tracked: tracked.iter().any(|c| c.eq_ignore_ascii_case(&p.condition_id)),

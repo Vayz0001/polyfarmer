@@ -31,12 +31,7 @@ pub struct Alerter {
 
 impl Alerter {
     pub fn new(path: &Path, tx: broadcast::Sender<Alert>) -> Self {
-        Self {
-            path: path.to_path_buf(),
-            buffer: Mutex::new(VecDeque::new()),
-            tx,
-            last: Mutex::new(None),
-        }
+        Self { path: path.to_path_buf(), buffer: Mutex::new(VecDeque::new()), tx, last: Mutex::new(None) }
     }
 
     pub fn info(&self, msg: impl Into<String>) {
@@ -72,7 +67,9 @@ impl Alerter {
         let mut buf = self.buffer.lock().unwrap();
         while let Some(buffered) = buf.front() {
             match append_alert(&self.path, buffered) {
-                Ok(_) => { buf.pop_front(); }
+                Ok(_) => {
+                    buf.pop_front();
+                }
                 Err(_) => break, // disk still failing — stop draining, append new alert to buffer
             }
         }

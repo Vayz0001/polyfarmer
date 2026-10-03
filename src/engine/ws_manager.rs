@@ -3,9 +3,7 @@ use crate::engine::executor::Executor;
 use crate::engine::orderbook::TokenBook;
 use crate::engine::quoter::{self, DeactivateReason, QuoteAction};
 use crate::storage::save_markets;
-use crate::types::{
-    MarketConfig, OrderStatus, WsBookSnapshot, WsPriceChangeEvent, WsCommand,
-};
+use crate::types::{MarketConfig, OrderStatus, WsBookSnapshot, WsCommand, WsPriceChangeEvent};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -98,8 +96,7 @@ pub fn spawn(
             // Collect currently subscribed token_ids from state
             let token_ids: Vec<String> = {
                 let s = state.read().await;
-                s.configs.iter().map(|c| c.token_id.clone()).collect::<HashSet<_>>()
-                    .into_iter().collect()
+                s.configs.iter().map(|c| c.token_id.clone()).collect::<HashSet<_>>().into_iter().collect()
             };
 
             // Don't connect until we have at least one market — the server
@@ -109,8 +106,7 @@ pub fn spawn(
                 // state on the first real connect).
                 while cmd_rx.try_recv().is_ok() {}
                 // Log once every ~30s so the operator knows the bot is alive but idle
-                static IDLE_LOG_COUNT: std::sync::atomic::AtomicU32 =
-                    std::sync::atomic::AtomicU32::new(0);
+                static IDLE_LOG_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
                 let count = IDLE_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if count % 10 == 0 {
                     info!("WS manager: no markets configured, waiting... (add one from the dashboard)");
@@ -125,7 +121,10 @@ pub fn spawn(
             info!("WS connecting ({} tokens)...", token_ids.len());
 
             let (ws_stream, _) = match connect_async(WS_URL).await {
-                Ok(s) => { backoff_ms = RECONNECT_BASE_MS; s }
+                Ok(s) => {
+                    backoff_ms = RECONNECT_BASE_MS;
+                    s
+                }
                 Err(e) => {
                     error!("WS connect failed: {}", e);
                     tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
@@ -268,17 +267,23 @@ pub fn spawn(
             // re-cancelling is idempotent and prevents orphaned orders.
             let live_order_ids: Vec<String> = {
                 let s = state.read().await;
-                s.order_status.values().filter_map(|status| {
-                    match status {
-                        OrderStatus::Live { order_id, .. } |
-                        OrderStatus::Cancelling { order_id, .. } => Some(order_id.clone()),
+                s.order_status
+                    .values()
+                    .filter_map(|status| match status {
+                        OrderStatus::Live { order_id, .. } | OrderStatus::Cancelling { order_id, .. } => {
+                            Some(order_id.clone())
+                        }
                         _ => None,
-                    }
-                }).collect()
+                    })
+                    .collect()
             };
 
             warn!("WS disconnected: {} — cancelling {} bot orders", disconnect_reason, live_order_ids.len());
-            alerter.warn(format!("WS disconnected ({}) — cancelling {} open orders", disconnect_reason, live_order_ids.len()));
+            alerter.warn(format!(
+                "WS disconnected ({}) — cancelling {} open orders",
+                disconnect_reason,
+                live_order_ids.len()
+            ));
 
             // Retry up to 3 times — only reset statuses on confirmed cancellation.
             // If we reset to Idle without confirming, the bot re-places orders that are still
@@ -286,7 +291,10 @@ pub fn spawn(
             let mut cancel_confirmed = false;
             for attempt in 1u32..=3 {
                 match executor.cancel_orders(&live_order_ids).await {
-                    Ok(_) => { cancel_confirmed = true; break; }
+                    Ok(_) => {
+                        cancel_confirmed = true;
+                        break;
+                    }
                     Err(e) => {
                         error!("cancel_orders attempt {}/3 failed: {}", attempt, e);
                         if attempt < 3 {
@@ -321,7 +329,7 @@ pub fn spawn(
                 // won't place new orders (it only places from Idle). Alert for manual check.
                 alerter.error(
                     "cancel_orders failed after 3 attempts on WS disconnect — \
-                     manual check required, bot will not re-quote until restart"
+                     manual check required, bot will not re-quote until restart",
                 );
             }
 
@@ -332,34 +340,35 @@ pub fn spawn(
 }
 
 /// Handle one incoming WS text message.
-async fn handle_message(
-    text: &str,
-    state: &Arc<RwLock<AppState>>,
-    executor: &Arc<Executor>,
-    alerter: &Arc<Alerter>,
-) {
+async fn handle_message(text: &str, state: &Arc<RwLock<AppState>>, executor: &Arc<Executor>, alerter: &Arc<Alerter>) {
     let value: Value = match serde_json::from_str(text) {
         Ok(v) => v,
-        Err(e) => { warn!("WS JSON parse error: {}", e); return; }
+        Err(e) => {
+            warn!("WS JSON parse error: {}", e);
+            return;
+        }
     };
 
     // Initial book snapshot = JSON array
     if let Some(arr) = value.as_array() {
-        let snapshots: Vec<WsBookSnapshot> = arr.iter()
-            .filter_map(|v| serde_json::from_value(v.clone()).ok())
-            .collect();
+        let snapshots: Vec<WsBookSnapshot> =
+            arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect();
 
         let mut s = state.write().await;
         for snap in snapshots {
             let asset_id = snap.asset_id.clone();
             let book = s.books.entry(asset_id.clone()).or_default();
             book.apply_snapshot(&snap);
-            let (best_bid, best_ask, n_bids, n_asks) =
-                (book.best_bid, book.best_ask, book.bids.len(), book.asks.len());
+            let (best_bid, best_ask, n_bids, n_asks) = (book.best_bid, book.best_ask, book.bids.len(), book.asks.len());
             s.snapshotted.insert(asset_id.clone());
-            info!("Book snapshot: {}... | best_bid={:?} best_ask={:?} bids={} asks={}",
+            info!(
+                "Book snapshot: {}... | best_bid={:?} best_ask={:?} bids={} asks={}",
                 asset_id.get(..8).unwrap_or(&asset_id),
-                best_bid, best_ask, n_bids, n_asks);
+                best_bid,
+                best_ask,
+                n_bids,
+                n_asks
+            );
         }
         return;
     }
@@ -370,13 +379,14 @@ async fn handle_message(
         "price_change" => {
             let event: WsPriceChangeEvent = match serde_json::from_str(text) {
                 Ok(e) => e,
-                Err(e) => { warn!("price_change parse error: {}", e); return; }
+                Err(e) => {
+                    warn!("price_change parse error: {}", e);
+                    return;
+                }
             };
 
             // Collect which tokens were affected
-            let affected_tokens: HashSet<String> = event.price_changes.iter()
-                .map(|c| c.asset_id.clone())
-                .collect();
+            let affected_tokens: HashSet<String> = event.price_changes.iter().map(|c| c.asset_id.clone()).collect();
 
             // Apply changes to books — skip tokens that haven't received their snapshot yet.
             // Price changes arriving before the snapshot would be wiped when the snapshot
@@ -396,7 +406,8 @@ async fn handle_message(
             // Read state, collect actions, then execute outside the lock
             let actions: Vec<(String, QuoteAction, String, rust_decimal::Decimal, rust_decimal::Decimal)> = {
                 let s = state.read().await;
-                s.configs.iter()
+                s.configs
+                    .iter()
                     .filter(|c| affected_tokens.contains(&c.token_id))
                     .filter_map(|c| {
                         // Book may not be populated yet if snapshot hasn't arrived.
@@ -411,16 +422,17 @@ async fn handle_message(
                         } else {
                             book.best_bid.unwrap_or_default() - c.distance
                         };
-                        let depth = book.bid_depth_between(
-                            depth_lower,
-                            book.best_bid.unwrap_or_default(),
-                        );
+                        let depth = book.bid_depth_between(depth_lower, book.best_bid.unwrap_or_default());
                         if matches!(action, QuoteAction::Hold) {
-                            debug!("[{}] best_bid={:?} depth={} status={:?} → Hold",
-                                &c.label, book.best_bid, depth, status);
+                            debug!(
+                                "[{}] best_bid={:?} depth={} status={:?} → Hold",
+                                &c.label, book.best_bid, depth, status
+                            );
                         } else {
-                            info!("[{}] best_bid={:?} depth={} status={:?} → {:?}",
-                                &c.label, book.best_bid, depth, status, action);
+                            info!(
+                                "[{}] best_bid={:?} depth={} status={:?} → {:?}",
+                                &c.label, book.best_bid, depth, status, action
+                            );
                         }
                         Some((c.id.clone(), action, c.token_id.clone(), c.order_size, c.tick_size))
                     })
@@ -433,8 +445,8 @@ async fn handle_message(
         "last_trade_price" => {
             // Trade executed — log only, no action needed for LP bot
             let asset_id = value.get("asset_id").and_then(|v| v.as_str()).unwrap_or("?");
-            let price    = value.get("price").and_then(|v| v.as_str()).unwrap_or("?");
-            let size     = value.get("size").and_then(|v| v.as_str()).unwrap_or("?");
+            let price = value.get("price").and_then(|v| v.as_str()).unwrap_or("?");
+            let size = value.get("size").and_then(|v| v.as_str()).unwrap_or("?");
             info!("Trade: asset={}... price={} size={}", asset_id.get(..8).unwrap_or(asset_id), price, size);
         }
 
@@ -497,12 +509,12 @@ async fn execute_actions(
                                 Some(OrderStatus::Placing { price: p }) if *p == price
                             );
                             if still_placing {
-                                s.order_status.insert(config_id.clone(), OrderStatus::Live {
-                                    order_id: order_id.clone(),
-                                    price,
-                                });
+                                s.order_status
+                                    .insert(config_id.clone(), OrderStatus::Live { order_id: order_id.clone(), price });
                                 s.place_failures.remove(&config_id); // reset on success
-                                let (label, token_label) = s.configs.iter()
+                                let (label, token_label) = s
+                                    .configs
+                                    .iter()
                                     .find(|c| c.id == config_id)
                                     .map(|c| (c.label.clone(), c.token_label.clone()))
                                     .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
@@ -528,7 +540,9 @@ async fn execute_actions(
                             // "Not enough balance" = collateral locked by a matching/settling order.
                             // Not a config failure — just wait for next price_change to re-evaluate.
                             if err_str.contains("not enough balance") {
-                                warn!("Place skipped: insufficient balance (order settling?) — will retry on next tick");
+                                warn!(
+                                    "Place skipped: insufficient balance (order settling?) — will retry on next tick"
+                                );
                                 let mut s = state2.write().await;
                                 if matches!(s.order_status.get(&config_id), Some(OrderStatus::Placing { .. })) {
                                     s.order_status.insert(config_id, OrderStatus::Idle);
@@ -552,14 +566,14 @@ async fn execute_actions(
                                     if *failures < MAX_PLACE_FAILURES {
                                         None
                                     } else {
-                                        let label = s.configs.iter()
+                                        let label = s
+                                            .configs
+                                            .iter()
                                             .find(|c| c.id == config_id)
                                             .map(|c| c.label.clone())
                                             .unwrap_or_else(|| config_id.to_string());
-                                        let remaining: Vec<_> = s.configs.iter()
-                                            .filter(|c| c.id != config_id)
-                                            .cloned()
-                                            .collect();
+                                        let remaining: Vec<_> =
+                                            s.configs.iter().filter(|c| c.id != config_id).cloned().collect();
                                         let markets_file = s.markets_file.clone();
                                         Some((label, remaining, markets_file))
                                     }
@@ -597,11 +611,12 @@ async fn execute_actions(
             QuoteAction::Cancel { order_id, reason } => {
                 let (label, token_label) = {
                     let mut s = state.write().await;
-                    s.order_status.insert(config_id.clone(), OrderStatus::Cancelling {
-                        order_id: order_id.clone(),
-                        since: std::time::Instant::now(),
-                    });
-                    s.configs.iter()
+                    s.order_status.insert(
+                        config_id.clone(),
+                        OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
+                    );
+                    s.configs
+                        .iter()
                         .find(|c| c.id == config_id)
                         .map(|c| (c.label.clone(), c.token_label.clone()))
                         .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()))
@@ -618,10 +633,7 @@ async fn execute_actions(
                         Ok(true) => {
                             alerter2.info(format!(
                                 "Order cancelled · {}\n${} of {} — {}",
-                                label,
-                                order_size,
-                                token_label,
-                                reason_str,
+                                label, order_size, token_label, reason_str,
                             ));
                             true
                         }
@@ -659,10 +671,10 @@ async fn execute_actions(
                     if s.heartbeat_paused {
                         continue; // CLOB unreachable — don't cancel+replace
                     }
-                    s.order_status.insert(config_id.clone(), OrderStatus::Cancelling {
-                        order_id: order_id.clone(),
-                        since: std::time::Instant::now(),
-                    });
+                    s.order_status.insert(
+                        config_id.clone(),
+                        OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
+                    );
                 }
 
                 let exec = Arc::clone(executor);
@@ -676,7 +688,10 @@ async fn execute_actions(
                     match exec.cancel_order_verified(&order_id).await {
                         Ok(true) => {}
                         Ok(false) => {
-                            warn!("Replace: cancel of {} verified still live — leaving Cancelling for timeout recovery", order_id);
+                            warn!(
+                                "Replace: cancel of {} verified still live — leaving Cancelling for timeout recovery",
+                                order_id
+                            );
                             return; // leave state as Cancelling; 30s timeout will reset to Idle
                         }
                         Err(e) => {
@@ -743,14 +758,16 @@ async fn execute_actions(
                                 Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id
                             );
                             if still_cancelling {
-                                let (label, token_label) = s.configs.iter()
+                                let (label, token_label) = s
+                                    .configs
+                                    .iter()
                                     .find(|c| c.id == config_id)
                                     .map(|c| (c.label.clone(), c.token_label.clone()))
                                     .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
-                                s.order_status.insert(config_id, OrderStatus::Live {
-                                    order_id: new_order_id,
-                                    price: fresh_price,
-                                });
+                                s.order_status.insert(
+                                    config_id,
+                                    OrderStatus::Live { order_id: new_order_id, price: fresh_price },
+                                );
                                 drop(s);
                                 alerter2.info(format!(
                                     "Order replaced · {}\nBUY {} {} shares @ {}¢ (${})",
@@ -762,7 +779,10 @@ async fn execute_actions(
                                 ));
                             } else {
                                 drop(s);
-                                warn!("Replace: state changed during cancel+place — cancelling orphan {}", new_order_id);
+                                warn!(
+                                    "Replace: state changed during cancel+place — cancelling orphan {}",
+                                    new_order_id
+                                );
                                 let _ = exec.cancel_order(&new_order_id).await;
                             }
                         }
@@ -783,8 +803,11 @@ async fn execute_actions(
             QuoteAction::Deactivate { order_id, reason } => {
                 let label = {
                     let s = state.read().await;
-                    s.configs.iter().find(|c| c.id == config_id)
-                        .map(|c| c.label.clone()).unwrap_or_else(|| config_id.clone())
+                    s.configs
+                        .iter()
+                        .find(|c| c.id == config_id)
+                        .map(|c| c.label.clone())
+                        .unwrap_or_else(|| config_id.clone())
                 };
 
                 if matches!(reason, DeactivateReason::Volatility) {
@@ -806,8 +829,8 @@ async fn execute_actions(
                     ));
                 } else {
                     let (title, msg) = match reason {
-                        DeactivateReason::Paused     => ("Paused", "Order cancelled — resume from Markets"),
-                        DeactivateReason::Expired    => ("Expired", "Expiry reached — stopped quoting"),
+                        DeactivateReason::Paused => ("Paused", "Order cancelled — resume from Markets"),
+                        DeactivateReason::Expired => ("Expired", "Expiry reached — stopped quoting"),
                         DeactivateReason::Volatility => unreachable!(),
                     };
                     alerter.info(format!("{} · {}\n{}", title, label, msg));
@@ -819,10 +842,10 @@ async fn execute_actions(
                         // events will see Cancelling and return Hold, preventing duplicate alerts.
                         {
                             let mut s = state.write().await;
-                            s.order_status.insert(config_id.clone(), OrderStatus::Cancelling {
-                                order_id: oid.clone(),
-                                since: std::time::Instant::now(),
-                            });
+                            s.order_status.insert(
+                                config_id.clone(),
+                                OrderStatus::Cancelling { order_id: oid.clone(), since: std::time::Instant::now() },
+                            );
                         }
                         let exec = Arc::clone(executor);
                         let state2 = Arc::clone(state);
