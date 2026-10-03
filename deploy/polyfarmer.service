@@ -1,0 +1,49 @@
+# systemd unit for running polyfarmer on a server.
+#
+#   sudo useradd --system --create-home --home-dir /opt/polyfarmer polyfarmer
+#   cargo build --release            # on the server, or build elsewhere
+#   sudo install -m 0755 target/release/polyfarmer /opt/polyfarmer/polyfarmer
+#   sudo install -m 0644 deploy/polyfarmer.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now polyfarmer
+#   journalctl -u polyfarmer -f      # first run prints the setup code here
+#
+# `systemctl stop` sends SIGTERM; polyfarmer cancels its resting orders on
+# Polymarket before exiting (give it time: TimeoutStopSec).
+
+[Unit]
+Description=polyfarmer - Polymarket LP rewards bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=polyfarmer
+Group=polyfarmer
+# State lives in ./data (markets, alerts, encrypted wallet) relative to this directory.
+WorkingDirectory=/opt/polyfarmer
+ExecStart=/opt/polyfarmer/polyfarmer
+
+# Keep the dashboard on loopback and reach it via Tailscale / an SSH tunnel / an
+# HTTPS reverse proxy (see README). Enable Secure cookies when it is served over HTTPS.
+Environment=DASHBOARD_BIND=127.0.0.1:8080
+Environment=DASHBOARD_SECURE_COOKIES=true
+Environment=RUST_LOG=polyfarmer=info
+# Optional: a reliable Polygon RPC for balance + wallet detection.
+#Environment=POLYGON_RPC_URL=https://...
+
+# A crash restarts it (startup cancels any leftover orders on tracked markets
+# before quoting). A clean stop (exit 0 after SIGTERM) does not restart.
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/polyfarmer/data
+
+[Install]
+WantedBy=multi-user.target

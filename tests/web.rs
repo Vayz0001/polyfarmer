@@ -33,12 +33,6 @@ fn test_app() -> (Router, String) {
     (router(WebState::new(Arc::new(store), empty_engine())), pw)
 }
 
-/// Router backed by a fresh, *uninitialized* store (first-run state).
-fn test_app_uninit() -> Router {
-    let store = CredentialStore::open(unique_dir()).unwrap();
-    router(WebState::new(Arc::new(store), empty_engine()))
-}
-
 async fn body_string(res: axum::response::Response) -> String {
     let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
     String::from_utf8(bytes.to_vec()).unwrap()
