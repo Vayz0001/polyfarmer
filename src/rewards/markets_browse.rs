@@ -62,9 +62,13 @@ pub struct BrowseQuery {
     pub next_cursor: Option<String>,
 }
 
+/// One shared client (connection pool + TLS config) for every browse request.
+static HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+    reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("static reqwest config")
+});
+
 pub async fn browse(query: &BrowseQuery) -> Result<RewardsMultiResponse> {
-    let client = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build()?;
-    let mut req = client.get(REWARDS_MULTI_URL);
+    let mut req = HTTP.get(REWARDS_MULTI_URL);
     if let Some(q) = &query.q {
         req = req.query(&[("q", q)]);
     }

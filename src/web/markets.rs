@@ -51,7 +51,7 @@ const BOOK_PUSH_MIN_INTERVAL: Duration = Duration::from_millis(250);
 /// Browse results (query → response). Polymarket's endpoint takes ~5–10s, so
 /// results are served stale-while-revalidate: instant after the first load.
 static BROWSE: LazyLock<Arc<TtlCache<Arc<markets_browse::RewardsMultiResponse>>>> =
-    LazyLock::new(|| Arc::new(TtlCache::new(Duration::from_secs(60))));
+    LazyLock::new(|| Arc::new(TtlCache::with_capacity(Duration::from_secs(60), 64)));
 const BROWSE_PAGE_SIZE: u32 = 30;
 
 fn browse_key(q: &str, sort: &str, dir: &str, cursor: &str) -> String {

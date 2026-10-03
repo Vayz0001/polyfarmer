@@ -196,9 +196,9 @@ pub fn spawn(
                                 debug!("WS recv Ping — sending Pong");
                                 let _ = write.send(Message::Pong(data)).await;
                             }
-                            Some(Ok(Message::Close(_))) => break "server closed",
-                            Some(Err(e)) => break Box::leak(format!("recv error: {e}").into_boxed_str()),
-                            None => break "stream ended",
+                            Some(Ok(Message::Close(_))) => break "server closed".to_string(),
+                            Some(Err(e)) => break format!("recv error: {e}"),
+                            None => break "stream ended".to_string(),
                             _ => {}
                         }
                     }
@@ -206,7 +206,7 @@ pub fn spawn(
                     // ── PING ────────────────────────────────────────────────
                     _ = ping_ticker.tick() => {
                         if write.send(Message::Text("PING".into())).await.is_err() {
-                            break "ping send failed";
+                            break "ping send failed".to_string();
                         }
                     }
 
@@ -224,7 +224,7 @@ pub fn spawn(
                                         "custom_feature_enabled": true
                                     });
                                     if write.send(Message::Text(msg.to_string().into())).await.is_err() {
-                                        break "subscribe send failed";
+                                        break "subscribe send failed".to_string();
                                     }
                                     new.iter().for_each(|t| { subscribed.insert(t.clone()); });
                                     info!("WS subscribed {} new tokens", new.len());
@@ -237,7 +237,7 @@ pub fn spawn(
                                 if !to_remove.is_empty() {
                                     let msg = json!({ "assets_ids": to_remove, "operation": "unsubscribe" });
                                     if write.send(Message::Text(msg.to_string().into())).await.is_err() {
-                                        break "unsubscribe send failed";
+                                        break "unsubscribe send failed".to_string();
                                     }
                                     to_remove.iter().for_each(|t| { subscribed.remove(t); });
                                     // Free book memory and snapshot state for removed tokens
@@ -253,7 +253,7 @@ pub fn spawn(
 
                     // ── Graceful shutdown ───────────────────────────────────
                     _ = stop_rx.changed() => {
-                        if *stop_rx.borrow() { break "shutdown"; }
+                        if *stop_rx.borrow() { break "shutdown".to_string(); }
                     }
                 }
             };

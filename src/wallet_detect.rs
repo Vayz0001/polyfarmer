@@ -108,6 +108,11 @@ const PER_REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 /// when the user has no internet connection at all.
 const TOTAL_BUDGET: Duration = Duration::from_secs(9);
 
+/// One shared client for every RPC call (clones are cheap handles to the same pool).
+static RPC_HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+    reqwest::Client::builder().timeout(PER_REQUEST_TIMEOUT).build().expect("static reqwest config")
+});
+
 // ── Minimal JSON-RPC client ───────────────────────────────────────────────────
 
 struct Rpc {
@@ -122,9 +127,7 @@ impl Rpc {
     /// sequential so a handful of dead/slow endpoints — or no network at
     /// all — resolve in one timeout window, not one-per-candidate.
     async fn connect(configured: Option<&str>) -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .timeout(PER_REQUEST_TIMEOUT)
-            .build()?;
+        let client = RPC_HTTP.clone();
 
         let mut urls: Vec<String> = Vec::new();
         if let Some(u) = configured {
@@ -196,7 +199,7 @@ pub async fn pusd_balance(owner: Address, configured_rpc: Option<&str>) -> Resul
     data.extend_from_slice(&BALANCE_OF_SELECTOR);
     data.extend_from_slice(&left_pad_32(owner));
 
-    let client = reqwest::Client::builder().timeout(PER_REQUEST_TIMEOUT).build()?;
+    let client = RPC_HTTP.clone();
     let urls = configured_rpc.into_iter().chain(DEFAULT_RPC_URLS.iter().copied());
     let mut last_err = eyre!("no RPC configured");
     for url in urls {
