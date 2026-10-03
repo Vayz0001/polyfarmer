@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}{% endblock %} · polyfarmer</title>
-  <script>try{var t=localStorage.getItem("pf-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+  <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false}' />
+  <script src="/assets/theme.js"></script>
   <link rel="stylesheet" href="/assets/app.css" />
   <script src="/assets/htmx.min.js" defer></script>
 </head>

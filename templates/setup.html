@@ -28,7 +28,7 @@
           <div class="affix">
             <input class="input mono" type="password" name="private_key" id="private_key" placeholder="0x…" required maxlength="66" autocomplete="off" spellcheck="false"
                    data-keycheck
-                   hx-post="/setup/wallet/detect" hx-trigger="input changed delay:150ms[PF.keyLooksValid(this.value)]"
+                   hx-post="/setup/wallet/detect" hx-trigger="pf-key-complete delay:150ms"
                    hx-target="#wallet-detect-status" hx-swap="innerHTML" hx-include="[name='csrf']" />
             <button type="button" class="btn ghost icon act" data-action="reveal" aria-label="Show private key" aria-pressed="false"><svg class="i sm"><use href="#i-eye"/></svg></button>
           </div>

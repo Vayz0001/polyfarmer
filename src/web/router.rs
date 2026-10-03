@@ -2,10 +2,6 @@
 //! setup) behind the auth guard, with a session layer over everything.
 
 use axum::{
-    extract::{DefaultBodyLimit, Request},
-    http::{Method, StatusCode},
-    middleware::Next,
-    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
@@ -13,33 +9,10 @@ use tower_sessions::cookie::SameSite;
 use tower_sessions::{Expiry, SessionManagerLayer};
 
 use super::auth::ANONYMOUS_TIMEOUT;
+use super::security::harden;
 use super::session_store::SWEEP_INTERVAL;
 use super::state::WebState;
 use super::{activity, assets, auth, dashboard, events, markets, positions, rewards, setup, shell};
-
-/// Largest request body any form here legitimately sends (a pasted private key
-/// is ~70 bytes). Axum's default is 2 MB; there is no reason to buffer that.
-const MAX_BODY_BYTES: usize = 64 * 1024;
-
-/// Defence in depth against CSRF (the per-session tokens remain the primary
-/// control): browsers label every request with `Sec-Fetch-Site`
-/// (OWASP "Fetch Metadata"). A state-changing request that the browser says came
-/// from another site — *or another origin on the same site*, e.g. a different
-/// local web app on another port — is refused outright, before any handler or
-/// token check runs. Requests without the header (curl, older browsers, tests)
-/// fall through to the token check.
-async fn reject_cross_site_writes(req: Request, next: Next) -> Response {
-    let unsafe_method = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-    if unsafe_method {
-        let site = req.headers().get("sec-fetch-site").and_then(|v| v.to_str().ok());
-        if let Some(site) = site {
-            if !matches!(site, "same-origin" | "none") {
-                return (StatusCode::FORBIDDEN, "Cross-site request blocked.").into_response();
-            }
-        }
-    }
-    next.run(req).await
-}
 
 /// Build the dashboard router with shared [`WebState`].
 pub fn router(state: WebState) -> Router {
@@ -113,12 +86,12 @@ pub fn router(state: WebState) -> Router {
         .route("/login", get(auth::login_form).post(auth::login_submit))
         .route("/assets/{*path}", get(assets::serve));
 
-    Router::new()
+    let https = state.secure_cookies;
+    let app = Router::new()
         .merge(protected)
         .merge(public)
         .layer(session_layer)
-        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
-        // Outermost: refuse cross-site writes before sessions or handlers run.
-        .layer(axum::middleware::from_fn(reject_cross_site_writes))
-        .with_state(state)
+        .with_state(state);
+    // Security headers + CSP, cross-site write filter, body cap, panic containment.
+    harden(app, https)
 }

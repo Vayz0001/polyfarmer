@@ -224,14 +224,18 @@
     if (body.length < 64) return "partial";
     return body.length === 64 ? "complete" : "invalid";
   }
-  PF.keyLooksValid = function (v) { return keyState(v) === "complete"; };
   function onKeyInput(el) {
     var st = keyState(el.value), status = $("#wallet-detect-status"), wrap = $("#wallet-field-wrap");
     if (st !== "complete" && wrap) { wrap.className = "pf-collapse"; }
     if (!status) return;
     if (st === "empty" || st === "partial") status.innerHTML = "";
     else if (st === "invalid") status.innerHTML = '<div class="help" style="color:var(--ask)">That isn\'t a valid private key (64 hex characters).</div>';
-    else status.innerHTML = '<div class="help">Looking up your Polymarket wallet on-chain…</div>';
+    else {
+      status.innerHTML = '<div class="help">Looking up your Polymarket wallet on-chain…</div>';
+      // Only a complete 64-hex key is sent to the server for wallet detection (htmx
+      // listens for this event; a partial key never leaves the browser).
+      el.dispatchEvent(new CustomEvent("pf-key-complete", { bubbles: true }));
+    }
   }
 
   // ── market view ─────────────────────────────────────────────────────────

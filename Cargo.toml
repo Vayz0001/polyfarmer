@@ -38,7 +38,7 @@ hex = "0.4"
 # Shares hyper 1 / http 1 / tower 0.5 with the SDK tree — no version conflict.
 axum = "0.8"
 askama = "0.16"                # compile-time templates, auto-escaping (XSS-safe)
-tower-http = { version = "0.6", features = ["compression-br", "trace"] }
+tower-http = { version = "0.6", default-features = false, features = ["catch-panic"] }  # contain handler panics (was: unused brotli/trace features)
 rust-embed = "8.11"           # bake templates + static assets into the binary
 mime_guess = "2"              # content-types for embedded assets
 tower-sessions = "0.15"       # cookie sessions (login state, CSRF token)

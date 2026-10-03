@@ -406,7 +406,7 @@ async fn render_ladder(state: &WebState, mr: &MarketRef, side: usize, group: Dec
     let max_spread = mr.rewards_max_spread.unwrap_or(dec!(0));
     let mine = live_mine(state, &mr.token_ids[side]).await;
     let ladder = market_data::build_ladder(book, mid, max_spread, LADDER_LEVELS, &mine, group);
-    BookLadderTemplate { ladder }.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>"))
+    BookLadderTemplate { ladder }.render().unwrap_or_else(|e| super::shell::render_failed(&e))
 }
 
 /// GET /markets/view/book — one-shot ladder render (used when the live stream

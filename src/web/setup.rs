@@ -218,7 +218,7 @@ pub async fn engine_status(State(state): State<WebState>) -> Response {
         return hx_redirect("/");
     }
     let tpl = EngineStatusTemplate { failed: phase == EnginePhase::Error };
-    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>"))).into_response()
+    Html(tpl.render().unwrap_or_else(|e| super::shell::render_failed(&e))).into_response()
 }
 
 /// The first-run launch screen — a calm branded interstitial that polls the
@@ -229,7 +229,7 @@ pub async fn launching(State(state): State<WebState>) -> Response {
         return Redirect::to("/setup").into_response();
     }
     let tpl = LaunchingTemplate {};
-    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>"))).into_response()
+    Html(tpl.render().unwrap_or_else(|e| super::shell::render_failed(&e))).into_response()
 }
 
 /// Empty 200 carrying htmx's `HX-Redirect` header → client-side navigation.
@@ -253,7 +253,7 @@ async fn save_result(
             saved,
             message: if saved { String::new() } else { message },
         };
-        return Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
+        return Html(tpl.render().unwrap_or_else(|e| super::shell::render_failed(&e)))
             .into_response();
     }
     // Non-htmx fallback (JS disabled) — full-page re-render with the notice.
@@ -332,7 +332,7 @@ fn render_detect(
     candidates: Vec<String>,
 ) -> Html<String> {
     let tpl = WalletDetectTemplate { reveal, value: value.to_string(), message, verified, candidates };
-    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
+    Html(tpl.render().unwrap_or_else(|e| super::shell::render_failed(&e)))
 }
 
 async fn render(

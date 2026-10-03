@@ -29,10 +29,17 @@ pub async fn shell(session: &Session, active: &'static str) -> Shell {
     Shell { active, csrf: csrf_token(session).await }
 }
 
-/// Render any Askama template, surfacing template errors inline (they're
-/// compile-checked, so this only fires on runtime formatting errors).
+/// What a client sees if a template fails to render: no internals. (Templates are
+/// compile-checked, so this only fires on a runtime formatting error.) The cause
+/// goes to the log.
+pub(super) fn render_failed(e: &dyn std::fmt::Display) -> String {
+    tracing::error!("template render failed: {e}");
+    "<p>Something went wrong rendering this page. Check the bot's log.</p>".to_string()
+}
+
+/// Render any Askama template.
 pub fn render<T: Template>(tpl: &T) -> Html<String> {
-    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
+    Html(tpl.render().unwrap_or_else(|e| render_failed(&e)))
 }
 
 /// The engine's real health, derived from `AppState` — never from "is a

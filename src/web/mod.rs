@@ -15,6 +15,7 @@ mod markets;
 mod positions;
 mod rewards;
 mod router;
+pub mod security;
 pub mod session_store;
 mod setup;
 mod shell;

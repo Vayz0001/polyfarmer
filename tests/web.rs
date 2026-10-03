@@ -655,7 +655,7 @@ async fn cross_site_writes_are_refused_before_any_handler_runs() {
         }
     };
     let post = |site: Option<&'static str>| {
-        let (app, pw, fresh) = (app.clone(), pw.clone(), fresh.clone());
+        let (app, pw, fresh) = (app.clone(), pw.clone(), fresh);
         async move {
             let (cookie, csrf) = fresh().await;
             let mut b = Request::builder()
@@ -782,4 +782,215 @@ async fn oversized_request_bodies_are_rejected() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+// ── Security headers, CSP, panic containment, assets ───────────────────────────
+
+use polyfarmer::web::security::{harden, CSP};
+
+fn header_str(res: &axum::response::Response, name: &str) -> Option<String> {
+    res.headers().get(name).map(|v| v.to_str().unwrap().to_string())
+}
+
+/// Headers every response must carry, whatever produced it.
+fn assert_hardened(res: &axum::response::Response, what: &str) {
+    assert_eq!(header_str(res, "content-security-policy").as_deref(), Some(CSP), "{what}: CSP");
+    assert_eq!(header_str(res, "x-content-type-options").as_deref(), Some("nosniff"), "{what}");
+    assert_eq!(header_str(res, "x-frame-options").as_deref(), Some("DENY"), "{what}");
+    assert_eq!(header_str(res, "referrer-policy").as_deref(), Some("no-referrer"), "{what}");
+    assert_eq!(header_str(res, "cross-origin-opener-policy").as_deref(), Some("same-origin"), "{what}");
+    assert_eq!(header_str(res, "cross-origin-resource-policy").as_deref(), Some("same-origin"), "{what}");
+    assert!(header_str(res, "permissions-policy").unwrap().contains("camera=()"), "{what}");
+}
+
+#[test]
+fn csp_forbids_inline_script_eval_and_framing() {
+    let directive = |name: &str| {
+        CSP.split(';').map(str::trim).find(|d| d.starts_with(name)).unwrap_or_else(|| panic!("no {name} in CSP")).to_string()
+    };
+    let script = directive("script-src");
+    assert_eq!(script, "script-src 'self'", "scripts only from our own origin: {script}");
+    for bad in ["unsafe-eval", "unsafe-inline", "http:", "*"] {
+        assert!(!script.contains(bad), "script-src must not allow {bad}");
+    }
+    assert_eq!(directive("default-src"), "default-src 'self'");
+    assert_eq!(directive("frame-ancestors"), "frame-ancestors 'none'");
+    assert_eq!(directive("object-src"), "object-src 'none'");
+    assert_eq!(directive("base-uri"), "base-uri 'none'");
+    assert_eq!(directive("form-action"), "form-action 'self'");
+    assert_eq!(directive("connect-src"), "connect-src 'self'");
+}
+
+#[tokio::test]
+async fn every_kind_of_response_carries_the_security_headers() {
+    let (app, pw) = test_app();
+    let cookie = login(&app, &pw).await;
+    let req = |uri: &str, cookie: Option<&str>| {
+        let mut b = Request::builder().uri(uri);
+        if let Some(c) = cookie {
+            b = b.header(header::COOKIE, c);
+        }
+        b.body(Body::empty()).unwrap()
+    };
+    let res = app.clone().oneshot(req("/login", None)).await.unwrap();
+    assert_hardened(&res, "200 page");
+    let res = app.clone().oneshot(req("/", None)).await.unwrap();
+    assert!(res.status().is_redirection());
+    assert_hardened(&res, "303 redirect");
+    let res = app.clone().oneshot(req("/assets/nope.txt", None)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_hardened(&res, "404");
+    let res = app.clone().oneshot(req("/markets", Some(&cookie))).await.unwrap();
+    assert_hardened(&res, "authenticated page");
+    let res = app.clone().oneshot(req("/markets/table", Some(&cookie))).await.unwrap();
+    assert_hardened(&res, "htmx fragment");
+
+    // …including errors produced by the layers themselves (403 cross-site, 413 body cap).
+    let res = app
+        .clone()
+        .oneshot(Request::builder().method("POST").uri("/login").header("sec-fetch-site", "cross-site").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert_hardened(&res, "403");
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("x".repeat(200 * 1024)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_hardened(&res, "413");
+}
+
+#[tokio::test]
+async fn pages_are_never_cached_but_assets_revalidate_with_an_etag() {
+    let (app, pw) = test_app();
+    let cookie = login(&app, &pw).await;
+    let res = app
+        .clone()
+        .oneshot(Request::builder().uri("/markets").header(header::COOKIE, &cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(header_str(&res, "cache-control").as_deref(), Some("no-store"), "account pages must not be cached");
+
+    let res = app.clone().oneshot(Request::builder().uri("/assets/app.js").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(header_str(&res, "cache-control").as_deref(), Some("no-cache"));
+    assert!(header_str(&res, "content-type").unwrap().contains("javascript"));
+    let etag = header_str(&res, "etag").expect("assets carry an ETag");
+    assert!(etag.starts_with('"') && etag.len() > 10);
+
+    // A matching validator gets a body-less 304; a stale one gets the file.
+    let res = app
+        .clone()
+        .oneshot(Request::builder().uri("/assets/app.js").header(header::IF_NONE_MATCH, &etag).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_MODIFIED);
+    assert!(body_string(res).await.is_empty());
+    let res = app
+        .oneshot(Request::builder().uri("/assets/app.js").header(header::IF_NONE_MATCH, "\"stale\"").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn hsts_is_sent_only_when_served_over_https() {
+    for (secure, expect) in [(false, false), (true, true)] {
+        let store = CredentialStore::open(unique_dir()).unwrap();
+        store.set_password("test-password-123").unwrap();
+        let app = router(WebState::new(Arc::new(store), empty_engine()).with_secure_cookies(secure));
+        let res = app.oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
+        let hsts = header_str(&res, "strict-transport-security");
+        assert_eq!(hsts.is_some(), expect, "secure={secure}: {hsts:?}");
+        if expect {
+            assert!(hsts.unwrap().contains("max-age=31536000"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_handler_panic_becomes_a_generic_500_with_the_headers_and_no_detail() {
+    use axum::routing::get;
+    async fn boom() -> &'static str {
+        panic!("secret internal detail: /home/user/.keys")
+    }
+    let app = harden(Router::new().route("/ok", get(|| async { "fine" })).route("/boom", get(boom)), false);
+    let res = app.clone().oneshot(Request::builder().uri("/boom").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_hardened(&res, "panic 500");
+    let body = body_string(res).await;
+    assert!(!body.contains("secret") && !body.contains("/home/user"), "panic detail leaked: {body}");
+    // The server keeps serving after a panic.
+    let res = app.oneshot(Request::builder().uri("/ok").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(body_string(res).await, "fine");
+}
+
+#[tokio::test]
+async fn new_scripts_are_served_as_javascript() {
+    let (app, _) = test_app();
+    for path in ["/assets/theme.js", "/assets/launch.js", "/assets/htmx.min.js"] {
+        let res = app.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{path}");
+        assert!(header_str(&res, "content-type").unwrap().contains("javascript"), "{path}");
+    }
+}
+
+/// The strict CSP only works while templates stay free of inline script and
+/// handlers. Fail loudly if one is reintroduced — for ALL templates, including
+/// pages no other test renders.
+#[test]
+fn templates_are_csp_clean() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("templates");
+    let inline_script = regex_lite_find;
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("html") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let html = std::fs::read_to_string(&path).unwrap();
+        checked += 1;
+
+        // <script> must always have src= (no inline code).
+        for tag in html.match_indices("<script").map(|(i, _)| &html[i..html[i..].find('>').map(|j| i + j).unwrap_or(html.len())]) {
+            assert!(tag.contains("src="), "{name}: inline <script> would be blocked by the CSP: {tag}");
+        }
+        // No inline event handlers (onclick=, onload=, …) and no javascript: URLs.
+        assert!(!inline_script(&html, " on"), "{name}: inline event-handler attribute");
+        assert!(!html.contains("javascript:"), "{name}: javascript: URL");
+        // htmx features that need eval: trigger filters `[expr]`, hx-on, js: values.
+        assert!(!html.contains("hx-on"), "{name}: hx-on needs eval");
+        for tr in html.match_indices("hx-trigger=\"").map(|(i, _)| &html[i + 12..i + 12 + html[i + 12..].find('"').unwrap()]) {
+            assert!(!tr.contains('['), "{name}: htmx trigger filter needs eval: {tr}");
+        }
+        assert!(!html.contains("\"js:") && !html.contains("'js:"), "{name}: htmx js: value needs eval");
+    }
+    assert!(checked >= 25, "expected to scan the real templates, found {checked}");
+
+    // Base layouts must also switch htmx's own eval / script-tag features off.
+    for base in ["base.html", "base_card.html"] {
+        let html = std::fs::read_to_string(dir.join(base)).unwrap();
+        assert!(html.contains("\"allowEval\":false") && html.contains("\"allowScriptTags\":false"), "{base}: htmx-config");
+        assert!(html.contains("/assets/theme.js"), "{base}: theme loaded from an external file");
+    }
+}
+
+/// True if `html` contains ` on<letters>=` (an inline handler attribute) — a tiny
+/// scan so the test needs no regex dependency.
+fn regex_lite_find(html: &str, prefix: &str) -> bool {
+    let b = html.as_bytes();
+    html.match_indices(prefix).any(|(i, _)| {
+        let rest = &b[i + prefix.len()..];
+        let n = rest.iter().take_while(|c| c.is_ascii_lowercase()).count();
+        n >= 3 && rest.get(n) == Some(&b'=')
+    })
 }

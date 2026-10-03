@@ -269,7 +269,7 @@ pub async fn welcome_submit(
 
 fn render_welcome(csrf_token: String, error: Option<String>, code: &str) -> Html<String> {
     let tpl = WelcomeTemplate { csrf_token, error, code: code.to_string() };
-    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
+    Html(tpl.render().unwrap_or_else(|e| super::shell::render_failed(&e)))
 }
 
 pub async fn login_submit(
@@ -339,7 +339,7 @@ pub async fn require_auth(
 
 fn render_login(csrf_token: String, error: Option<String>) -> Html<String> {
     let tpl = LoginTemplate { csrf_token, error };
-    Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
+    Html(tpl.render().unwrap_or_else(|e| super::shell::render_failed(&e)))
 }
 
 #[cfg(test)]
