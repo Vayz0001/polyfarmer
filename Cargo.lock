@@ -3221,6 +3221,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "hex",
+ "libc",
  "mime_guess",
  "polymarket_client_sdk_v2",
  "rand 0.8.6",

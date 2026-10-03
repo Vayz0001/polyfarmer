@@ -57,5 +57,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
+# raise SIGTERM in the shutdown-signal test
+libc = "0.2"
 # router testing via oneshot (no network bind needed)
 tower = { version = "0.5", features = ["util"] }

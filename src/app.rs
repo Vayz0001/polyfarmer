@@ -293,8 +293,8 @@ pub async fn run() -> Result<()> {
     alerter.info("Bot started");
     info!("All tasks spawned, bot is running");
 
-    // ── Graceful shutdown on SIGINT / SIGTERM ─────────────────────────────────
-    tokio::signal::ctrl_c().await?;
+    // ── Graceful shutdown on SIGINT (Ctrl+C) / SIGTERM (systemd, `kill`, docker) ──
+    shutdown_signal().await;
     info!("Shutdown signal received — cancelling bot orders...");
     alerter.warn("Bot shutting down — cancelling open orders");
 
@@ -326,6 +326,32 @@ async fn set_phase(state: &Arc<RwLock<AppState>>, phase: EnginePhase) {
     state.write().await.engine_phase = phase;
 }
 
+/// Resolves on SIGINT (Ctrl+C) or, on Unix, SIGTERM — what `systemctl stop`,
+/// `kill` and `docker stop` send. Handling only Ctrl+C meant a service stop
+/// killed the process without cancelling its resting orders on Polymarket.
+pub async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+            }
+            // Couldn't register SIGTERM — still honour Ctrl+C rather than never exiting.
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
 /// Park until the wallet is (re)configured, a periodic re-check fires, or the
 /// process is asked to shut down. Returns `true` when we should exit now.
 ///
@@ -336,7 +362,7 @@ async fn wait_or_exit(wallet_ready: &Notify, retry_after: Duration) -> bool {
     tokio::select! {
         _ = wallet_ready.notified() => false,
         _ = tokio::time::sleep(retry_after) => false,
-        _ = tokio::signal::ctrl_c() => {
+        _ = shutdown_signal() => {
             info!("Shutdown requested before a wallet was configured");
             true
         }
@@ -713,5 +739,28 @@ async fn evaluate_all_markets(
                 }
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::shutdown_signal;
+    use std::time::Duration;
+
+    /// A SIGTERM (what a service stop sends) must wake `shutdown_signal`, so the
+    /// existing cancel-open-orders shutdown path runs instead of the process
+    /// dying with orders still resting.
+    #[tokio::test]
+    async fn sigterm_triggers_graceful_shutdown() {
+        let waiter = tokio::spawn(shutdown_signal());
+        // Let the task register its handler before the signal arrives.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        // SAFETY: raising a signal in our own process; tokio's handler (installed
+        // above and kept for the process lifetime) consumes it.
+        assert_eq!(unsafe { libc::raise(libc::SIGTERM) }, 0);
+        tokio::time::timeout(Duration::from_secs(3), waiter)
+            .await
+            .expect("shutdown_signal should resolve after SIGTERM")
+            .expect("task should not panic");
     }
 }
