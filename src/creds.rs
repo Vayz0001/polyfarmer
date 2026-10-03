@@ -12,7 +12,7 @@
 //! password-derived "unlock-on-login" mode can be layered on later.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
@@ -23,6 +23,9 @@ use rand::rngs::OsRng;
 use rand::{Rng, RngCore};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
+
+use crate::fsutil::{create_private_dir, write_private_atomic};
 
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
@@ -119,7 +122,8 @@ struct AdminRecord {
 
 #[derive(Serialize, Deserialize)]
 struct WalletRecord {
-    private_key: String,
+    /// Wiped from memory when the record is dropped.
+    private_key: Zeroizing<String>,
     proxy_wallet: String,
 }
 
@@ -139,7 +143,9 @@ impl CredentialStore {
     /// Open (creating if needed) the store at `dir`, ensuring a master key exists.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self> {
         let dir = dir.into();
-        fs::create_dir_all(&dir)?;
+        // Created 0700 (an already-existing dir is left alone, with a warning if
+        // it is readable by other users). Files inside are 0600 from creation.
+        create_private_dir(&dir)?;
         let store = Self { dir };
         store.ensure_master_key()?;
         store.ensure_setup_code()?;
@@ -153,19 +159,19 @@ impl CredentialStore {
 
     fn ensure_master_key(&self) -> Result<()> {
         if !self.master_path().exists() {
-            let mut key = [0u8; KEY_LEN];
-            OsRng.fill_bytes(&mut key);
-            write_secret(&self.master_path(), &key)?;
+            let mut key = Zeroizing::new([0u8; KEY_LEN]);
+            OsRng.fill_bytes(&mut *key);
+            write_private_atomic(&self.master_path(), &*key)?;
         }
         Ok(())
     }
 
-    fn master_key(&self) -> Result<[u8; KEY_LEN]> {
-        let bytes = fs::read(self.master_path())?;
+    fn master_key(&self) -> Result<Zeroizing<[u8; KEY_LEN]>> {
+        let bytes = Zeroizing::new(fs::read(self.master_path())?);
         if bytes.len() != KEY_LEN {
             return Err(eyre!("master.key is corrupt ({} bytes)", bytes.len()));
         }
-        let mut key = [0u8; KEY_LEN];
+        let mut key = Zeroizing::new([0u8; KEY_LEN]);
         key.copy_from_slice(&bytes);
         Ok(key)
     }
@@ -181,7 +187,7 @@ impl CredentialStore {
         let raw: String = (0..SETUP_CODE_LEN)
             .map(|_| SETUP_CODE_ALPHABET[OsRng.gen_range(0..SETUP_CODE_ALPHABET.len())] as char)
             .collect();
-        write_secret(&self.setup_code_path(), format_setup_code(&raw).as_bytes())
+        write_private_atomic(&self.setup_code_path(), format_setup_code(&raw).as_bytes())
     }
 
     /// The pending setup code (`abcd-efgh`), or `None` once setup is complete.
@@ -225,7 +231,7 @@ impl CredentialStore {
         let rec = AdminRecord {
             password_hash: hash_password(password)?,
         };
-        write_secret(&self.admin_path(), serde_json::to_string_pretty(&rec)?.as_bytes())?;
+        write_private_atomic(&self.admin_path(), serde_json::to_string_pretty(&rec)?.as_bytes())?;
         // First-run is over — the setup code must not outlive it.
         let _ = fs::remove_file(self.setup_code_path());
         Ok(())
@@ -240,12 +246,13 @@ impl CredentialStore {
     /// Encrypt and store the wallet credentials.
     pub fn set_wallet(&self, private_key: &str, proxy_wallet: &str) -> Result<()> {
         let rec = WalletRecord {
-            private_key: private_key.to_string(),
+            private_key: Zeroizing::new(private_key.to_string()),
             proxy_wallet: proxy_wallet.to_string(),
         };
-        let plaintext = serde_json::to_vec(&rec)?;
-        let blob = encrypt(&self.master_key()?, &plaintext)?;
-        write_secret(&self.wallet_path(), &blob)
+        let plaintext = Zeroizing::new(serde_json::to_vec(&rec)?);
+        let key = self.master_key()?;
+        let blob = encrypt(&key, &plaintext)?;
+        write_private_atomic(&self.wallet_path(), &blob)
     }
 
     /// Load and decrypt the wallet credentials, if configured.
@@ -254,11 +261,13 @@ impl CredentialStore {
             return Ok(None);
         }
         let blob = fs::read(self.wallet_path())?;
-        let plaintext = decrypt(&self.master_key()?, &blob)?;
+        let key = self.master_key()?;
+        let plaintext = Zeroizing::new(decrypt(&key, &blob)?);
         let rec: WalletRecord = serde_json::from_slice(&plaintext)?;
         Ok(Some(WalletCreds {
-            private_key: SecretString::from(rec.private_key),
-            proxy_wallet: rec.proxy_wallet,
+            // `rec` (and its Zeroizing key) is wiped when this function returns.
+            private_key: SecretString::from(rec.private_key.to_string()),
+            proxy_wallet: rec.proxy_wallet.clone(),
         }))
     }
 }
@@ -270,27 +279,7 @@ impl WalletCreds {
     }
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-/// Atomic write of a secret file with 0600 perms (temp + rename).
-fn write_secret(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, bytes)?;
-    chmod_600(&tmp)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn chmod_600(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-#[cfg(not(unix))]
-fn chmod_600(_path: &Path) -> Result<()> {
-    Ok(())
-}
+// File writes go through `crate::fsutil` (0600 from creation, atomic, fsynced).
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
@@ -356,6 +345,35 @@ mod tests {
         assert_eq!(CredentialStore::open(&dir).unwrap().setup_code(), None);
         assert!(!dir.join("setup.code").exists());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Every file and the folder the store creates is owner-only from the moment
+    /// it exists (no create-then-chmod window), even under a permissive umask.
+    #[cfg(unix)]
+    #[test]
+    fn data_dir_and_every_secret_file_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &std::path::Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let dir = temp_dir().join("data");
+
+        let old = unsafe { libc::umask(0o000) };
+        let store = CredentialStore::open(&dir);
+        let store = store.map(|s| {
+            s.set_password("a-long-enough-password").unwrap();
+            s.set_wallet("0xprivkey", "0xWalletAddr").unwrap();
+            s
+        });
+        unsafe { libc::umask(old) };
+        let _store = store.unwrap();
+
+        assert_eq!(mode(&dir), 0o700, "data dir");
+        for f in ["master.key", "admin.json", "wallet.enc"] {
+            assert_eq!(mode(&dir.join(f)), 0o600, "{f}");
+        }
+        // No temp files linger after atomic writes.
+        let leftovers: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).filter(|n| n.to_string_lossy().ends_with(".tmp")).collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        let _ = fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[cfg(unix)]

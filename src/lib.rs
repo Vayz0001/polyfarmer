@@ -8,6 +8,7 @@ pub mod cache;
 pub mod config;
 pub mod creds;
 pub mod engine;
+pub mod fsutil;
 pub mod rewards;
 pub mod storage;
 pub mod types;

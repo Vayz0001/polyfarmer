@@ -13,6 +13,7 @@ use axum::{
 };
 use serde::Deserialize;
 use tower_sessions::Session;
+use zeroize::Zeroizing;
 
 use super::auth::{csrf_token, verify_csrf};
 use super::shell::{render as render_tpl, shell, Shell};
@@ -45,14 +46,16 @@ pub struct PasswordForm {
 #[derive(Deserialize)]
 pub struct WalletForm {
     csrf: String,
-    private_key: String,
+    /// Wiped from memory when the form is dropped, on every exit path. (The raw
+    /// request body buffer is out of our reach, so this is best effort.)
+    private_key: Zeroizing<String>,
     proxy_wallet: String,
 }
 
 #[derive(Deserialize)]
 pub struct DetectForm {
     csrf: String,
-    private_key: String,
+    private_key: Zeroizing<String>,
 }
 
 #[derive(Template)]

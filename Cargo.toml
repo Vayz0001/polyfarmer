@@ -51,6 +51,7 @@ rand = "0.8"                  # secure RNG (salts, nonces, master key, tokens)
 # ── Config, secrets, errors, logging ──────────────────────────────────────────
 dotenvy = "0.15"
 secrecy = "0.10"
+zeroize = { version = "1", features = ["serde"] }  # wipe key material from memory when dropped
 eyre = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
