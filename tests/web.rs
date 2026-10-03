@@ -994,3 +994,111 @@ fn regex_lite_find(html: &str, prefix: &str) -> bool {
         n >= 3 && rest.get(n) == Some(&b'=')
     })
 }
+
+// ── Hostile input never panics a handler ───────────────────────────────────────
+
+/// Logged-in session cookie + a CSRF token valid for it (taken from a rendered page).
+async fn authed_with_csrf(app: &Router, pw: &str) -> (String, String) {
+    let cookie = login(app, pw).await;
+    let (_, page, rotated) = get_authed(app, &cookie, "/markets").await;
+    (rotated.unwrap_or(cookie), extract_csrf(&page))
+}
+
+async fn post_form(app: &Router, cookie: &str, uri: &str, body: String) -> (StatusCode, String) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    (res.status(), body_string(res).await)
+}
+
+fn enc(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+#[tokio::test]
+async fn start_farming_rejects_hostile_values_with_a_message_not_a_panic() {
+    let (app, pw) = test_app();
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let start = |price: &str, size: &str, depth: &str, vol: &str, exp: &str| {
+        format!(
+            "csrf={csrf}&slug=whatever&side=0&sides=one&price_cents={}&order_size={}&min_depth_usd={}&max_volatility_cents={}&expires_in={}",
+            enc(price), enc(size), enc(depth), enc(vol), enc(exp)
+        )
+    };
+    let cases = [
+        // (price, size, depth, volatility, expiry) -> text the error must contain
+        (start("18", "100", "0", "", "7日"), "Invalid expiry"),                      // multibyte: used to panic
+        (start("18", "100", "0", "", "99999999999999d"), "Invalid expiry"),          // duration overflow: used to panic
+        (start("18", "100", "0", "", "99999999999999999999d"), "Invalid expiry"),
+        (start("18", "100", "0", "", "💥"), "Invalid expiry"),
+        (start("18", "79228162514264337593543950335", "0", "", "7d"), "Order size"),  // Decimal-max size
+        (start("0.0000000000000000000000000001", "100", "0", "", "7d"), "price between"), // size/price overflow
+        (start("-5", "100", "0", "", "7d"), "price between"),
+        (start("18", "100", "99999999999999999999", "", "7d"), "Min depth"),
+        (start("18", "100", "0", "1e999", "7d"), "Auto-pause"),
+        (start("18", "100", "0", "101", "7d"), "Auto-pause"),
+        (start("abc", "100", "0", "", "7d"), "price between"),
+    ];
+    for (body, expect) in cases {
+        let (status, out) = post_form(&app, &cookie, "/markets/start", body.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(out.contains(expect), "expected {expect:?} in response for {body}\n got: {out}");
+        assert!(!out.contains("Internal error"), "handler panicked for {body}");
+    }
+}
+
+#[tokio::test]
+async fn edit_rejects_hostile_values_and_leaves_the_config_untouched() {
+    let (app, pw) = test_app_with_market();
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let edit = |size: &str, dist: &str, depth: &str, vol: &str, exp: &str| {
+        format!(
+            "csrf={csrf}&order_size={}&distance_cents={}&min_depth_usd={}&max_volatility_cents={}&expires_in={}",
+            enc(size), enc(dist), enc(depth), enc(vol), enc(exp)
+        )
+    };
+    for (body, expect) in [
+        (edit("100", "2", "500", "", "7日"), "Invalid expiry"),
+        (edit("100", "2", "500", "", "99999999999999d"), "Invalid expiry"),
+        (edit("79228162514264337593543950335", "2", "500", "", "keep"), "Order size"),
+        (edit("100", "9999", "500", "", "keep"), "Distance"),
+        (edit("100", "2", "-1", "", "keep"), "Min depth"),
+        (edit("100", "2", "500", "5000", "keep"), "Auto-pause"),
+    ] {
+        let (status, out) = post_form(&app, &cookie, "/markets/mar_test_leg/edit", body.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(out.contains(expect), "expected {expect:?} for {body}\n got: {out}");
+        assert!(!out.contains("Internal error"), "panicked for {body}");
+    }
+    // None of the rejected edits changed the saved leg (still $100, 2¢, $500 depth).
+    let (_, table, _) = get_authed(&app, &cookie, "/markets/table").await;
+    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below bid"), "{table}");
+}
+
+#[tokio::test]
+async fn oversized_free_text_and_odd_parameters_are_bounded() {
+    let (app, pw) = test_app();
+    let cookie = login(&app, &pw).await;
+    // A 5,000-character search is cut to 200 characters before it reaches the page.
+    let (status, page, _) = get_authed(&app, &cookie, &format!("/markets/browse?q={}", "a".repeat(5000))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains(&"a".repeat(200)) && !page.contains(&"a".repeat(201)), "search text must be truncated");
+    // An absurd slug is refused without being sent upstream.
+    let (status, page, _) = get_authed(&app, &cookie, &format!("/markets/view?slug={}", "x".repeat(300))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("look like a Polymarket market link"), "{page}");
+    // An unknown sort column falls back to the default rather than going upstream.
+    let (status, page, _) = get_authed(&app, &cookie, "/markets/browse?sort=%27%3B%20DROP%20TABLE&dir=sideways").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("value=\"rate_per_day\" selected") && page.contains("value=\"DESC\" selected"), "defaults applied");
+}

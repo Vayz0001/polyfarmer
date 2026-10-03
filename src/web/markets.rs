@@ -28,6 +28,7 @@ use crate::types::{MarketConfig, OrderStatus, WsCommand};
 
 use super::auth::{csrf_token, verify_csrf};
 use super::dashboard::{cents, render_markets_table, until};
+use super::input;
 use super::shell::{render, shell, Shell};
 use super::state::WebState;
 
@@ -77,6 +78,9 @@ pub fn prewarm_browse() {
 static HISTORY: LazyLock<TtlCache<Vec<(i64, Decimal)>>> = LazyLock::new(|| TtlCache::new(Duration::from_secs(60)));
 
 async fn load_market(slug: &str) -> Result<MarketRef, String> {
+    if slug.is_empty() || slug.len() > input::MAX_SLUG_LEN {
+        return Err("That doesn't look like a Polymarket market link.".to_string());
+    }
     match tokio::time::timeout(NETWORK_TIMEOUT, gamma_resolve::market_by_slug_cached(slug)).await {
         Ok(Ok(m)) => Ok(m),
         Ok(Err(e)) => Err(format!("Could not load this market: {e}")),
@@ -398,7 +402,7 @@ struct BookLadderTemplate {
 }
 
 fn parse_group(raw: Option<&str>, tick: Decimal) -> Decimal {
-    raw.and_then(|s| s.trim().parse::<Decimal>().ok()).filter(|g| *g > dec!(0)).unwrap_or(tick)
+    input::book_group(raw, tick)
 }
 
 async fn render_ladder(state: &WebState, mr: &MarketRef, side: usize, group: Decimal, book: &market_data::BookSnapshot) -> String {
@@ -662,13 +666,13 @@ pub async fn view_preview(State(state): State<WebState>, session: Session, Form(
     if !verify_csrf(&session, &form.csrf).await {
         return render(&PlacementPreviewTemplate::message(true, Some("Session expired — reload the page.".into())));
     }
-    let price = match form.price_cents.trim().parse::<Decimal>() {
-        Ok(c) if c > dec!(0) && c < dec!(100) => c / dec!(100),
-        _ => return render(&PlacementPreviewTemplate::message(true, Some("Enter a price between 0 and 100¢.".into()))),
+    let price = match input::price_cents(&form.price_cents) {
+        Ok(p) => p,
+        Err(e) => return render(&PlacementPreviewTemplate::message(true, Some(e))),
     };
-    let order_size: Decimal = match form.order_size.trim().parse() {
-        Ok(s) if s > dec!(0) => s,
-        _ => return render(&PlacementPreviewTemplate::message(true, Some("Enter a positive order size.".into()))),
+    let order_size = match input::order_size_usd(&form.order_size) {
+        Ok(s) => s,
+        Err(e) => return render(&PlacementPreviewTemplate::message(true, Some(e))),
     };
     let mr = match load_market(&form.slug).await {
         Ok(m) => m,
@@ -781,34 +785,6 @@ fn render_start_error(message: &str) -> Response {
     render(&StartFarmingResultTemplate { error: Some(message.to_string()) }).into_response()
 }
 
-/// Min depth ahead of the order, entered in **USD** — `MarketConfig::
-/// min_depth_between` is USDC notional (the quoter compares Σ price·size).
-/// Blank = 0 (no depth requirement).
-fn parse_usd(s: &str) -> Option<Decimal> {
-    let t = s.trim().trim_start_matches('$').replace(',', "");
-    if t.is_empty() {
-        return Some(dec!(0));
-    }
-    t.parse::<Decimal>().ok().filter(|v| *v >= dec!(0))
-}
-
-/// "3.0" (cents) → 0.03 (price units).
-fn parse_cents(s: &str) -> Option<Decimal> {
-    let cents: Decimal = s.trim().parse().ok()?;
-    Some(cents / Decimal::from(100))
-}
-
-/// Optional auto-pause threshold in cents; blank = disabled.
-fn parse_volatility(s: &str) -> Result<Option<Decimal>, String> {
-    if s.trim().is_empty() {
-        return Ok(None);
-    }
-    match parse_cents(s) {
-        Some(v) if v > dec!(0) => Ok(Some(v)),
-        _ => Err("Auto-pause threshold must be a positive number of cents.".to_string()),
-    }
-}
-
 /// POST /markets/start — turns the visual placement into 1 (one side) or 2
 /// (both sides, sharing `condition_id`, size split in half) `MarketConfig`s.
 pub async fn start_farming(
@@ -819,22 +795,23 @@ pub async fn start_farming(
     if !verify_csrf(&session, &form.csrf).await {
         return render_start_error("Invalid session — reload the page.");
     }
-    let price = match form.price_cents.trim().parse::<Decimal>() {
-        Ok(c) if c > dec!(0) && c < dec!(100) => c / dec!(100),
-        _ => return render_start_error("Enter a price between 0 and 100¢."),
+    let price = match input::price_cents(&form.price_cents) {
+        Ok(p) => p,
+        Err(e) => return render_start_error(&e),
     };
-    let order_size: Decimal = match form.order_size.trim().parse() {
-        Ok(s) if s > dec!(0) => s,
-        _ => return render_start_error("Order size must be a positive number."),
+    let order_size = match input::order_size_usd(&form.order_size) {
+        Ok(s) => s,
+        Err(e) => return render_start_error(&e),
     };
-    let Some(min_depth_between) = parse_usd(&form.min_depth_usd) else {
-        return render_start_error("Min depth must be a dollar amount (e.g. 500).");
+    let min_depth_between = match input::depth_usd(&form.min_depth_usd) {
+        Ok(d) => d,
+        Err(e) => return render_start_error(&e),
     };
-    let max_volatility = match parse_volatility(&form.max_volatility_cents) {
+    let max_volatility = match input::volatility_cents(&form.max_volatility_cents) {
         Ok(v) => v,
         Err(e) => return render_start_error(&e),
     };
-    let expires_at = match parse_expiry(&form.expires_in) {
+    let expires_at = match input::expiry(&form.expires_in) {
         Ok(e) => e,
         Err(e) => return render_start_error(&e),
     };
@@ -949,31 +926,6 @@ fn poly_event_url(event_slug: &str, market_slug: &str) -> String {
     }
 }
 
-/// Parses "<number><unit>" (s/m/h/d), e.g. "7d", "4h", "30m", or "never".
-/// Range: 1 minute .. 1 year. Empty → 7 days.
-fn parse_expiry(s: &str) -> Result<chrono::DateTime<Utc>, String> {
-    let s = s.trim();
-    // "never" = quote indefinitely — a far-future sentinel so the expiry check
-    // never fires (no schema change to MarketConfig's non-optional expires_at).
-    if s.eq_ignore_ascii_case("never") {
-        return Ok(Utc::now() + chrono::Duration::days(36500));
-    }
-    let s = if s.is_empty() { "7d" } else { s };
-    let (num_part, unit) = s.split_at(s.len() - 1);
-    let n: i64 = num_part.parse().map_err(|_| format!("Invalid expiry '{s}' — use e.g. 7d, 4h, 30m."))?;
-    let duration = match unit {
-        "s" => chrono::Duration::seconds(n),
-        "m" => chrono::Duration::minutes(n),
-        "h" => chrono::Duration::hours(n),
-        "d" => chrono::Duration::days(n),
-        _ => return Err(format!("Invalid expiry unit in '{s}' — use s, m, h, or d.")),
-    };
-    if duration < chrono::Duration::minutes(1) || duration > chrono::Duration::days(366) {
-        return Err("Expiry must be between 1 minute and 1 year.".to_string());
-    }
-    Ok(Utc::now() + duration)
-}
-
 fn rand_alpha(n: usize) -> String {
     use rand::Rng;
     const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
@@ -992,12 +944,30 @@ pub struct BrowseParams {
     pub cursor: Option<String>,
 }
 
+/// Sort columns the browse form offers. Anything else (the value goes upstream and
+/// into a cache key) falls back to the default.
+const BROWSE_SORTS: [&str; 5] = ["rate_per_day", "competitiveness", "spread", "volume_24hr", "end_date"];
+
 impl BrowseParams {
     fn sort_or_default(&self) -> String {
-        self.sort.clone().unwrap_or_else(|| "rate_per_day".to_string())
+        match self.sort.as_deref() {
+            Some(s) if BROWSE_SORTS.contains(&s) => s.to_string(),
+            _ => "rate_per_day".to_string(),
+        }
     }
     fn dir_or_default(&self) -> String {
-        self.dir.clone().unwrap_or_else(|| "DESC".to_string())
+        match self.dir.as_deref() {
+            Some("ASC") => "ASC".to_string(),
+            _ => "DESC".to_string(),
+        }
+    }
+    /// Search text, bounded.
+    fn q(&self) -> String {
+        input::search_text(&self.q)
+    }
+    /// Pagination cursor, if plausible.
+    fn cursor(&self) -> Option<String> {
+        input::cursor(self.cursor.as_deref())
     }
 }
 
@@ -1013,7 +983,7 @@ struct BrowsePageTemplate {
 pub async fn browse_page(session: Session, Query(params): Query<BrowseParams>) -> Html<String> {
     render(&BrowsePageTemplate {
         shell: shell(&session, "markets").await,
-        q: params.q.clone(),
+        q: params.q(),
         sort: params.sort_or_default(),
         dir: params.dir_or_default(),
     })
@@ -1053,17 +1023,17 @@ struct BrowseResultsTemplate {
 /// htmx target for the browse page's search/sort/pagination.
 pub async fn browse_results(State(state): State<WebState>, Query(params): Query<BrowseParams>) -> Html<String> {
     let query = markets_browse::BrowseQuery {
-        q: (!params.q.is_empty()).then(|| params.q.clone()),
+        q: Some(params.q()).filter(|q| !q.is_empty()),
         order_by: Some(params.sort_or_default()),
         position: Some(params.dir_or_default()),
         page_size: Some(BROWSE_PAGE_SIZE),
-        next_cursor: params.cursor.clone(),
+        next_cursor: params.cursor(),
     };
     let tracked: Vec<String> = state.engine.read().await.configs.iter().map(|c| c.condition_id.to_lowercase()).collect();
 
     // Polymarket's browse endpoint takes several seconds; cache each query
     // briefly so paging back / revisiting is instant.
-    let key = browse_key(&params.q, &params.sort_or_default(), &params.dir_or_default(), params.cursor.as_deref().unwrap_or(""));
+    let key = browse_key(&params.q(), &params.sort_or_default(), &params.dir_or_default(), params.cursor().as_deref().unwrap_or(""));
     let outcome = match BROWSE.peek(&key) {
         // Cached (fresh or stale): answer now; a stale entry refreshes behind the scenes.
         Some((resp, _)) => {
@@ -1094,11 +1064,11 @@ pub async fn browse_results(State(state): State<WebState>, Query(params): Query<
         rows,
         has_more,
         next_cursor,
-        q: params.q.clone(),
+        q: params.q(),
         sort: params.sort_or_default(),
         dir: params.dir_or_default(),
         error,
-        append: params.cursor.is_some(),
+        append: params.cursor().is_some(),
     })
 }
 
@@ -1273,24 +1243,25 @@ pub async fn edit_submit(
     if !verify_csrf(&session, &form.csrf).await {
         return fail("Invalid session — reload the page.".into()).await;
     }
-    let order_size = match form.order_size.trim().parse::<Decimal>() {
-        Ok(v) if v > dec!(0) => v,
-        _ => return fail("Order size must be a positive dollar amount.".into()).await,
+    let order_size = match input::order_size_usd(&form.order_size) {
+        Ok(v) => v,
+        Err(e) => return fail(e).await,
     };
-    let distance = match parse_cents(&form.distance_cents) {
-        Some(v) if v > dec!(0) => v,
-        _ => return fail("Distance must be a positive number of cents.".into()).await,
+    let distance = match input::distance_cents(&form.distance_cents) {
+        Ok(v) => v,
+        Err(e) => return fail(e).await,
     };
-    let Some(min_depth) = parse_usd(&form.min_depth_usd) else {
-        return fail("Min depth must be a dollar amount (e.g. 500).".into()).await;
+    let min_depth = match input::depth_usd(&form.min_depth_usd) {
+        Ok(v) => v,
+        Err(e) => return fail(e).await,
     };
-    let max_volatility = match parse_volatility(&form.max_volatility_cents) {
+    let max_volatility = match input::volatility_cents(&form.max_volatility_cents) {
         Ok(v) => v,
         Err(e) => return fail(e).await,
     };
     let expires_at = match form.expires_in.trim() {
         "" | "keep" => None,
-        other => match parse_expiry(other) {
+        other => match input::expiry(other) {
             Ok(t) => Some(t),
             Err(e) => return fail(e).await,
         },
@@ -1561,23 +1532,11 @@ mod tests {
 
     #[test]
     fn min_depth_is_parsed_as_usd_not_cents() {
-        // The quoter compares min_depth_between to USDC notional — "500"
-        // must mean $500 (the old form divided by 100 → $5).
-        assert_eq!(parse_usd("500"), Some(dec!(500)));
-        assert_eq!(parse_usd("$1,250.50"), Some(dec!(1250.50)));
-        assert_eq!(parse_usd(""), Some(dec!(0)));
-        assert_eq!(parse_usd("-5"), None);
-        assert_eq!(parse_usd("abc"), None);
-    }
-
-    #[test]
-    fn volatility_and_expiry_parsing() {
-        assert_eq!(parse_volatility(""), Ok(None));
-        assert_eq!(parse_volatility("5"), Ok(Some(dec!(0.05))));
-        assert!(parse_volatility("0").is_err());
-        assert!(parse_expiry("never").unwrap() > Utc::now() + chrono::Duration::days(3650));
-        assert!(parse_expiry("2x").is_err());
-        assert!(parse_expiry("400d").is_err());
+        // The quoter compares min_depth_between to USDC notional — "500" must mean
+        // $500 (the old form divided by 100 → $5). Kept here as a regression guard
+        // for the unit; the full bounds tests live in web/input.rs.
+        assert_eq!(input::depth_usd("500"), Ok(dec!(500)));
+        assert_eq!(input::depth_usd("$1,250.50"), Ok(dec!(1250.50)));
     }
 
     #[test]

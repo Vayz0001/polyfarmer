@@ -10,6 +10,7 @@ mod auth;
 pub mod book_hub;
 mod dashboard;
 pub mod events;
+mod input;
 pub mod limiter;
 mod markets;
 mod positions;
