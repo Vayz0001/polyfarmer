@@ -38,12 +38,39 @@ RestartSec=5
 KillSignal=SIGTERM
 TimeoutStopSec=60
 
-# Hardening
+# Hardening: the process holds your decrypted wallet key, so give it as little
+# of the machine as it can work with. Check the result on your host with
+#   systemd-analyze security polyfarmer
+# Files it creates (wallet, key, password hash) are owner-only.
+UMask=0077
 NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
 ProtectSystem=strict
 ProtectHome=true
-PrivateTmp=true
 ReadWritePaths=/opt/polyfarmer/data
+PrivateTmp=true
+PrivateDevices=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# No core dumps: they would contain the decrypted key.
+LimitCORE=0
 
 [Install]
 WantedBy=multi-user.target

@@ -25,7 +25,25 @@ const WALLET_POLL: Duration = Duration::from_secs(3);
 /// Longer than WALLET_POLL so a sustained outage doesn't hammer Polymarket.
 const START_RETRY: Duration = Duration::from_secs(10);
 
+/// Keep secrets out of crash dumps: the process holds the decrypted wallet key.
+/// No core files, and (on Linux) not dumpable, which also stops other processes
+/// of the same user from attaching with ptrace or reading `/proc/<pid>/mem`.
+#[cfg(unix)]
+fn harden_process() {
+    let no_core = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: plain syscalls with valid arguments; no memory is shared or retained.
+    unsafe {
+        libc::setrlimit(libc::RLIMIT_CORE, &no_core);
+        #[cfg(target_os = "linux")]
+        libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
+    }
+}
+
+#[cfg(not(unix))]
+fn harden_process() {}
+
 pub async fn run() -> Result<()> {
+    harden_process();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -795,5 +813,20 @@ mod tests {
             .await
             .expect("shutdown_signal should resolve after SIGTERM")
             .expect("task should not panic");
+    }
+
+    /// Core dumps (which would contain the decrypted wallet key) are disabled and,
+    /// on Linux, the process is marked non-dumpable.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn harden_process_disables_core_dumps_and_ptrace() {
+        super::harden_process();
+        // SAFETY: read-only queries about our own process.
+        unsafe {
+            assert_eq!(libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0), 0);
+            let mut lim = libc::rlimit { rlim_cur: 1, rlim_max: 1 };
+            assert_eq!(libc::getrlimit(libc::RLIMIT_CORE, &mut lim), 0);
+            assert_eq!((lim.rlim_cur, lim.rlim_max), (0, 0));
+        }
     }
 }

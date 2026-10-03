@@ -59,8 +59,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
-[dev-dependencies]
-# raise SIGTERM in the shutdown-signal test
+[target.'cfg(unix)'.dependencies]
+# process hardening (no core dumps / ptrace) and umask in tests; already a transitive dependency
 libc = "0.2"
+
+[dev-dependencies]
 # router testing via oneshot (no network bind needed)
 tower = { version = "0.5", features = ["util"] }

@@ -126,8 +126,22 @@ Your private key is **not** configured here; it is entered in Settings.
 - The wallet key is encrypted with ChaCha20-Poly1305. The encryption key (`data/master.key`) sits
   **next to** the encrypted wallet so the bot can restart unattended, which means anyone who can read
   your whole data folder can decrypt it. Protect the machine and its backups, and use a dedicated wallet.
-- The admin password is stored as an argon2 hash. Five wrong attempts lock login for 30 seconds.
-- Sessions are in memory (restarting the bot logs you out).
+- The admin password is an argon2 hash (12 to 128 characters for new passwords; checked off the async
+  runtime so a login attempt can't stall the bot).
+- **Login throttling:** failures are counted per source. A direct peer is locked for 30 s after 5 wrong
+  attempts, then 1 min, 2 min, … up to 15 min while it keeps failing. Behind Tailscale Serve or a reverse
+  proxy every visitor arrives from `127.0.0.1`, so they share one more forgiving bucket (15 failures, flat
+  30 s) and the lockout can't be used to keep you out for long. A global ceiling protects the hashing cost.
+  The per-IP rules apply only when clients connect directly, so don't rely on them behind a proxy.
+- **Sessions** live in memory (a restart logs everyone out). They end after 12 hours idle or 7 days total,
+  the number of sessions is capped, and changing the password logs out every other browser. The cookie is
+  `HttpOnly`, `SameSite=Strict`, and `Secure` (with the `__Host-` prefix) when `DASHBOARD_SECURE_COOKIES=true`.
+- **Browser protections:** every form post carries a CSRF token and cross-site requests are refused. Pages
+  are served with a strict Content-Security-Policy (no inline scripts, nothing loaded from other sites
+  except market images), `X-Frame-Options: DENY`, `nosniff`, no referrer, and `no-store`. Request bodies
+  are capped at 64 KB and every form value is range-checked.
+- Secrets and state files are created owner-only (`0600`, data directory `0700`) and written atomically.
+  The process disables core dumps and ptrace on Linux, and the systemd unit drops everything it doesn't need.
 - The bot only talks to Polymarket (CLOB, Gamma, Data API), a Polygon RPC, and the browser you connect.
 
 ## Development
