@@ -20,12 +20,43 @@ use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce};
 use eyre::{eyre, Result};
 use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::{Rng, RngCore};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
+
+// ── First-run setup code ──────────────────────────────────────────────────────
+// Until the admin password exists, anyone who can reach the dashboard could
+// claim the setup page. Reverse proxies and Tailscale Serve connect from
+// 127.0.0.1, so "is the peer local?" can't tell the owner from a stranger.
+// Instead, first-run needs a one-time code that only someone with access to the
+// bot's log / data folder can read.
+
+/// No look-alikes (0/o, 1/l/i): easy to read off a log and type.
+const SETUP_CODE_ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
+const SETUP_CODE_LEN: usize = 8;
+
+/// `abcdefgh` -> `abcd-efgh` for display.
+fn format_setup_code(raw: &str) -> String {
+    let n = normalize_code(raw);
+    match n.len() {
+        len if len > 4 => format!("{}-{}", &n[..4], &n[4..]),
+        _ => n,
+    }
+}
+
+/// Lowercase, alphanumerics only — so `ABCD-EFGH`, `abcd efgh` and `abcdefgh`
+/// all match.
+fn normalize_code(s: &str) -> String {
+    s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect()
+}
+
+/// Compare without bailing out at the first differing byte.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
 
 // ── Password hashing (argon2id) ───────────────────────────────────────────────
 
@@ -111,12 +142,14 @@ impl CredentialStore {
         fs::create_dir_all(&dir)?;
         let store = Self { dir };
         store.ensure_master_key()?;
+        store.ensure_setup_code()?;
         Ok(store)
     }
 
     fn admin_path(&self) -> PathBuf { self.dir.join("admin.json") }
     fn master_path(&self) -> PathBuf { self.dir.join("master.key") }
     fn wallet_path(&self) -> PathBuf { self.dir.join("wallet.enc") }
+    fn setup_code_path(&self) -> PathBuf { self.dir.join("setup.code") }
 
     fn ensure_master_key(&self) -> Result<()> {
         if !self.master_path().exists() {
@@ -135,6 +168,40 @@ impl CredentialStore {
         let mut key = [0u8; KEY_LEN];
         key.copy_from_slice(&bytes);
         Ok(key)
+    }
+
+    // ── first-run setup code ────────────────────────────────────────────────────
+
+    /// While no admin password exists, make sure a setup code is on disk
+    /// (`setup.code`, 0600). Once the password is set the code is deleted.
+    fn ensure_setup_code(&self) -> Result<()> {
+        if self.is_initialized() || self.setup_code_path().exists() {
+            return Ok(());
+        }
+        let raw: String = (0..SETUP_CODE_LEN)
+            .map(|_| SETUP_CODE_ALPHABET[OsRng.gen_range(0..SETUP_CODE_ALPHABET.len())] as char)
+            .collect();
+        write_secret(&self.setup_code_path(), format_setup_code(&raw).as_bytes())
+    }
+
+    /// The pending setup code (`abcd-efgh`), or `None` once setup is complete.
+    pub fn setup_code(&self) -> Option<String> {
+        if self.is_initialized() {
+            return None;
+        }
+        fs::read_to_string(self.setup_code_path()).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    }
+
+    /// Whether `input` matches the pending setup code. Always false once the
+    /// admin password exists.
+    pub fn verify_setup_code(&self, input: &str) -> bool {
+        match self.setup_code() {
+            Some(code) => {
+                let (want, got) = (normalize_code(&code), normalize_code(input));
+                !got.is_empty() && ct_eq(want.as_bytes(), got.as_bytes())
+            }
+            None => false,
+        }
     }
 
     // ── admin password ────────────────────────────────────────────────────────
@@ -158,7 +225,10 @@ impl CredentialStore {
         let rec = AdminRecord {
             password_hash: hash_password(password)?,
         };
-        write_secret(&self.admin_path(), serde_json::to_string_pretty(&rec)?.as_bytes())
+        write_secret(&self.admin_path(), serde_json::to_string_pretty(&rec)?.as_bytes())?;
+        // First-run is over — the setup code must not outlive it.
+        let _ = fs::remove_file(self.setup_code_path());
+        Ok(())
     }
 
     // ── wallet credentials ──────────────────────────────────────────────────────
@@ -251,6 +321,52 @@ mod tests {
         OsRng.fill_bytes(&mut wrong);
         assert!(decrypt(&wrong, &blob).is_err()); // wrong key
         assert!(decrypt(&key, b"short").is_err()); // truncated
+    }
+
+    #[test]
+    fn setup_code_lifecycle() {
+        let dir = temp_dir();
+        let store = CredentialStore::open(&dir).unwrap();
+
+        // Uninitialised → a code exists, formatted abcd-efgh, from the safe alphabet.
+        let code = store.setup_code().expect("code on first run");
+        assert_eq!(code.len(), 9);
+        assert_eq!(code.as_bytes()[4], b'-');
+        assert!(code.chars().filter(|c| *c != '-').all(|c| SETUP_CODE_ALPHABET.contains(&(c as u8))));
+
+        // Stable across reopen (so the code in the log stays valid across a restart).
+        assert_eq!(CredentialStore::open(&dir).unwrap().setup_code().as_deref(), Some(code.as_str()));
+
+        // Accepts the code however it was typed; rejects everything else.
+        assert!(store.verify_setup_code(&code));
+        assert!(store.verify_setup_code(&code.to_uppercase()));
+        assert!(store.verify_setup_code(&format!("  {}  ", code.replace('-', " "))));
+        assert!(!store.verify_setup_code(""));
+        assert!(!store.verify_setup_code("----"));
+        assert!(!store.verify_setup_code("aaaa-aaaa"));
+        assert!(!store.verify_setup_code(&code[..8]));
+
+        // Setting the password consumes the code.
+        store.set_password("first-pass").unwrap();
+        assert_eq!(store.setup_code(), None);
+        assert!(!store.verify_setup_code(&code), "a used code must not work again");
+        assert!(!dir.join("setup.code").exists());
+
+        // An already-initialised install never grows a code.
+        assert_eq!(CredentialStore::open(&dir).unwrap().setup_code(), None);
+        assert!(!dir.join("setup.code").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_code_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir();
+        let _store = CredentialStore::open(&dir).unwrap();
+        let mode = fs::metadata(dir.join("setup.code")).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

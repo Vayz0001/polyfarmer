@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use askama::Template;
 use axum::{
-    extract::{Request, State},
+    extract::{Query, Request, State},
     middleware::Next,
     response::{Html, IntoResponse, Redirect, Response},
     Form,
@@ -32,6 +32,43 @@ struct LoginTemplate {
 pub struct LoginForm {
     csrf: String,
     password: String,
+}
+
+// ── attempt lockout (shared by login and first-run setup-code entry) ──────────
+
+/// True while the lockout is active. An *expired* lockout is cleared here
+/// (with a fresh failure count); failures accumulated before a lockout are left
+/// alone — resetting them on every check meant five bad attempts in a row never
+/// added up and the lockout could never trigger.
+/// (Never hold the std Mutex guard across an `.await` — that would make the
+/// handler future `!Send`.)
+fn guard_locked(state: &WebState) -> bool {
+    let mut guard = state.login_guard.lock().unwrap();
+    match guard.locked_until {
+        Some(until) if Instant::now() < until => true,
+        Some(_) => {
+            guard.locked_until = None;
+            guard.fails = 0;
+            false
+        }
+        None => false,
+    }
+}
+
+/// Record a failed attempt; after MAX_LOGIN_FAILS in a row, lock for LOCKOUT_SECS.
+fn guard_fail(state: &WebState) {
+    let mut guard = state.login_guard.lock().unwrap();
+    guard.fails += 1;
+    if guard.fails >= MAX_LOGIN_FAILS {
+        guard.locked_until = Some(Instant::now() + Duration::from_secs(LOCKOUT_SECS));
+        guard.fails = 0;
+    }
+}
+
+fn guard_reset(state: &WebState) {
+    let mut guard = state.login_guard.lock().unwrap();
+    guard.fails = 0;
+    guard.locked_until = None;
 }
 
 // ── CSRF ──────────────────────────────────────────────────────────────────────
@@ -77,20 +114,34 @@ pub async fn login_form(State(state): State<WebState>, session: Session) -> Resp
 struct WelcomeTemplate {
     csrf_token: String,
     error: Option<String>,
+    /// Prefilled setup code (from the link printed in the startup log).
+    code: String,
 }
 
 #[derive(Deserialize)]
 pub struct WelcomeForm {
     csrf: String,
+    #[serde(default)]
+    code: String,
     password: String,
     confirm: String,
 }
 
-pub async fn welcome_form(State(state): State<WebState>, session: Session) -> Response {
+#[derive(Deserialize)]
+pub struct WelcomeQuery {
+    #[serde(default)]
+    code: String,
+}
+
+pub async fn welcome_form(
+    State(state): State<WebState>,
+    session: Session,
+    Query(q): Query<WelcomeQuery>,
+) -> Response {
     if state.store.is_initialized() {
         return Redirect::to("/login").into_response();
     }
-    render_welcome(csrf_token(&session).await, None).into_response()
+    render_welcome(csrf_token(&session).await, None, &q.code).into_response()
 }
 
 pub async fn welcome_submit(
@@ -101,33 +152,55 @@ pub async fn welcome_submit(
     if state.store.is_initialized() {
         return Redirect::to("/login").into_response();
     }
+    let code = form.code.clone();
+    if guard_locked(&state) {
+        return render_welcome(
+            csrf_token(&session).await,
+            Some("Too many attempts — try again shortly.".into()),
+            &code,
+        )
+        .into_response();
+    }
     if !verify_csrf(&session, &form.csrf).await {
-        return render_welcome(csrf_token(&session).await, Some("Invalid session — retry.".into()))
+        return render_welcome(csrf_token(&session).await, Some("Invalid session — retry.".into()), &code)
             .into_response();
+    }
+    // The one-time setup code proves the visitor can read the bot's log / data
+    // folder — i.e. is the owner — regardless of which address they came from.
+    if !state.store.verify_setup_code(&form.code) {
+        guard_fail(&state);
+        return render_welcome(
+            csrf_token(&session).await,
+            Some("Setup code is incorrect. It's printed in the bot's startup log (and saved as setup.code in its data folder).".into()),
+            &code,
+        )
+        .into_response();
     }
     if form.password.len() < 8 {
         return render_welcome(
             csrf_token(&session).await,
             Some("Password must be at least 8 characters.".into()),
+            &code,
         )
         .into_response();
     }
     if form.password != form.confirm {
-        return render_welcome(csrf_token(&session).await, Some("Passwords do not match.".into()))
+        return render_welcome(csrf_token(&session).await, Some("Passwords do not match.".into()), &code)
             .into_response();
     }
     if let Err(e) = state.store.set_password(&form.password) {
-        return render_welcome(csrf_token(&session).await, Some(format!("Failed to save: {e}")))
+        return render_welcome(csrf_token(&session).await, Some(format!("Failed to save: {e}")), &code)
             .into_response();
     }
+    guard_reset(&state);
     // Log them straight in, then on to wallet setup.
     let _ = session.cycle_id().await;
     let _ = session.insert(SESSION_AUTH, true).await;
     Redirect::to("/setup").into_response()
 }
 
-fn render_welcome(csrf_token: String, error: Option<String>) -> Html<String> {
-    let tpl = WelcomeTemplate { csrf_token, error };
+fn render_welcome(csrf_token: String, error: Option<String>, code: &str) -> Html<String> {
+    let tpl = WelcomeTemplate { csrf_token, error, code: code.to_string() };
     Html(tpl.render().unwrap_or_else(|e| format!("<pre>template error: {e}</pre>")))
 }
 
@@ -136,20 +209,7 @@ pub async fn login_submit(
     session: Session,
     Form(form): Form<LoginForm>,
 ) -> Response {
-    // Rate-limit check — never hold the std Mutex guard across an `.await`
-    // (that would make the handler future `!Send`).
-    let locked = {
-        let mut guard = state.login_guard.lock().unwrap();
-        match guard.locked_until {
-            Some(until) if Instant::now() < until => true,
-            _ => {
-                guard.locked_until = None;
-                guard.fails = 0;
-                false
-            }
-        }
-    };
-    if locked {
+    if guard_locked(&state) {
         return render_login(
             csrf_token(&session).await,
             Some("Too many attempts — try again shortly.".into()),
@@ -164,11 +224,7 @@ pub async fn login_submit(
 
     let ok = state.store.verify_login(&form.password).unwrap_or(false);
     if ok {
-        {
-            let mut guard = state.login_guard.lock().unwrap();
-            guard.fails = 0;
-            guard.locked_until = None;
-        }
+        guard_reset(&state);
         // Prevent session fixation: rotate the id, then mark authenticated.
         let _ = session.cycle_id().await;
         let _ = session.insert(SESSION_AUTH, true).await;
@@ -177,15 +233,7 @@ pub async fn login_submit(
         let dest = if !state.store.has_wallet() { "/setup" } else { "/" };
         Redirect::to(dest).into_response()
     } else {
-        // Scope the guard so it is dropped before the `.await` below.
-        {
-            let mut guard = state.login_guard.lock().unwrap();
-            guard.fails += 1;
-            if guard.fails >= MAX_LOGIN_FAILS {
-                guard.locked_until = Some(Instant::now() + Duration::from_secs(LOCKOUT_SECS));
-                guard.fails = 0;
-            }
-        }
+        guard_fail(&state);
         render_login(csrf_token(&session).await, Some("Incorrect password.".into()))
             .into_response()
     }

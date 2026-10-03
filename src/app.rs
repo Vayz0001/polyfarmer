@@ -41,8 +41,14 @@ pub async fn run() -> Result<()> {
 
     // ── Credential store ──────────────────────────────────────────────────────
     let store = Arc::new(crate::creds::CredentialStore::open(config.data_dir.clone())?);
-    if !store.is_initialized() {
-        info!("First run — open the dashboard to create your admin password.");
+    if let Some(code) = store.setup_code() {
+        // Shown here (and saved as <data>/setup.code) because the first-run
+        // page requires it: whoever can read this log owns the install.
+        info!("┌──────────────────────────────────────────────────────────────");
+        info!("│ First run — create your admin password:");
+        info!("│   setup code:  {code}");
+        info!("│   open:        {}", setup_link(&config.dashboard_bind, &code));
+        info!("└──────────────────────────────────────────────────────────────");
     }
 
     // ── Shared engine state ────────────────────────────────────────────────────
@@ -324,6 +330,18 @@ pub async fn run() -> Result<()> {
 /// Set the engine phase on shared state (brief write lock, released at once).
 async fn set_phase(state: &Arc<RwLock<AppState>>, phase: EnginePhase) {
     state.write().await.engine_phase = phase;
+}
+
+/// `http://host:port/welcome?code=…` for the startup log. A wildcard bind
+/// (`0.0.0.0`) has no usable host, so show `localhost`; on a remote server the
+/// owner substitutes the address they reach it by.
+fn setup_link(bind: &str, code: &str) -> String {
+    let host = bind
+        .strip_prefix("0.0.0.0")
+        .or_else(|| bind.strip_prefix("[::]"))
+        .map(|rest| format!("localhost{rest}"))
+        .unwrap_or_else(|| bind.to_string());
+    format!("http://{host}/welcome?code={code}")
 }
 
 /// Resolves on SIGINT (Ctrl+C) or, on Unix, SIGTERM — what `systemctl stop`,
@@ -739,6 +757,17 @@ async fn evaluate_all_markets(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::setup_link;
+
+    #[test]
+    fn setup_link_uses_a_reachable_host() {
+        assert_eq!(setup_link("127.0.0.1:8080", "abcd-efgh"), "http://127.0.0.1:8080/welcome?code=abcd-efgh");
+        assert_eq!(setup_link("0.0.0.0:8080", "abcd-efgh"), "http://localhost:8080/welcome?code=abcd-efgh");
     }
 }
 

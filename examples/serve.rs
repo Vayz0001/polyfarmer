@@ -45,7 +45,10 @@ async fn main() {
     if demo {
         seed_demo(&state, dir).await;
     } else if !state.store.is_initialized() {
-        println!("\n  first run — open the dashboard to create your admin password\n");
+        if let Some(code) = state.store.setup_code() {
+            println!("\n  first run — setup code: {code}");
+            println!("  open http://127.0.0.1:8080/welcome?code={code}\n");
+        }
     }
     events::spawn_state_watcher(state.clone());
     polyfarmer::web::prewarm_browse();

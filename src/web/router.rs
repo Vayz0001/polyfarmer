@@ -1,13 +1,7 @@
 //! axum router: public routes (login, assets), protected routes (dashboard,
 //! setup) behind the auth guard, with a session layer over everything.
 
-use std::net::SocketAddr;
-
 use axum::{
-    extract::{ConnectInfo, Request, State},
-    http::StatusCode,
-    middleware::Next,
-    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
@@ -16,31 +10,6 @@ use tower_sessions::{MemoryStore, SessionManagerLayer};
 
 use super::state::WebState;
 use super::{activity, assets, auth, dashboard, events, markets, positions, rewards, setup, shell};
-
-/// Until an admin password is set, only loopback clients may reach the dashboard
-/// — so the first-run setup window can't be hijacked even if bound to 0.0.0.0.
-/// (Connect info is absent in tests → allowed; present for the real server.)
-async fn require_local_until_setup(
-    State(state): State<WebState>,
-    req: Request,
-    next: Next,
-) -> Response {
-    if !state.store.is_initialized() {
-        let is_local = req
-            .extensions()
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|ci| ci.0.ip().is_loopback())
-            .unwrap_or(true);
-        if !is_local {
-            return (
-                StatusCode::FORBIDDEN,
-                "Setup is restricted to localhost until an admin password is set.",
-            )
-                .into_response();
-        }
-    }
-    next.run(req).await
-}
 
 /// Build the dashboard router with shared [`WebState`].
 pub fn router(state: WebState) -> Router {
@@ -105,9 +74,5 @@ pub fn router(state: WebState) -> Router {
         .merge(protected)
         .merge(public)
         .layer(session_layer)
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            require_local_until_setup,
-        ))
         .with_state(state)
 }
