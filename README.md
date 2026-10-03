@@ -138,8 +138,14 @@ Your private key is **not** configured here; it is entered in Settings.
 
 ## Development
 
+CI (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs these on every push and pull request,
+plus weekly to catch newly published advisories. Run them before you push:
+
 ```bash
-cargo test
+cargo fmt --all --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+cargo deny check          # dependency policy in deny.toml (cargo install cargo-deny)
 ```
 
 ## License
