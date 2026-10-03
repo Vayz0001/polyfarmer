@@ -14,7 +14,7 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// markets.json — persisted market configs.
     pub markets_file: PathBuf,
-    /// alerts.json — append-only alert log (read by the optional Discord notifier).
+    /// alerts.json — append-only alert log (shown in the dashboard's Activity feed).
     pub alerts_file: PathBuf,
     /// reward_history.json — daily reward-earnings snapshots (no Polymarket
     /// history endpoint exists, so we build our own).

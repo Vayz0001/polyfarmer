@@ -1,9 +1,8 @@
 //! Trading engine: WebSocket order-book tracking, quote logic, order
 //! placement/cancellation via the Polymarket V2 CLOB, and the heartbeat watchdog.
 //!
-//! Ported from the original `poly-lp-bot` with logic unchanged — only relocated
-//! under the `engine` module. `config`, `storage`, and `types` live at the crate
-//! root since they are shared with the (forthcoming) web layer.
+//! `config`, `storage`, and `types` live at the crate root since they are shared
+//! with the web layer.
 
 pub mod alerts;
 pub mod executor;

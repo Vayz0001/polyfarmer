@@ -365,20 +365,6 @@ async fn markets_table_shows_min_depth_in_usd_and_real_status() {
 }
 
 #[tokio::test]
-async fn old_reward_history_url_redirects() {
-    let (app, pw) = test_app();
-    let cookie = login(&app, &pw).await;
-    let res = app
-        .oneshot(
-            Request::builder().uri("/rewards/history").header(header::COOKIE, &cookie).body(Body::empty()).unwrap(),
-        )
-        .await
-        .unwrap();
-    assert!(res.status().is_redirection());
-    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/rewards");
-}
-
-#[tokio::test]
 async fn repeated_wrong_passwords_lock_out_login() {
     let (app, pw) = test_app();
     let res = app.clone().oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();

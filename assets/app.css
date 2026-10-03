@@ -191,7 +191,6 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .panel-body { padding: 14px; }
 .panel-foot { padding: 10px 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11.5px; }
 .grid { display: grid; gap: 14px; }
-.grid.cols-2 { grid-template-columns: 1fr 1fr; }
 .grid.main-side { grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
 .grid.side-main { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); align-items: start; }
 
@@ -205,7 +204,6 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .tbl th.num { text-align: right; }
 .tbl td.mkt { max-width: 300px; }
 .score-cell { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
-.tbl .sub-row td { height: 32px; }
 .tbl tbody.group + tbody.group tr:first-child td { border-top: 1px solid var(--line-2); }
 .mkt-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .mkt-title .name { color: var(--fg); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

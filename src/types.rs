@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 // ── Market config ─────────────────────────────────────────────────────────────
-// Written by the TS Discord bot, read by the Rust LP engine.
+// Written by the dashboard, read by the LP engine.
 // All fields are fully resolved before writing (token_id, condition_id, tick_size).
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ pub struct MarketConfig {
     pub token_label: String,
 
     /// Minimum price increment for this market (e.g. 0.01)
-    /// Fetched by TS bot at resolution time via Gamma API.
+    /// Fetched at resolution time via the Gamma API.
     pub tick_size: Decimal,
 
     /// How far below best_bid to place our resting order.
@@ -44,7 +44,7 @@ pub struct MarketConfig {
     /// Stop quoting after this time; cancel order and remove from active set
     pub expires_at: DateTime<Utc>,
 
-    /// Manually paused via Discord — order cancelled, no new quotes until resumed
+    /// Manually paused from the dashboard — order cancelled, no new quotes until resumed
     #[serde(default)]
     pub paused: bool,
 
@@ -115,7 +115,7 @@ pub enum EnginePhase {
     Error,
 }
 
-// ── Alert (appended to alerts.json by Rust, read+DM'd by TS Discord bot) ──────
+// ── Alert (appended to alerts.json by the engine, shown in the Activity feed) ─
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

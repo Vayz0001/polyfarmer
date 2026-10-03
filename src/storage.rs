@@ -78,8 +78,8 @@ const ALERT_ROTATE_BYTES: u64 = 10 * 1024 * 1024;
 /// Rotates to alerts.json.1 when the file exceeds ALERT_ROTATE_BYTES,
 /// keeping only the current and one previous file.
 ///
-/// O_APPEND is atomic at the OS level for small writes, so the TS Discord bot
-/// will never read a partial line.
+/// O_APPEND is atomic at the OS level for small writes, so a reader never sees
+/// a partial line.
 pub fn append_alert(path: &Path, alert: &Alert) -> Result<()> {
     // Rotate if needed
     if let Ok(meta) = fs::metadata(path) {

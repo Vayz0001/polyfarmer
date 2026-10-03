@@ -1,7 +1,7 @@
 //! Resolve a pasted Polymarket URL into the fields needed to build a
 //! `MarketConfig` — via the SDK's typed Gamma client (no hand-rolled JSON
-//! parsing, unlike the old TS bot: `clob_token_ids`/`outcomes` already come
-//! back as real arrays, not JSON-encoded strings).
+//! parsing: `clob_token_ids`/`outcomes` already come back as real arrays, not
+//! JSON-encoded strings).
 //!
 //! Deliberately does NOT touch `Executor` — Gamma is public/unauthenticated,
 //! and a market must be addable even before the engine has started (the web

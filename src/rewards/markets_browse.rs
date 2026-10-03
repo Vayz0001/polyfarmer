@@ -24,7 +24,6 @@ pub struct RewardsMultiMarket {
     pub event_slug: String,
     pub market_slug: String,
     pub image: Option<String>,
-    pub market_competitiveness: Option<Decimal>,
     pub one_day_price_change: Option<Decimal>,
     pub question: String,
     pub rewards_max_spread: Decimal,

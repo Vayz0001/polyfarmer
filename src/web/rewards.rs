@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use askama::Template;
 use axum::extract::State;
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::Html;
 use chrono::{NaiveDate, Utc};
 use polymarket_client_sdk_v2::clob::types::response::UserRewardsEarningResponse;
 use rust_decimal::prelude::ToPrimitive;
@@ -165,11 +165,6 @@ pub async fn alltime(State(state): State<WebState>) -> Html<String> {
         }
         Err(e) => render(&AllTimeTemplate { total: None, sub: format!("couldn't load: {e}") }),
     }
-}
-
-/// The old standalone history page now lives on /rewards.
-pub async fn history_page() -> Response {
-    Redirect::to("/rewards").into_response()
 }
 
 // ── Today (lazy fragment) ───────────────────────────────────────────────────

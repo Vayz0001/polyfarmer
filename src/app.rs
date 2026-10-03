@@ -243,8 +243,8 @@ pub async fn run() -> Result<()> {
     heartbeat::spawn(Arc::clone(&executor), Arc::clone(&alerter), Arc::clone(&state), stop_rx.clone());
 
     // ── Spawn: daily reward-history snapshot ──────────────────────────────────
-    // markets.json no longer needs a poll loop — web handlers (Segment 5) own
-    // the only write path now and mutate `AppState` directly; ws_manager's
+    // markets.json needs no poll loop — the web handlers are the only write path
+    // and mutate `AppState` directly; ws_manager's
     // connect loop always re-derives its subscription set fresh from
     // `AppState.configs` on every (re)connect, so there's nothing left to
     // reconcile from a periodic file diff.

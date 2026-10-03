@@ -72,10 +72,6 @@ impl<V: Clone + Send + 'static> TtlCache<V> {
         entries.get(key).map(|(at, v)| (v.clone(), at.elapsed() < self.ttl))
     }
 
-    pub fn get_fresh(&self, key: &str) -> Option<V> {
-        self.peek(key).and_then(|(v, fresh)| fresh.then_some(v))
-    }
-
     /// Insert, keeping the cache within capacity: a new key into a full cache first
     /// drops entries past a few TTLs (they can't be served as anything useful),
     /// then the oldest entry until there is room.

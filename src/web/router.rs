@@ -68,7 +68,6 @@ pub fn router(state: WebState) -> Router {
         .route("/rewards", get(rewards::page))
         .route("/rewards/table", get(rewards::table))
         .route("/rewards/alltime", get(rewards::alltime))
-        .route("/rewards/history", get(rewards::history_page))
         .route("/setup", get(setup::page))
         .route("/setup/password", post(setup::set_password))
         .route("/setup/wallet", post(setup::set_wallet))

@@ -6,10 +6,7 @@ use eyre::Result;
 use polymarket_client_sdk_v2::auth::state::Authenticated;
 use polymarket_client_sdk_v2::auth::Normal;
 use polymarket_client_sdk_v2::clob::types::request::UserRewardsEarningRequest;
-use polymarket_client_sdk_v2::clob::types::response::{
-    CurrentRewardResponse, MarketRewardResponse, TotalUserEarningResponse, UserEarningResponse,
-    UserRewardsEarningResponse,
-};
+use polymarket_client_sdk_v2::clob::types::response::{TotalUserEarningResponse, UserRewardsEarningResponse};
 use polymarket_client_sdk_v2::clob::types::SignatureType;
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal::Decimal;
@@ -312,17 +309,6 @@ impl Executor {
     // propagates to the caller (web handler shows "try again" / the daily
     // poller retries on its next tick).
 
-    /// Live, real (not estimated) % share of each market's reward pool you're
-    /// currently earning, keyed by condition_id.
-    pub async fn reward_percentages(&self) -> Result<HashMap<String, Decimal>> {
-        Ok(self.client.reward_percentages().await?)
-    }
-
-    /// Whether a single resting order is currently scoring for rewards.
-    pub async fn is_order_scoring(&self, order_id: &str) -> Result<bool> {
-        Ok(self.client.is_order_scoring(order_id).await?.scoring)
-    }
-
     /// Batch scoring check — one call for the whole markets table instead of
     /// one per row.
     pub async fn are_orders_scoring(&self, order_ids: &[&str]) -> Result<HashMap<String, bool>> {
@@ -332,23 +318,6 @@ impl Executor {
     /// Total reward earnings (by asset) for a single UTC date.
     pub async fn total_earnings_for_user_for_day(&self, date: NaiveDate) -> Result<Vec<TotalUserEarningResponse>> {
         Ok(self.client.total_earnings_for_user_for_day(date).await?)
-    }
-
-    /// Per-market, per-order earnings breakdown for a single UTC date.
-    /// Paginated by the API — collected here into one flat Vec (same pattern
-    /// as `fetch_open_order_ids`).
-    pub async fn earnings_for_user_for_day(&self, date: NaiveDate) -> Result<Vec<UserEarningResponse>> {
-        let mut all = Vec::new();
-        let mut cursor: Option<String> = None;
-        loop {
-            let page = self.client.earnings_for_user_for_day(date, cursor.clone()).await?;
-            all.extend(page.data);
-            if page.next_cursor == TERMINAL_CURSOR {
-                break;
-            }
-            cursor = Some(page.next_cursor);
-        }
-        Ok(all)
     }
 
     /// Your reward-eligible markets with both the market's reward config and
@@ -381,23 +350,6 @@ impl Executor {
         Ok(all)
     }
 
-    /// All currently-active reward programs across every market (not just
-    /// ours) — used to cross-reference whether a tracked market is still
-    /// rewarding. Paginated (500+ markets at any time); collected in full.
-    pub async fn current_rewards(&self) -> Result<Vec<CurrentRewardResponse>> {
-        let mut all = Vec::new();
-        let mut cursor: Option<String> = None;
-        loop {
-            let page = self.client.current_rewards(cursor.clone()).await?;
-            all.extend(page.data);
-            if page.next_cursor == TERMINAL_CURSOR {
-                break;
-            }
-            cursor = Some(page.next_cursor);
-        }
-        Ok(all)
-    }
-
     /// Collateral (pUSD) balance available to the exchange, in USD. Read-only;
     /// the CLOB reports collateral in 6-decimal base units.
     pub async fn collateral_balance(&self) -> Result<Decimal> {
@@ -406,20 +358,5 @@ impl Executor {
         let req = BalanceAllowanceRequest::builder().asset_type(AssetType::Collateral).build();
         let resp = self.client.balance_allowance(req).await?;
         Ok(resp.balance / Decimal::from(1_000_000u32))
-    }
-
-    /// Present and future reward configurations for one market.
-    pub async fn raw_rewards_for_market(&self, condition_id: &str) -> Result<Vec<MarketRewardResponse>> {
-        let mut all = Vec::new();
-        let mut cursor: Option<String> = None;
-        loop {
-            let page = self.client.raw_rewards_for_market(condition_id, cursor.clone()).await?;
-            all.extend(page.data);
-            if page.next_cursor == TERMINAL_CURSOR {
-                break;
-            }
-            cursor = Some(page.next_cursor);
-        }
-        Ok(all)
     }
 }
