@@ -42,7 +42,7 @@ tower-sessions = "0.15"       # cookie sessions (login state, CSRF token)
 
 # ── Auth + credential encryption ──────────────────────────────────────────────
 argon2 = "0.5"                # password hashing (login) — OWASP standard, RustCrypto
-chacha20poly1305 = "0.10"     # AEAD to encrypt the wallet key at rest, RustCrypto
+chacha20poly1305 = "0.11"     # AEAD to encrypt the wallet key at rest, RustCrypto
 rand = "0.8"                  # secure RNG (salts, nonces, master key, tokens)
 
 # ── Config, secrets, errors, logging ──────────────────────────────────────────
