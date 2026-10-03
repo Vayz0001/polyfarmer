@@ -19,13 +19,14 @@ pub struct Shell {
     /// Which nav item is highlighted: "overview" | "markets" | "positions" |
     /// "rewards" | "activity" | "settings".
     pub active: &'static str,
+    /// Per-session CSRF token, for the shell-level forms (logout).
+    pub csrf: String,
 }
 
-/// Every full page builds its shell here (also mints the session's CSRF token
-/// early, so htmx actions on the page always have one to send).
+/// Every full page builds its shell here (this also mints the session's CSRF
+/// token, so htmx actions on the page always have one to send).
 pub async fn shell(session: &Session, active: &'static str) -> Shell {
-    let _ = csrf_token(session).await;
-    Shell { active }
+    Shell { active, csrf: csrf_token(session).await }
 }
 
 /// Render any Askama template, surfacing template errors inline (they're

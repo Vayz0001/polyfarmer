@@ -28,7 +28,7 @@
       <div class="spacer"></div>
       <div class="side-foot nav">
         <button type="button" class="nav-btn" data-action="theme"><svg class="i"><use href="#i-sun"/></svg><span>Toggle theme</span></button>
-        <form method="post" action="/logout"><button class="nav-btn" type="submit"><svg class="i"><use href="#i-logout"/></svg>Log out</button></form>
+        <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ shell.csrf }}" /><button class="nav-btn" type="submit"><svg class="i"><use href="#i-logout"/></svg>Log out</button></form>
         <div class="foot-note">Self-hosted · your keys never leave this machine</div>
       </div>
     </aside>

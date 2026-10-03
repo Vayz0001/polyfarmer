@@ -627,3 +627,159 @@ async fn secure_deployments_use_the_host_cookie_prefix() {
     assert!(secure.starts_with("__Host-polyfarmer="), "{secure}");
     assert!(secure.contains("Secure") && secure.contains("Path=/") && !secure.contains("Domain="), "{secure}");
 }
+
+// ── CSRF hardening and request limits ──────────────────────────────────────────
+
+/// GET `uri` with `cookie`; returns (status, body, new cookie if the session id rotated).
+async fn get_authed(app: &Router, cookie: &str, uri: &str) -> (StatusCode, String, Option<String>) {
+    let res = app
+        .clone()
+        .oneshot(Request::builder().uri(uri).header(header::COOKIE, cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = res.status();
+    let new_cookie = session_cookie(&res);
+    (status, body_string(res).await, new_cookie)
+}
+
+#[tokio::test]
+async fn cross_site_writes_are_refused_before_any_handler_runs() {
+    let (app, pw) = test_app();
+    // A fresh anonymous session (cookie + CSRF token) per attempt — a successful
+    // login rotates the session id, so one session can't be reused after it.
+    let fresh = || {
+        let app = app.clone();
+        async move {
+            let res = app.oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
+            (session_cookie(&res).unwrap(), extract_csrf(&body_string(res).await))
+        }
+    };
+    let post = |site: Option<&'static str>| {
+        let (app, pw, fresh) = (app.clone(), pw.clone(), fresh.clone());
+        async move {
+            let (cookie, csrf) = fresh().await;
+            let mut b = Request::builder()
+                .method("POST")
+                .uri("/login")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+            if let Some(s) = site {
+                b = b.header("sec-fetch-site", s);
+            }
+            app.oneshot(b.body(Body::from(format!("csrf={csrf}&password={pw}"))).unwrap()).await.unwrap()
+        }
+    };
+    // The browser says another site — or another origin on the same site (e.g. a
+    // different local app on another port) — sent this: blocked even with a valid token.
+    for site in ["cross-site", "same-site"] {
+        let res = post(Some(site)).await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN, "Sec-Fetch-Site: {site}");
+    }
+    // Our own pages (same-origin), typed/bookmarked requests ("none") and
+    // header-less clients (curl, tests) are fine.
+    for site in [Some("same-origin"), Some("none"), None] {
+        assert!(post(site).await.status().is_redirection(), "Sec-Fetch-Site: {site:?} must be allowed");
+    }
+}
+
+#[tokio::test]
+async fn cross_site_get_requests_are_not_blocked() {
+    // Only state-changing methods are filtered; following a link into the app works.
+    let (app, _) = test_app();
+    let res = app
+        .oneshot(Request::builder().uri("/login").header("sec-fetch-site", "cross-site").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn logout_requires_the_csrf_token() {
+    let (app, pw) = test_app();
+    let cookie = login(&app, &pw).await;
+    let (status, page, rotated) = get_authed(&app, &cookie, "/markets").await;
+    assert_eq!(status, StatusCode::OK);
+    let cookie = rotated.unwrap_or(cookie);
+    let csrf = extract_csrf(&page);
+    assert!(page.contains("action=\"/logout\""), "the sidebar has a logout form with a token");
+
+    let logout = |body: String| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/logout")
+                    .header(header::COOKIE, cookie)
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    // Without a (valid) token a hostile page can't sign the owner out.
+    for body in ["", "csrf=", "csrf=wrong-token"] {
+        let res = logout(body.to_string()).await;
+        assert!(res.status().is_redirection());
+        assert_ne!(res.headers().get(header::LOCATION).unwrap(), "/login", "body {body:?} must not log out");
+        assert_eq!(get_authed(&app, &cookie, "/markets").await.0, StatusCode::OK, "still signed in after {body:?}");
+    }
+    // With the token it signs out.
+    let res = logout(format!("csrf={csrf}")).await;
+    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
+    assert!(get_authed(&app, &cookie, "/markets").await.0.is_redirection(), "session destroyed");
+}
+
+#[tokio::test]
+async fn preview_endpoint_checks_the_csrf_token() {
+    let (app, pw) = test_app();
+    let cookie = login(&app, &pw).await;
+    let (_, page, rotated) = get_authed(&app, &cookie, "/markets").await;
+    let cookie = rotated.unwrap_or(cookie);
+    let csrf = extract_csrf(&page);
+    let post = |body: String| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        async move {
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/markets/view/preview")
+                        .header(header::COOKIE, cookie)
+                        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            body_string(res).await
+        }
+    };
+    // No / wrong token → refused before any network work.
+    assert!(post("slug=x&price_cents=18&order_size=100".into()).await.contains("Session expired"));
+    assert!(post("csrf=nope&slug=x&price_cents=18&order_size=100".into()).await.contains("Session expired"));
+    // A valid token passes the gate (and then fails on the bad price, without network).
+    let out = post(format!("csrf={csrf}&slug=x&price_cents=abc&order_size=100")).await;
+    assert!(out.contains("Enter a price"), "{out}");
+}
+
+#[tokio::test]
+async fn oversized_request_bodies_are_rejected() {
+    let (app, _) = test_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("csrf=x&password={}", "A".repeat(200 * 1024))))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}

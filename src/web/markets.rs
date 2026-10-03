@@ -590,6 +590,8 @@ pub async fn view_position(State(state): State<WebState>, Query(p): Query<Positi
 
 #[derive(Deserialize)]
 pub struct PlacementPreviewForm {
+    #[serde(default)]
+    csrf: String,
     slug: String,
     #[serde(default)]
     side: usize,
@@ -656,7 +658,10 @@ fn pct(w: Decimal) -> String {
 /// POST /markets/view/preview — server-side placement feedback (fill risk,
 /// both-sides derivation, true reward weight), debounced as you type. Reads
 /// the hub's live book, so it costs no Polymarket calls once streaming.
-pub async fn view_preview(State(state): State<WebState>, Form(form): Form<PlacementPreviewForm>) -> Html<String> {
+pub async fn view_preview(State(state): State<WebState>, session: Session, Form(form): Form<PlacementPreviewForm>) -> Html<String> {
+    if !verify_csrf(&session, &form.csrf).await {
+        return render(&PlacementPreviewTemplate::message(true, Some("Session expired — reload the page.".into())));
+    }
     let price = match form.price_cents.trim().parse::<Decimal>() {
         Ok(c) if c > dec!(0) && c < dec!(100) => c / dec!(100),
         _ => return render(&PlacementPreviewTemplate::message(true, Some("Enter a price between 0 and 100¢.".into()))),

@@ -304,7 +304,18 @@ pub async fn login_submit(
     }
 }
 
-pub async fn logout(session: Session) -> Redirect {
+#[derive(Deserialize)]
+pub struct LogoutForm {
+    #[serde(default)]
+    csrf: String,
+}
+
+/// Signing out is a state change like any other: without the token a hostile page
+/// could silently sign the owner out (a nuisance that can mask other attacks).
+pub async fn logout(session: Session, Form(form): Form<LogoutForm>) -> Redirect {
+    if !verify_csrf(&session, &form.csrf).await {
+        return Redirect::to("/");
+    }
     let _ = session.flush().await;
     Redirect::to("/login")
 }
