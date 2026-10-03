@@ -13,6 +13,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
@@ -118,6 +119,31 @@ pub fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Vec<u8>> {
 #[derive(Serialize, Deserialize)]
 struct AdminRecord {
     password_hash: String,
+    /// Bumped on every password change. Sessions remember the epoch they were
+    /// issued under; a mismatch means the password changed since, so the session
+    /// is rejected — a stolen cookie dies when the owner changes the password.
+    /// (Absent in files written by older versions → 0.)
+    #[serde(default)]
+    session_epoch: u64,
+}
+
+/// New passwords must be this long (NIST SP 800-63B: length, not composition
+/// rules, is what protects a password that is the only factor). Existing
+/// passwords keep working; the check is applied only when one is being set.
+pub const MIN_PASSWORD_CHARS: usize = 12;
+/// Upper bound so an absurd input can't be used to burn CPU in the hash.
+pub const MAX_PASSWORD_CHARS: usize = 128;
+
+/// Validate a password being *chosen* (not one being checked at login).
+pub fn validate_new_password(password: &str) -> std::result::Result<(), String> {
+    let n = password.chars().count();
+    if n < MIN_PASSWORD_CHARS {
+        return Err(format!("Password must be at least {MIN_PASSWORD_CHARS} characters."));
+    }
+    if n > MAX_PASSWORD_CHARS {
+        return Err(format!("Password must be at most {MAX_PASSWORD_CHARS} characters."));
+    }
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -137,6 +163,9 @@ pub struct WalletCreds {
 
 pub struct CredentialStore {
     dir: PathBuf,
+    /// In-memory copy of `AdminRecord::session_epoch`, so the auth guard doesn't
+    /// read the disk on every request.
+    epoch: AtomicU64,
 }
 
 impl CredentialStore {
@@ -146,7 +175,10 @@ impl CredentialStore {
         // Created 0700 (an already-existing dir is left alone, with a warning if
         // it is readable by other users). Files inside are 0600 from creation.
         create_private_dir(&dir)?;
-        let store = Self { dir };
+        let store = Self { dir, epoch: AtomicU64::new(0) };
+        if let Ok(rec) = store.read_admin() {
+            store.epoch.store(rec.session_epoch, Ordering::Relaxed);
+        }
         store.ensure_master_key()?;
         store.ensure_setup_code()?;
         Ok(store)
@@ -222,16 +254,26 @@ impl CredentialStore {
         Ok(serde_json::from_str(&raw)?)
     }
 
+    /// Current session epoch (see `AdminRecord::session_epoch`).
+    pub fn session_epoch(&self) -> u64 {
+        self.epoch.load(Ordering::Relaxed)
+    }
+
     pub fn verify_login(&self, password: &str) -> Result<bool> {
         Ok(verify_password(password, &self.read_admin()?.password_hash))
     }
 
     /// Set (or change) the admin password.
     pub fn set_password(&self, password: &str) -> Result<()> {
+        let next_epoch = self.epoch.load(Ordering::Relaxed).wrapping_add(1);
         let rec = AdminRecord {
             password_hash: hash_password(password)?,
+            session_epoch: next_epoch,
         };
         write_private_atomic(&self.admin_path(), serde_json::to_string_pretty(&rec)?.as_bytes())?;
+        // Only after the file is durably written: every session issued before this
+        // point is now invalid.
+        self.epoch.store(next_epoch, Ordering::Relaxed);
         // First-run is over — the setup code must not outlive it.
         let _ = fs::remove_file(self.setup_code_path());
         Ok(())
@@ -357,11 +399,9 @@ mod tests {
         let dir = temp_dir().join("data");
 
         let old = unsafe { libc::umask(0o000) };
-        let store = CredentialStore::open(&dir);
-        let store = store.map(|s| {
+        let store = CredentialStore::open(&dir).inspect(|s| {
             s.set_password("a-long-enough-password").unwrap();
             s.set_wallet("0xprivkey", "0xWalletAddr").unwrap();
-            s
         });
         unsafe { libc::umask(old) };
         let _store = store.unwrap();
@@ -374,6 +414,46 @@ mod tests {
         let leftovers: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).filter(|n| n.to_string_lossy().ends_with(".tmp")).collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
         let _ = fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn password_policy_is_length_based() {
+        assert!(validate_new_password("short").is_err());
+        assert!(validate_new_password("elevenchars").is_err()); // 11
+        assert!(validate_new_password("twelve chars").is_ok()); // 12 incl. space
+        assert!(validate_new_password(&"é".repeat(12)).is_ok(), "counted in characters, not bytes");
+        assert!(validate_new_password(&"a".repeat(128)).is_ok());
+        assert!(validate_new_password(&"a".repeat(129)).is_err());
+    }
+
+    #[test]
+    fn password_change_bumps_the_session_epoch_and_it_survives_restart() {
+        let dir = temp_dir();
+        let store = CredentialStore::open(&dir).unwrap();
+        assert_eq!(store.session_epoch(), 0);
+        store.set_password("first-long-password").unwrap();
+        let e1 = store.session_epoch();
+        assert!(e1 > 0);
+        store.set_password("second-long-password").unwrap();
+        let e2 = store.session_epoch();
+        assert!(e2 > e1, "every change bumps it");
+        // Re-opened store (process restart) sees the same epoch — sessions don't
+        // become valid again just because the bot restarted.
+        assert_eq!(CredentialStore::open(&dir).unwrap().session_epoch(), e2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn admin_files_from_older_versions_load_with_epoch_zero() {
+        let dir = temp_dir();
+        let store = CredentialStore::open(&dir).unwrap();
+        let hash = hash_password("legacy-password-1").unwrap();
+        fs::write(dir.join("admin.json"), format!("{{\"password_hash\": \"{hash}\"}}")).unwrap();
+        let reopened = CredentialStore::open(&dir).unwrap();
+        assert!(reopened.verify_login("legacy-password-1").unwrap());
+        assert_eq!(reopened.session_epoch(), 0);
+        drop(store);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]

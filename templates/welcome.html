@@ -10,8 +10,8 @@
     <input class="input mono" type="text" id="code" name="code" value="{{ code }}" placeholder="abcd-efgh" autocomplete="off" spellcheck="false" autocapitalize="off" {% if code.is_empty() %}autofocus{% endif %} required />
     <p class="help">Printed in the bot's startup log, and saved as <span class="mono">setup.code</span> in its data folder. It's deleted once you finish.</p>
   </div>
-  <div class="field"><label class="label" for="password">New password <span class="hint">8+ characters</span></label><input class="input" type="password" id="password" name="password" autocomplete="new-password" minlength="8" {% if !code.is_empty() %}autofocus{% endif %} required /></div>
-  <div class="field"><label class="label" for="confirm">Confirm password</label><input class="input" type="password" id="confirm" name="confirm" autocomplete="new-password" minlength="8" required /></div>
+  <div class="field"><label class="label" for="password">New password <span class="hint">12+ characters</span></label><input class="input" type="password" id="password" name="password" autocomplete="new-password" minlength="12" maxlength="128" {% if !code.is_empty() %}autofocus{% endif %} required /></div>
+  <div class="field"><label class="label" for="confirm">Confirm password</label><input class="input" type="password" id="confirm" name="confirm" autocomplete="new-password" minlength="12" maxlength="128" required /></div>
   {% if let Some(err) = error %}<div class="alert err">{{ err }}</div>{% endif %}
   <button class="btn primary block" type="submit">Create password</button>
 </form>

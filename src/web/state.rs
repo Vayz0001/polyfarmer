@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 use rust_decimal::Decimal;
 use tokio::sync::{broadcast, mpsc, Notify, RwLock};
@@ -17,11 +17,8 @@ use crate::rewards::portfolio::{Activity, Position};
 use crate::types::{Alert, WsCommand};
 
 use super::book_hub::BookHub;
-
-/// Lock the dashboard after this many consecutive failed logins.
-pub const MAX_LOGIN_FAILS: u32 = 5;
-/// Lockout duration once the fail threshold is hit.
-pub const LOCKOUT_SECS: u64 = 30;
+use super::limiter::AttemptLimiter;
+use super::session_store::BoundedSessionStore;
 
 /// Freshness budgets for dashboard-only reads. None of these drive trading.
 const SCORING_TTL: Duration = Duration::from_secs(15);
@@ -36,7 +33,10 @@ pub struct WebState {
     /// Live engine state — shared with the trading engine. Populated by the
     /// engine when running; readable by the dashboard at all times.
     pub engine: Arc<RwLock<AppState>>,
-    pub login_guard: Arc<Mutex<LoginGuard>>,
+    /// Throttles failed logins / setup-code guesses per source (see `limiter`).
+    pub limiter: Arc<AttemptLimiter>,
+    /// Bounded, self-cleaning session store (see `session_store`).
+    pub sessions: BoundedSessionStore,
     /// Optional custom Polygon RPC for on-chain wallet detection (see
     /// `wallet_detect`). `None` means use the public fallback list.
     pub polygon_rpc_url: Option<String>,
@@ -140,12 +140,6 @@ impl EngineHandle {
     }
 }
 
-#[derive(Default)]
-pub struct LoginGuard {
-    pub fails: u32,
-    pub locked_until: Option<Instant>,
-}
-
 impl WebState {
     pub fn new(store: Arc<CredentialStore>, engine: Arc<RwLock<AppState>>) -> Self {
         Self::with_rpc(store, engine, None)
@@ -182,7 +176,8 @@ impl WebState {
         Self {
             store,
             engine,
-            login_guard: Arc::new(Mutex::new(LoginGuard::default())),
+            limiter: Arc::new(AttemptLimiter::default()),
+            sessions: BoundedSessionStore::default(),
             polygon_rpc_url,
             wallet_ready: Arc::new(Notify::new()),
             engine_handle: EngineHandle::new(),

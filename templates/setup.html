@@ -51,8 +51,8 @@
         {% if let Some(n) = pw_notice %}<div class="alert ok">{{ n }}</div>{% endif %}
         {% if let Some(e) = pw_error %}<div class="alert err">{{ e }}</div>{% endif %}
         <div class="field"><label class="label" for="pw-current">Current password</label><input class="input" type="password" id="pw-current" name="current" autocomplete="current-password" required /></div>
-        <div class="field"><label class="label" for="pw-new">New password <span class="hint">8+ characters</span></label><input class="input" type="password" id="pw-new" name="password" autocomplete="new-password" minlength="8" required /></div>
-        <div class="field"><label class="label" for="pw-confirm">Confirm new password</label><input class="input" type="password" id="pw-confirm" name="confirm" autocomplete="new-password" minlength="8" required /></div>
+        <div class="field"><label class="label" for="pw-new">New password <span class="hint">12+ characters</span></label><input class="input" type="password" id="pw-new" name="password" autocomplete="new-password" minlength="12" maxlength="128" required /></div>
+        <div class="field"><label class="label" for="pw-confirm">Confirm new password</label><input class="input" type="password" id="pw-confirm" name="confirm" autocomplete="new-password" minlength="12" maxlength="128" required /></div>
         <div><button class="btn" type="submit">Change password</button></div>
       </form>
     </div>

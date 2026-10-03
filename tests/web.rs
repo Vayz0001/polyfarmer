@@ -192,7 +192,7 @@ async fn first_run_welcome_creates_account_with_setup_code() {
     assert!(body.contains("Setup code") && body.contains("name=\"code\""));
 
     // …and the correct code creates the account → redirect to /setup.
-    let res = post_welcome(&app, &cookie, &csrf, &code, "supersecret").await;
+    let res = post_welcome(&app, &cookie, &csrf, &code, "supersecret-pass-1").await;
     assert!(res.status().is_redirection(), "got {}", res.status());
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/setup");
 }
@@ -214,12 +214,12 @@ async fn setup_is_refused_without_the_right_code_even_from_loopback() {
 
     let (cookie, csrf, _) = welcome_page(&app, "/welcome").await;
     for bad in ["", "aaaa-aaaa", "not-the-code"] {
-        let res = post_welcome(&app, &cookie, &csrf, bad, "supersecret").await;
+        let res = post_welcome(&app, &cookie, &csrf, bad, "supersecret-pass-1").await;
         assert_eq!(res.status(), StatusCode::OK, "code {bad:?} must not redirect");
         assert!(body_string(res).await.contains("Setup code is incorrect"), "code {bad:?}");
     }
     // …and no account was created: the right code still works afterwards.
-    let res = post_welcome(&app, &cookie, &csrf, &code, "supersecret").await;
+    let res = post_welcome(&app, &cookie, &csrf, &code, "supersecret-pass-1").await;
     assert!(res.status().is_redirection());
 }
 
@@ -229,14 +229,14 @@ async fn setup_code_link_prefills_and_is_single_use() {
     let (cookie, csrf, body) = welcome_page(&app, &format!("/welcome?code={code}")).await;
     assert!(body.contains(&format!("value=\"{code}\"")), "code from the link is prefilled");
 
-    let res = post_welcome(&app, &cookie, &csrf, &code, "supersecret").await;
+    let res = post_welcome(&app, &cookie, &csrf, &code, "supersecret-pass-1").await;
     assert!(res.status().is_redirection());
 
     // Setup is over: /welcome bounces to /login and the code can't be reused.
     let res = app.clone().oneshot(Request::builder().uri("/welcome").body(Body::empty()).unwrap()).await.unwrap();
     assert!(res.status().is_redirection());
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
-    let res = post_welcome(&app, &cookie, &csrf, &code, "another-pass").await;
+    let res = post_welcome(&app, &cookie, &csrf, &code, "another-long-pass").await;
     assert!(res.status().is_redirection());
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
 }
@@ -245,12 +245,13 @@ async fn setup_code_link_prefills_and_is_single_use() {
 async fn wrong_setup_codes_lock_out_guessing() {
     let (app, code) = test_app_uninit_with_code();
     let (cookie, csrf, _) = welcome_page(&app, "/welcome").await;
-    // MAX_LOGIN_FAILS (5) wrong guesses → locked; even the right code is then refused.
-    for _ in 0..5 {
-        let res = post_welcome(&app, &cookie, &csrf, "zzzz-zzzz", "supersecret").await;
+    // Test requests carry no peer address, which counts as "proxied" (loopback / a
+    // reverse proxy): 15 wrong guesses → locked; even the right code is then refused.
+    for _ in 0..15 {
+        let res = post_welcome(&app, &cookie, &csrf, "zzzz-zzzz", "supersecret-pass-1").await;
         assert!(body_string(res).await.contains("Setup code is incorrect"));
     }
-    let res = post_welcome(&app, &cookie, &csrf, &code, "supersecret").await;
+    let res = post_welcome(&app, &cookie, &csrf, &code, "supersecret-pass-1").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert!(body_string(res).await.contains("Too many attempts"));
 }
@@ -433,9 +434,9 @@ async fn repeated_wrong_passwords_lock_out_login() {
             .unwrap()
         }
     };
-    // 5 wrong guesses in a row → locked (this limiter used to reset its counter
-    // on every check, so it never engaged).
-    for _ in 0..5 {
+    // 15 wrong guesses in a row from a proxied/unknown peer → locked (this limiter
+    // used to reset its counter on every check, so it never engaged).
+    for _ in 0..15 {
         let res = attempt("definitely-wrong".into()).await;
         assert!(body_string(res).await.contains("Incorrect password"));
     }
@@ -463,4 +464,166 @@ async fn session_cookie_is_secure_only_when_enabled() {
     let secure = login_cookie_header(true).await;
     assert!(secure.contains("Secure"), "{secure}");
     assert!(secure.contains("HttpOnly") && secure.contains("SameSite=Lax"));
+}
+
+// ── Sessions, throttling and password policy ───────────────────────────────────
+
+use polyfarmer::web::session_store::BoundedSessionStore;
+
+fn peer(ip: &str) -> axum::extract::ConnectInfo<std::net::SocketAddr> {
+    axum::extract::ConnectInfo(format!("{ip}:5555").parse().unwrap())
+}
+
+/// POST /login as `ip` (a direct peer) with `password`, using an already-minted session.
+async fn post_login_from(app: &Router, ip: &str, cookie: &str, csrf: &str, password: &str) -> axum::response::Response {
+    let mut req = Request::builder()
+        .method("POST")
+        .uri("/login")
+        .header(header::COOKIE, cookie)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from(format!("csrf={csrf}&password={password}")))
+        .unwrap();
+    req.extensions_mut().insert(peer(ip));
+    app.clone().oneshot(req).await.unwrap()
+}
+
+#[tokio::test]
+async fn direct_peers_are_throttled_individually_after_five_failures() {
+    let (app, pw) = test_app();
+    let (cookie, csrf) = {
+        let res = app.clone().oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
+        (session_cookie(&res).unwrap(), extract_csrf(&body_string(res).await))
+    };
+    // 5 wrong guesses from 203.0.113.7 → that IP is locked…
+    for _ in 0..5 {
+        let res = post_login_from(&app, "203.0.113.7", &cookie, &csrf, "definitely-wrong").await;
+        assert!(body_string(res).await.contains("Incorrect password"));
+    }
+    let res = post_login_from(&app, "203.0.113.7", &cookie, &csrf, &pw).await;
+    assert_eq!(res.status(), StatusCode::OK, "still locked even with the right password");
+    assert!(body_string(res).await.contains("Too many attempts"));
+
+    // …but a different visitor is not affected: the owner can still sign in.
+    let res = post_login_from(&app, "203.0.113.99", &cookie, &csrf, &pw).await;
+    assert!(res.status().is_redirection(), "other IP logs in fine, got {}", res.status());
+}
+
+#[tokio::test]
+async fn password_change_signs_out_every_other_session_but_not_this_one() {
+    let (app, pw) = test_app();
+    let a = login(&app, &pw).await; // the owner's laptop
+    let b = login(&app, &pw).await; // a second (possibly stolen) session
+
+    let get = |cookie: String, uri: &'static str| {
+        let app = app.clone();
+        async move { app.oneshot(Request::builder().uri(uri).header(header::COOKIE, cookie).body(Body::empty()).unwrap()).await.unwrap() }
+    };
+    assert_eq!(get(a.clone(), "/markets").await.status(), StatusCode::OK);
+    assert_eq!(get(b.clone(), "/markets").await.status(), StatusCode::OK);
+
+    // Session A changes the password.
+    let page = get(a.clone(), "/setup").await;
+    let a_cookie = session_cookie(&page).unwrap_or(a.clone());
+    let csrf = extract_csrf(&body_string(page).await);
+    let form = format!("csrf={csrf}&current={pw}&password=a-brand-new-password&confirm=a-brand-new-password");
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/setup/password")
+                .header(header::COOKIE, &a_cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(form))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let a_new = session_cookie(&res).unwrap_or(a_cookie);
+    assert!(body_string(res).await.contains("Password changed"));
+
+    // The other session is dead (redirected to login); this one keeps working.
+    let res = get(b, "/markets").await;
+    assert!(res.status().is_redirection(), "stolen/other session must be signed out, got {}", res.status());
+    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
+    assert_eq!(get(a_new, "/markets").await.status(), StatusCode::OK, "the session that changed the password stays signed in");
+}
+
+#[tokio::test]
+async fn new_passwords_must_meet_the_length_policy() {
+    let (app, pw) = test_app();
+    let cookie = login(&app, &pw).await;
+    let page = app.clone().oneshot(Request::builder().uri("/setup").header(header::COOKIE, &cookie).body(Body::empty()).unwrap()).await.unwrap();
+    let cookie = session_cookie(&page).unwrap_or(cookie);
+    let csrf = extract_csrf(&body_string(page).await);
+    for (new, expect) in [("short", "at least 12"), ("elevenchars", "at least 12"), (&"x".repeat(129)[..], "at most 128")] {
+        let form = format!("csrf={csrf}&current={pw}&password={new}&confirm={new}");
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/setup/password")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(form))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(body_string(res).await.contains(expect), "{new:?}");
+    }
+}
+
+#[tokio::test]
+async fn anonymous_visitors_cannot_grow_the_session_store_without_bound() {
+    let store = CredentialStore::open(unique_dir()).unwrap();
+    store.set_password("test-password-123").unwrap();
+    let mut state = WebState::new(Arc::new(store), empty_engine());
+    state.sessions = BoundedSessionStore::new(40);
+    let sessions = state.sessions.clone();
+    let app = router(state);
+    // 300 cookie-less hits on /login — each mints a CSRF token, i.e. a session record.
+    for _ in 0..300 {
+        let res = app.clone().oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+    assert!(sessions.len() <= 40, "store grew to {}", sessions.len());
+    assert!(!sessions.is_empty());
+}
+
+#[tokio::test]
+async fn cookie_lifetimes_anonymous_short_logged_in_long() {
+    let (app, pw) = test_app();
+    let res = app.clone().oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
+    let anon = res.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+    assert!(anon.contains("Max-Age=1800"), "anonymous = 30 min: {anon}");
+
+    let cookie = session_cookie(&res).unwrap();
+    let csrf = extract_csrf(&body_string(res).await);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/login")
+                .header(header::COOKIE, &cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("csrf={csrf}&password={pw}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let authed = res.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+    assert!(authed.contains("Max-Age=43200"), "logged-in idle timeout = 12 h: {authed}");
+    assert!(authed.contains("HttpOnly") && authed.contains("SameSite=Lax"));
+}
+
+#[tokio::test]
+async fn secure_deployments_use_the_host_cookie_prefix() {
+    let plain = login_cookie_header(false).await;
+    assert!(plain.starts_with("polyfarmer_session="), "{plain}");
+    let secure = login_cookie_header(true).await;
+    assert!(secure.starts_with("__Host-polyfarmer="), "{secure}");
+    assert!(secure.contains("Secure") && secure.contains("Path=/") && !secure.contains("Domain="), "{secure}");
 }

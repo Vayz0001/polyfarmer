@@ -6,20 +6,34 @@ use axum::{
     Router,
 };
 use tower_sessions::cookie::SameSite;
-use tower_sessions::{MemoryStore, SessionManagerLayer};
+use tower_sessions::{Expiry, SessionManagerLayer};
 
+use super::auth::ANONYMOUS_TIMEOUT;
+use super::session_store::SWEEP_INTERVAL;
 use super::state::WebState;
 use super::{activity, assets, auth, dashboard, events, markets, positions, rewards, setup, shell};
 
 /// Build the dashboard router with shared [`WebState`].
 pub fn router(state: WebState) -> Router {
-    // In-memory sessions: fine for a single-user self-hosted app (re-login on
-    // restart). `Secure` is opt-in (DASHBOARD_SECURE_COOKIES): off for plain
-    // http://localhost, on when served over HTTPS (Tailscale Serve, a proxy).
-    let session_layer = SessionManagerLayer::new(MemoryStore::default())
+    // Sessions live in a bounded, self-cleaning in-memory store (re-login on
+    // restart is fine for a single-user app). `Secure` is opt-in
+    // (DASHBOARD_SECURE_COOKIES): off for plain http://localhost, on over HTTPS
+    // (Tailscale Serve, a proxy) — where the cookie also gets the `__Host-`
+    // prefix, which browsers only accept if it is Secure, Path=/ and Domain-less.
+    state.sessions.spawn_sweeper(SWEEP_INTERVAL);
+    let cookie_name = if state.secure_cookies { "__Host-polyfarmer" } else { "polyfarmer_session" };
+    let session_layer = SessionManagerLayer::new(state.sessions.clone())
+        .with_name(cookie_name)
+        .with_path("/")
         .with_http_only(true)
         .with_same_site(SameSite::Lax)
-        .with_secure(state.secure_cookies);
+        .with_secure(state.secure_cookies)
+        // Visitors who haven't logged in only hold a CSRF token: short-lived.
+        // Logging in switches the session to the longer idle timeout (see auth).
+        .with_expiry(Expiry::OnInactivity(time::Duration::seconds(ANONYMOUS_TIMEOUT.as_secs() as i64)))
+        // Re-save on every request so the idle timeout is *sliding* (measured
+        // from the last request, not from the last change to the session).
+        .with_always_save(true);
 
     let protected: Router<WebState> = Router::new()
         .route("/", get(dashboard::overview))

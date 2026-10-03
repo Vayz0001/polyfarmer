@@ -15,7 +15,10 @@ use serde::Deserialize;
 use tower_sessions::Session;
 use zeroize::Zeroizing;
 
-use super::auth::{csrf_token, verify_csrf};
+use super::auth::{
+    csrf_token, refresh_session_after_password_change, set_password_blocking, verify_csrf,
+    verify_password_blocking, AttemptSource, ClientIp,
+};
 use super::shell::{render as render_tpl, shell, Shell};
 use super::state::WebState;
 use crate::types::EnginePhase;
@@ -101,22 +104,37 @@ async fn render_pw(state: &WebState, session: &Session, notice: Option<String>, 
 pub async fn set_password(
     State(state): State<WebState>,
     session: Session,
+    ClientIp(peer): ClientIp,
     Form(form): Form<PasswordForm>,
 ) -> Response {
     if !verify_csrf(&session, &form.csrf).await {
         return render_pw(&state, &session, None, Some("Invalid session — retry.".into())).await;
     }
-    if !state.store.verify_login(&form.current).unwrap_or(false) {
+    // Re-authentication is throttled like login: a hijacked session must not get
+    // unlimited guesses at the current password.
+    let source = AttemptSource::from_peer(peer);
+    if let Some(wait) = state.limiter.check(source) {
+        let msg = format!("Too many attempts — try again in {} seconds.", wait.as_secs().max(1));
+        return render_pw(&state, &session, None, Some(msg)).await;
+    }
+    if !verify_password_blocking(&state, &form.current).await {
+        state.limiter.fail(source);
         return render_pw(&state, &session, None, Some("Current password is incorrect.".into())).await;
     }
-    if form.password.len() < 8 {
-        return render_pw(&state, &session, None, Some("New password must be at least 8 characters.".into())).await;
+    state.limiter.success(source);
+    if let Err(msg) = crate::creds::validate_new_password(&form.password) {
+        return render_pw(&state, &session, None, Some(msg)).await;
     }
     if form.password != form.confirm {
         return render_pw(&state, &session, None, Some("New passwords do not match.".into())).await;
     }
-    match state.store.set_password(&form.password) {
-        Ok(_) => render_pw(&state, &session, Some("Password changed.".into()), None).await,
+    match set_password_blocking(&state, &form.password).await {
+        Ok(_) => {
+            // Every other session (issued under the old password) is now invalid;
+            // keep this one, with a fresh id.
+            refresh_session_after_password_change(&session, &state).await;
+            render_pw(&state, &session, Some("Password changed. Other signed-in sessions were signed out.".into()), None).await
+        }
         Err(e) => render_pw(&state, &session, None, Some(format!("Failed to save: {e}"))).await,
     }
 }
