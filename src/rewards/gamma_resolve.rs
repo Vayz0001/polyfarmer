@@ -149,7 +149,7 @@ pub async fn resolve_url(url: &str) -> Result<Resolved> {
         .filter_map(|m| MarketRef::from_market(m).ok())
         .collect();
     match refs.len() {
-        0 => eyre::bail!("No tradeable markets found for this URL"),
+        0 => Err(eyre::eyre!("No tradeable markets found for this URL")),
         1 => Ok(Resolved::Single(Box::new(refs.pop().unwrap()))),
         _ => Ok(Resolved::Multiple(refs)),
     }
