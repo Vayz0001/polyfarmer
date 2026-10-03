@@ -1,0 +1,32 @@
+# Dependabot opens pull requests for outdated dependencies and for new security
+# advisories, so updates are reviewed and tested by CI instead of waiting for
+# someone to remember to run `cargo update`.
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps arrive as one PR instead of a dozen.
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # polymarket_client_sdk_v2 pins these majors; bumping them alone breaks the
+      # build or pulls in a second copy. Move them together with the SDK, by hand.
+      - dependency-name: "alloy*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "reqwest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "polymarket_client_sdk_v2"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
