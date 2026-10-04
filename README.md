@@ -120,27 +120,21 @@ Pick your system:
 <details>
 <summary><b>Windows 10 and 11</b></summary>
 
-1. Open **PowerShell** and install Git, Rust and the C++ build tools with `winget`, then close and reopen
-   PowerShell so the new programs are on your path. The build tools are a large download; they include the
-   Windows SDK.
+1. Download and run **[rustup-init.exe](https://win.rustup.rs/x86_64)**, the Rust installer. If it offers to
+   install the Visual Studio C++ build tools, choose the quick install and accept the defaults. That is a
+   large download (several GB). When it finishes, close the window.
+
+2. Download Polyfarmer: on [its GitHub page](https://github.com/Vayz0001/polyfarmer) click
+   **Code → Download ZIP**, then unzip it. Open the unzipped folder in File Explorer, click the address bar,
+   type `powershell` and press Enter. In the window that opens, run:
 
    ```powershell
-   winget install --id Git.Git -e
-   winget install --id Rustlang.Rustup -e
-   winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-   ```
-
-2. Download and run Polyfarmer. The `AWS_LC_SYS_PREBUILT_NASM` line lets the build use precompiled assembly
-   for its cryptography library, so you don't have to install [NASM](https://www.nasm.us). If you prefer to
-   build everything from source, install NASM (`winget install NASM.NASM`, then add it to your `PATH`) and
-   leave that line out.
-
-   ```powershell
-   git clone https://github.com/Vayz0001/polyfarmer.git
-   cd polyfarmer
-   $env:AWS_LC_SYS_PREBUILT_NASM = "1"
    cargo run --release
    ```
+
+   The first build takes a few minutes. When it finishes, the window prints a setup link, and you continue
+   with [First run](#first-run). To update later, download the ZIP again. If you use Git, you can instead
+   run `git clone https://github.com/Vayz0001/polyfarmer.git`, and `git pull` to update.
 
 **Windows notes**
 
@@ -298,8 +292,9 @@ Something else is using port 8080. Set `DASHBOARD_BIND=127.0.0.1:8090` (or any f
 <details>
 <summary><b>The build fails on Windows with "link.exe not found" or a NASM error.</b></summary>
 
-Install the C++ build tools from step 1 of the Windows instructions, then close and reopen PowerShell. For a
-NASM error, set `$env:AWS_LC_SYS_PREBUILT_NASM = "1"` before running `cargo`, or install NASM.
+Run `rustup-init.exe` again (step 1 of the Windows instructions) and let it install the C++ build tools, then
+open a new PowerShell window. A NASM error should not happen, because the project is set up to build without
+it. If you see one, please open an issue with the full error text.
 </details>
 
 <details>

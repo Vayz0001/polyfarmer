@@ -37,8 +37,8 @@ cargo test                           # unit and integration tests; no network or
 DEMO=1 cargo run --example serve     # dashboard with fake orders; password: demo-password
 ```
 
-On Windows PowerShell, set the variables first: `$env:AWS_LC_SYS_PREBUILT_NASM = "1"` (see the README) and
-`$env:DEMO = "1"`.
+On Windows PowerShell, set the demo variable first: `$env:DEMO = "1"`. The build needs no extra setup; the
+project's `.cargo/config.toml` already lets it work without NASM.
 
 The demo mode shows real Polymarket reward markets and order books but trades nothing, so it is the right way
 to work on the dashboard without a wallet. If you fork the repository, enable GitHub Actions on your fork so

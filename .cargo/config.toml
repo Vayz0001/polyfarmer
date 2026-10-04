@@ -1,0 +1,9 @@
+# Project-wide Cargo settings.
+
+[env]
+# Windows (x86-64) only, and only when NASM is not installed: let the crypto library (aws-lc-sys) use the
+# precompiled assembly that ships inside the crate instead of failing with "Missing dependency: nasm". That
+# means a fresh Windows machine builds Polyfarmer without installing NASM. If NASM is installed it is used
+# instead. Every other platform ignores this setting. To build the assembly from source regardless, install
+# NASM and set AWS_LC_SYS_PREBUILT_NASM=0 in your environment (an environment value wins over this file).
+AWS_LC_SYS_PREBUILT_NASM = "1"
