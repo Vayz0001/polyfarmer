@@ -100,14 +100,25 @@ Pick your system:
 <details>
 <summary><b>macOS</b></summary>
 
-1. Install the Xcode command line tools, then [rustup](https://rustup.rs). Restart your terminal after.
+1. Open **Terminal** (press `⌘ Space`, type "Terminal") and check whether Rust is already installed:
+
+   ```bash
+   rustc --version
+   ```
+
+   If it prints a version (for example because you installed Rust with Homebrew), **skip to step 3**.
+   If it says `command not found`, do step 2.
+
+2. Install Apple's developer tools and Rust. If a pop-up window opens for the developer tools, let it
+   finish. Then close Terminal and open it again.
 
    ```bash
    xcode-select --install
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
    ```
 
-2. Download and run Polyfarmer.
+3. Download and run Polyfarmer. The first build takes a few minutes. When it finishes, Terminal prints a
+   setup link, and you continue with [First run](#first-run).
 
    ```bash
    git clone https://github.com/Vayz0001/polyfarmer.git
