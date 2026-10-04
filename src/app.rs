@@ -353,9 +353,9 @@ pub async fn run() -> Result<()> {
 /// What to tell the user when signing in to Polymarket fails. `chain` is the full error text.
 fn start_failure_hint(chain: &str) -> &'static str {
     if chain.to_ascii_lowercase().contains("certificate") {
-        "Something between this computer and Polymarket is answering with a certificate that isn't Polymarket's. \
-         That is usually an ISP or network that filters the site, a VPN or proxy, or antivirus software that scans \
-         HTTPS. Polyfarmer can't work around that."
+        "This is what it usually looks like when your country or ISP blocks Polymarket: the block answers with a \
+         certificate that isn't Polymarket's. A VPN or proxy, a company firewall or antivirus software that scans \
+         HTTPS can cause the same error. Polyfarmer can't work around a block."
     } else {
         "Usually this is a network problem: check your internet connection and any VPN, proxy or firewall. \
          Polymarket also restricts some regions and may block VPNs."
@@ -827,7 +827,10 @@ mod tests {
     #[test]
     fn start_failure_hints_distinguish_certificate_errors_from_other_network_problems() {
         let cert = "Internal: error sending request: client error (Connect): invalid peer certificate: NotValidForName";
-        assert!(super::start_failure_hint(cert).contains("certificate that isn't Polymarket's"));
+        let hint = super::start_failure_hint(cert);
+        assert!(
+            hint.contains("country or ISP blocks Polymarket") && hint.contains("certificate that isn't Polymarket's")
+        );
         let other = "Internal: error sending request for url (https://clob.polymarket.com/auth/api-key)";
         let hint = super::start_failure_hint(other);
         assert!(hint.contains("network problem") && hint.contains("VPN") && hint.contains("restricts some regions"));
