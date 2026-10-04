@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/logo.svg" alt="Polyfarmer logo" width="84" height="84">
+<img src="docs/brand/polyfarmer-mark.svg" alt="Polyfarmer logo" width="96" height="96">
 
 # Polyfarmer
 

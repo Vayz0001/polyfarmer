@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Polyfarmer logo">
+  <rect width="64" height="64" rx="14" fill="#0e1530"/>
+  <path d="M26 41C20.5 28 31 14.5 52 13.5 53.5 30 44 41 26 41Z" fill="#2ebd73"/>
+  <rect x="17" y="12" width="9" height="40" rx="4.5" fill="#4a6cf7"/>
+</svg>
