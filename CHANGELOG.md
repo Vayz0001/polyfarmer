@@ -35,6 +35,8 @@ This is everything that will be in the first public beta (0.1.0).
   the known limits. Also issue forms (bug, feature, question), a pull request template and
   `THIRD_PARTY_NOTICES.md` with the htmx and Geist font licenses.
 - CI also builds, lints and tests on Windows and macOS, not only Linux.
+- Shorter Windows install steps: one Rust installer plus a ZIP download, with no `winget` commands, no Git, no NASM
+  and no environment variable to set. CI now checks the Windows build with NASM removed.
 - Shorter, beginner-friendly macOS install steps that also cover Macs with Rust already installed (for example
   through Homebrew).
 - A logo: a blue stem with a green leaf. The dashboard shows it in the sidebar, and browser tabs have a favicon
