@@ -1104,3 +1104,22 @@ async fn oversized_free_text_and_odd_parameters_are_bounded() {
         "defaults applied"
     );
 }
+
+#[tokio::test]
+async fn a_failed_engine_start_hints_at_network_vpn_and_region_causes() {
+    use polyfarmer::types::EnginePhase;
+    let store = CredentialStore::open(unique_dir()).unwrap();
+    store.set_password("test-password-123").unwrap();
+    store.set_wallet(&format!("0x{}", "11".repeat(32)), "0x0000000000000000000000000000000000000001").unwrap();
+    let engine = empty_engine();
+    engine.try_write().unwrap().engine_phase = EnginePhase::Error;
+    let app = router(WebState::new(Arc::new(store), engine));
+    let cookie = login(&app, "test-password-123").await;
+
+    let (_, overview, _) = get_authed(&app, &cookie, "/").await;
+    assert!(
+        overview.contains("Start failed") && overview.contains("VPN") && overview.contains("restricts some regions")
+    );
+    let (_, launch, _) = get_authed(&app, &cookie, "/setup/engine-status").await;
+    assert!(launch.contains("VPN") && launch.contains("restricts some regions"), "launch screen hint");
+}

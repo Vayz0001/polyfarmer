@@ -15,7 +15,7 @@
   {% if !has_wallet %}
   <div class="alert warn"><svg class="i"><use href="#i-warn"/></svg><span>No wallet configured — the engine is idle. <a href="/setup">Add your wallet in Settings</a> to start farming.</span></div>
   {% else if st.phase_tone == "err" %}
-  <div class="alert err"><svg class="i"><use href="#i-warn"/></svg><span>Engine: {{ st.phase_label }}. Orders are not being placed — check <a href="/activity">Activity</a> and the logs.</span></div>
+  <div class="alert err"><svg class="i"><use href="#i-warn"/></svg><span>Engine: {{ st.phase_label }}. Orders are not being placed — check <a href="/activity">Activity</a> and the logs.{% if st.phase_label == "Start failed" %} Usually this is a network problem: check your internet connection and any VPN, proxy or firewall. Polymarket also restricts some regions and may block VPNs.{% endif %}</span></div>
   {% endif %}
 
   <div id="kpis" hx-get="/overview/kpis" hx-trigger="load, pf:state from:body delay:500ms, every 30s" hx-swap="innerHTML">

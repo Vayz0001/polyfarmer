@@ -190,9 +190,15 @@ pub async fn run() -> Result<()> {
         let executor = match Executor::new(creds.expose_key(), proxy_wallet, config.polygon_rpc_url.as_deref()).await {
             Ok(e) => Arc::new(e),
             Err(e) => {
-                error!("Could not authenticate with Polymarket: {}", e);
+                // `{:#}` prints the whole cause chain (DNS, connection, TLS...); the SDK's top-level text
+                // alone is just "error sending request".
+                let chain = format!("{e:#}");
+                error!("Could not authenticate with Polymarket: {chain}");
                 if !failure_alerted {
-                    alerter.error("Wallet saved, but the engine couldn't start (Polymarket auth/network). It will keep retrying — check logs.");
+                    let hint = start_failure_hint(&chain);
+                    // The terminal is where a newcomer is looking; the dashboard's Activity feed gets it too.
+                    warn!("The engine couldn't start. {hint} It keeps retrying.");
+                    alerter.error(format!("Wallet saved, but the engine couldn't start. {hint} It keeps retrying."));
                     failure_alerted = true;
                 }
                 set_phase(&state, EnginePhase::Error).await;
@@ -344,6 +350,18 @@ pub async fn run() -> Result<()> {
 // ── Boot helpers ────────────────────────────────────────────────────────────
 
 /// Set the engine phase on shared state (brief write lock, released at once).
+/// What to tell the user when signing in to Polymarket fails. `chain` is the full error text.
+fn start_failure_hint(chain: &str) -> &'static str {
+    if chain.to_ascii_lowercase().contains("certificate") {
+        "This is what it usually looks like when your country or ISP blocks Polymarket: the block answers with a \
+         certificate that isn't Polymarket's. A VPN or proxy, a company firewall or antivirus software that scans \
+         HTTPS can cause the same error. Polyfarmer can't work around a block."
+    } else {
+        "Usually this is a network problem: check your internet connection and any VPN, proxy or firewall. \
+         Polymarket also restricts some regions and may block VPNs."
+    }
+}
+
 async fn set_phase(state: &Arc<RwLock<AppState>>, phase: EnginePhase) {
     state.write().await.engine_phase = phase;
 }
@@ -805,6 +823,18 @@ mod link_tests {
 mod tests {
     use super::shutdown_signal;
     use std::time::Duration;
+
+    #[test]
+    fn start_failure_hints_distinguish_certificate_errors_from_other_network_problems() {
+        let cert = "Internal: error sending request: client error (Connect): invalid peer certificate: NotValidForName";
+        let hint = super::start_failure_hint(cert);
+        assert!(
+            hint.contains("country or ISP blocks Polymarket") && hint.contains("certificate that isn't Polymarket's")
+        );
+        let other = "Internal: error sending request for url (https://clob.polymarket.com/auth/api-key)";
+        let hint = super::start_failure_hint(other);
+        assert!(hint.contains("network problem") && hint.contains("VPN") && hint.contains("restricts some regions"));
+    }
 
     /// A SIGTERM (what a service stop sends) must wake `shutdown_signal`, so the
     /// existing cancel-open-orders shutdown path runs instead of the process
