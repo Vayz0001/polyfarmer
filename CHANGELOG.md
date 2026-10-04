@@ -35,6 +35,8 @@ This is everything that will be in the first public beta (0.1.0).
   the known limits. Also issue forms (bug, feature, question), a pull request template and
   `THIRD_PARTY_NOTICES.md` with the htmx and Geist font licenses.
 - CI also builds, lints and tests on Windows and macOS, not only Linux.
+- A logo: a blue stem with a green leaf. The dashboard shows it in the sidebar, and browser tabs have a favicon
+  and touch icon for the first time. Ready-made variants (transparent, dark blue, black) are in `docs/brand`.
 
 ### Changed
 

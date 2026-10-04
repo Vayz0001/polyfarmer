@@ -63,12 +63,13 @@ async fn login_page_renders_with_csrf() {
     let body = body_string(res).await;
     assert!(body.contains("Polyfarmer"));
     assert!(body.contains("name=\"csrf\""));
+    assert!(body.contains("rel=\"icon\" href=\"/assets/favicon.svg\""), "the page links its favicon");
 }
 
 #[tokio::test]
 async fn embedded_assets_are_served() {
     let (app, _) = test_app();
-    for path in ["/assets/app.css", "/assets/htmx.min.js"] {
+    for path in ["/assets/app.css", "/assets/htmx.min.js", "/assets/favicon.svg", "/assets/apple-touch-icon.png"] {
         let res = app.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK, "{path}");
     }
