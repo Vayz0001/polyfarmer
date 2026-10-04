@@ -166,7 +166,9 @@ The first build takes a few minutes. Later starts are instant. To update, run `g
 
 ## First run
 
-1. The first start prints a **setup code** and a link in the terminal:
+1. When it starts, the terminal prints a link. Open it in your browser and choose a password of 12 to 128
+   characters. The link already contains a one-time setup code, which proves you control the machine running
+   Polyfarmer, so nobody else can claim a fresh install before you.
 
    ```text
    First run — create your admin password:
@@ -174,8 +176,8 @@ The first build takes a few minutes. Later starts are instant. To update, run `g
      open:        http://127.0.0.1:8080/welcome?code=abcd-efgh
    ```
 
-   Open the link in your browser (or open `http://127.0.0.1:8080` and type the code) and choose a password
-   of 12 to 128 characters.
+   If you open the page without the link, it asks for the code instead. It is in the same terminal output, and
+   saved in `data/setup.code`.
 2. Go to **Settings → Wallet** and paste your private key. It is encrypted on disk, and your Polymarket
    wallet address is detected from the chain.
 3. Go to **Markets → Find markets**, pick a market that pays rewards, and start with a **small size**.
