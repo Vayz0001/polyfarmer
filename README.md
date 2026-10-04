@@ -131,21 +131,24 @@ Pick your system:
 <details>
 <summary><b>Windows 10 and 11</b></summary>
 
-1. Download and run **[rustup-init.exe](https://win.rustup.rs/x86_64)**, the Rust installer. If it offers to
-   install the Visual Studio C++ build tools, choose the quick install and accept the defaults. That is a
-   large download (several GB). When it finishes, close the window.
-
-2. Download Polyfarmer: on [its GitHub page](https://github.com/Vayz0001/polyfarmer) click
-   **Code → Download ZIP**, then unzip it. Open the unzipped folder in File Explorer, click the address bar,
-   type `powershell` and press Enter. In the window that opens, run:
+1. Open **PowerShell** (Start menu, type "PowerShell") and install Git, Rust and the C++ build tools with
+   Windows' built-in package manager, `winget`. The build tools are a large download. When it finishes, close
+   PowerShell and open it again.
 
    ```powershell
-   cargo run --release
+   winget install --id Git.Git -e
+   winget install --id Rustlang.Rustup -e
+   winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
    ```
 
-   The first build takes a few minutes. When it finishes, the window prints a setup link, and you continue
-   with [First run](#first-run). To update later, download the ZIP again. If you use Git, you can instead
-   run `git clone https://github.com/Vayz0001/polyfarmer.git`, and `git pull` to update.
+2. Download and run Polyfarmer. The first build takes a few minutes. When it finishes, PowerShell prints a
+   setup link, and you continue with [First run](#first-run).
+
+   ```powershell
+   git clone https://github.com/Vayz0001/polyfarmer.git
+   cd polyfarmer
+   cargo run --release
+   ```
 
 **Windows notes**
 
@@ -303,8 +306,8 @@ Something else is using port 8080. Set `DASHBOARD_BIND=127.0.0.1:8090` (or any f
 <details>
 <summary><b>The build fails on Windows with "link.exe not found" or a NASM error.</b></summary>
 
-Run `rustup-init.exe` again (step 1 of the Windows instructions) and let it install the C++ build tools, then
-open a new PowerShell window. A NASM error should not happen, because the project is set up to build without
+Run the third `winget` command from step 1 of the Windows instructions again, to install the C++ build tools,
+then open a new PowerShell window. A NASM error should not happen, because the project is set up to build without
 it. If you see one, please open an issue with the full error text.
 </details>
 
