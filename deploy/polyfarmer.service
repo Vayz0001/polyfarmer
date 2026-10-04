@@ -1,6 +1,8 @@
 # systemd unit for running polyfarmer on a server.
 #
 #   sudo useradd --system --create-home --home-dir /opt/polyfarmer polyfarmer
+#   sudo -u polyfarmer mkdir -m 700 /opt/polyfarmer/data   # must exist before the first start
+#                                                          # (ReadWritePaths below needs it)
 #   cargo build --release            # on the server, or build elsewhere
 #   sudo install -m 0755 target/release/polyfarmer /opt/polyfarmer/polyfarmer
 #   sudo install -m 0644 deploy/polyfarmer.service /etc/systemd/system/
