@@ -100,14 +100,25 @@ Pick your system:
 <details>
 <summary><b>macOS</b></summary>
 
-1. Install the Xcode command line tools, then [rustup](https://rustup.rs). Restart your terminal after.
+1. Open **Terminal** (press `⌘ Space`, type "Terminal") and check whether Rust is already installed:
+
+   ```bash
+   rustc --version
+   ```
+
+   If it prints a version (for example because you installed Rust with Homebrew), **skip to step 3**.
+   If it says `command not found`, do step 2.
+
+2. Install Apple's developer tools and Rust. If a pop-up window opens for the developer tools, let it
+   finish. Then close Terminal and open it again.
 
    ```bash
    xcode-select --install
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
    ```
 
-2. Download and run Polyfarmer.
+3. Download and run Polyfarmer. The first build takes a few minutes. When it finishes, Terminal prints a
+   setup link, and you continue with [First run](#first-run).
 
    ```bash
    git clone https://github.com/Vayz0001/polyfarmer.git
@@ -120,25 +131,22 @@ Pick your system:
 <details>
 <summary><b>Windows 10 and 11</b></summary>
 
-1. Open **PowerShell** and install Git, Rust and the C++ build tools with `winget`, then close and reopen
-   PowerShell so the new programs are on your path. The build tools are a large download; they include the
-   Windows SDK.
+1. Open **PowerShell** (Start menu, type "PowerShell") and install Git, Rust and the C++ build tools with
+   Windows' built-in package manager, `winget`. The build tools are a large download. When it finishes, close
+   PowerShell and open it again.
 
    ```powershell
    winget install --id Git.Git -e
    winget install --id Rustlang.Rustup -e
-   winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+   winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
    ```
 
-2. Download and run Polyfarmer. The `AWS_LC_SYS_PREBUILT_NASM` line lets the build use precompiled assembly
-   for its cryptography library, so you don't have to install [NASM](https://www.nasm.us). If you prefer to
-   build everything from source, install NASM (`winget install NASM.NASM`, then add it to your `PATH`) and
-   leave that line out.
+2. Download and run Polyfarmer. The first build takes a few minutes. When it finishes, PowerShell prints a
+   setup link, and you continue with [First run](#first-run).
 
    ```powershell
    git clone https://github.com/Vayz0001/polyfarmer.git
    cd polyfarmer
-   $env:AWS_LC_SYS_PREBUILT_NASM = "1"
    cargo run --release
    ```
 
@@ -158,7 +166,9 @@ The first build takes a few minutes. Later starts are instant. To update, run `g
 
 ## First run
 
-1. The first start prints a **setup code** and a link in the terminal:
+1. When it starts, the terminal prints a link. Open it in your browser and choose a password of 12 to 128
+   characters. The link already contains a one-time setup code, which proves you control the machine running
+   Polyfarmer, so nobody else can claim a fresh install before you.
 
    ```text
    First run — create your admin password:
@@ -166,8 +176,8 @@ The first build takes a few minutes. Later starts are instant. To update, run `g
      open:        http://127.0.0.1:8080/welcome?code=abcd-efgh
    ```
 
-   Open the link in your browser (or open `http://127.0.0.1:8080` and type the code) and choose a password
-   of 12 to 128 characters.
+   If you open the page without the link, it asks for the code instead. It is in the same terminal output, and
+   saved in `data/setup.code`.
 2. Go to **Settings → Wallet** and paste your private key. It is encrypted on disk, and your Polymarket
    wallet address is detected from the chain.
 3. Go to **Markets → Find markets**, pick a market that pays rewards, and start with a **small size**.
@@ -298,8 +308,9 @@ Something else is using port 8080. Set `DASHBOARD_BIND=127.0.0.1:8090` (or any f
 <details>
 <summary><b>The build fails on Windows with "link.exe not found" or a NASM error.</b></summary>
 
-Install the C++ build tools from step 1 of the Windows instructions, then close and reopen PowerShell. For a
-NASM error, set `$env:AWS_LC_SYS_PREBUILT_NASM = "1"` before running `cargo`, or install NASM.
+Run the third `winget` command from step 1 of the Windows instructions again, to install the C++ build tools,
+then open a new PowerShell window. A NASM error should not happen, because the project is set up to build without
+it. If you see one, please open an issue with the full error text.
 </details>
 
 <details>

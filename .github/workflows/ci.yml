@@ -64,9 +64,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-    env:
-      # Windows: use the precompiled assembly for aws-lc-sys instead of requiring NASM (see README).
-      AWS_LC_SYS_PREBUILT_NASM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,6 +73,16 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # The runner image has NASM installed; a fresh Windows machine does not. Remove it and rebuild the
+      # crypto library, so this job proves the build works the way a new user's does (see .cargo/config.toml).
+      - name: Remove NASM (behave like a fresh Windows machine)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-Command nasm -All -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -LiteralPath $_.Source -Force }
+          if (Get-Command nasm -ErrorAction SilentlyContinue) { throw "nasm is still on PATH" }
+          cargo clean -p aws-lc-sys
 
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
