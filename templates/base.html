@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{% block title %}{% endblock %} · polyfarmer</title>
+  <title>{% block title %}{% endblock %} · Polyfarmer</title>
   <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false}' />
   <script src="/assets/theme.js"></script>
   <link rel="stylesheet" href="/assets/app.css" />
@@ -14,7 +14,7 @@
   {% include "_icons.html" %}
   <div class="app">
     <aside class="sidebar">
-      <a class="brand" href="/"><svg class="logo"><use href="#i-logo"/></svg>polyfarmer</a>
+      <a class="brand" href="/"><svg class="logo"><use href="#i-logo"/></svg>Polyfarmer</a>
       <nav class="nav">
         <a href="/" class="{% if shell.active == "overview" %}active{% endif %}"><svg class="i"><use href="#i-overview"/></svg>Overview</a>
         <a href="/markets" class="{% if shell.active == "markets" %}active{% endif %}"><svg class="i"><use href="#i-markets"/></svg>Markets</a>

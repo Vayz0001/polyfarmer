@@ -52,7 +52,7 @@ pub async fn run() -> Result<()> {
         .init();
 
     info!("================================");
-    info!("   polyfarmer starting");
+    info!("   Polyfarmer starting");
     info!("================================");
 
     let config = Arc::new(Config::from_env()?);

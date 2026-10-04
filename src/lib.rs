@@ -1,4 +1,4 @@
-//! polyfarmer — self-hosted Polymarket LP-rewards bot.
+//! Polyfarmer — self-hosted Polymarket LP-rewards bot.
 //!
 //! Single binary: the trading [`engine`] and the [`web`] dashboard run together
 //! in one process. Exposed as a library so the router and engine are testable.
