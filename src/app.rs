@@ -190,9 +190,15 @@ pub async fn run() -> Result<()> {
         let executor = match Executor::new(creds.expose_key(), proxy_wallet, config.polygon_rpc_url.as_deref()).await {
             Ok(e) => Arc::new(e),
             Err(e) => {
-                error!("Could not authenticate with Polymarket: {}", e);
+                // `{:#}` prints the whole cause chain (DNS, connection, TLS...); the SDK's top-level text
+                // alone is just "error sending request".
+                error!("Could not authenticate with Polymarket: {e:#}");
                 if !failure_alerted {
-                    alerter.error("Wallet saved, but the engine couldn't start (Polymarket auth/network). It will keep retrying — check logs.");
+                    alerter.error(
+                        "Wallet saved, but the engine couldn't start. Usually this is a network problem: check your \
+                         internet connection and any VPN, proxy or firewall. Polymarket also restricts some regions \
+                         and may block VPNs. It keeps retrying; details are in the log.",
+                    );
                     failure_alerted = true;
                 }
                 set_phase(&state, EnginePhase::Error).await;

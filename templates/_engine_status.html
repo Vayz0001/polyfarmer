@@ -1,6 +1,6 @@
 {% if failed %}
 <div id="engine-status" class="stack pf-rise" data-launch-failed>
-  <div class="alert err">The engine couldn't start (Polymarket auth or network). It keeps retrying — check the logs.</div>
+  <div class="alert err">The engine couldn't start. Usually this is a network problem: check your internet connection and any VPN, proxy or firewall. Polymarket also restricts some regions and may block VPNs. It keeps retrying; details are in the log.</div>
   <a class="btn" href="/setup">Back to Settings</a>
 </div>
 {% else %}

@@ -310,6 +310,26 @@ Debian and Ubuntu).
 </details>
 
 <details>
+<summary><b>The engine says "Start failed" and the terminal shows "error sending request".</b></summary>
+
+Polyfarmer couldn't sign in to Polymarket. It keeps retrying, and saving your wallet again retries
+straight away. The usual causes, most likely first:
+
+- **A network problem.** No connection, a firewall, a proxy, or DNS trouble. From the same computer, run
+  `curl https://clob.polymarket.com/time` (on Windows use `curl.exe`). If that prints a number, your connection
+  to Polymarket works; if it hangs or fails, the problem is your network, not Polyfarmer.
+- **A VPN or proxy.** Some are blocked by Polymarket, and some slow or break the connection. Turn it off and try
+  again.
+- **Your region.** Polymarket restricts trading from some countries. Polyfarmer can't change that. Check the
+  restrictions on polymarket.com, and be aware that using a VPN to reach a service from a restricted region can
+  break its rules.
+- **A wrong key or address.** If the terminal shows a message from Polymarket instead of "error sending
+  request", check the private key and wallet address in **Settings → Wallet**.
+
+The terminal shows the full error text. Include it (with any keys and addresses removed) if you open an issue.
+</details>
+
+<details>
 <summary><b>An order filled. What now?</b></summary>
 
 When a resting bid fills, you own that position. Polyfarmer does not sell or hedge it for you; you see it
