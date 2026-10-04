@@ -1,0 +1,29 @@
+name: Question
+description: Ask how something works or get help using Polyfarmer
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the [FAQ in the README](https://github.com/Vayz0001/polyfarmer#faq-and-troubleshooting) and existing issues first.
+
+        Do not paste private keys, the setup code, or files from `data/`.
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like to know?
+      description: Say what you are trying to do, what you tried, and what happened.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Windows (WSL)
+        - Other
+    validations:
+      required: false
