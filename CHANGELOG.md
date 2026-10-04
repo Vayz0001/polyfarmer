@@ -31,8 +31,8 @@ This is everything that will be in the first public beta (0.1.0).
   advisory has a written reason and review date.
 - `.env.example` as the one documented list of settings, with a test that keeps it in step with the code.
 - `SECURITY.md`, `CONTRIBUTING.md` and this changelog.
-- When the engine can't start, the dashboard and activity feed now say it is usually a network, VPN or regional
-  restriction problem, and the terminal logs the full error. The README FAQ explains how to check.
+- When the engine can't start, the terminal, the dashboard and the activity feed now say it is usually a network,
+  VPN or regional-block problem, and the terminal logs the full error.
 - A fuller README: install steps for Linux, macOS and Windows, a first-run guide, screenshots, an FAQ and
   the known limits. Also issue forms (bug, feature, question), a pull request template and
   `THIRD_PARTY_NOTICES.md` with the htmx and Geist font licenses.
