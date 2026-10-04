@@ -1,0 +1,88 @@
+name: Bug report
+description: Something is broken or behaves differently than documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **Security problem?** Do not post it here. Use [private vulnerability reporting](https://github.com/Vayz0001/polyfarmer/security/advisories/new) instead.
+
+        **Never paste** private keys, the setup code, `data/` files, session cookies, or logs you have not read through first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead? Screenshots help.
+      placeholder: "I added a market with distance 2c, expected a resting order, but ..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to Markets, then Find markets
+        2. ...
+    validations:
+      required: false
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Windows (WSL)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: how-run
+    attributes:
+      label: How do you run Polyfarmer?
+      options:
+        - From source in a terminal (cargo run)
+        - As a systemd service
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Run `git rev-parse --short HEAD` in the project folder, or give the release version.
+      placeholder: "a1b2c3d"
+    validations:
+      required: true
+  - type: dropdown
+    id: access
+    attributes:
+      label: How do you open the dashboard?
+      options:
+        - Directly on the same machine (http://127.0.0.1:8080)
+        - Tailscale Serve
+        - SSH tunnel
+        - Reverse proxy
+        - Other
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: The terminal or `journalctl -u polyfarmer` lines around the problem. Remove anything private first.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and read the FAQ in the README.
+          required: true
+        - label: I removed private keys, setup codes and other secrets from everything I pasted.
+          required: true

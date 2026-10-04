@@ -61,7 +61,7 @@ async fn login_page_renders_with_csrf() {
     let res = app.oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_string(res).await;
-    assert!(body.contains("polyfarmer"));
+    assert!(body.contains("Polyfarmer"));
     assert!(body.contains("name=\"csrf\""));
 }
 

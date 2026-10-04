@@ -1,9 +1,9 @@
 # Changelog
 
-All notable changes to polyfarmer are recorded here. The format follows
+All notable changes to Polyfarmer are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions will follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once releases are tagged. While
-polyfarmer is in beta (0.x), anything may change between releases.
+Polyfarmer is in beta (0.x), anything may change between releases.
 
 ## [Unreleased]
 
@@ -31,6 +31,15 @@ This is everything that will be in the first public beta (0.1.0).
   advisory has a written reason and review date.
 - `.env.example` as the one documented list of settings, with a test that keeps it in step with the code.
 - `SECURITY.md`, `CONTRIBUTING.md` and this changelog.
+- A fuller README: install steps for Linux, macOS and Windows, a first-run guide, screenshots, an FAQ and
+  the known limits. Also issue forms (bug, feature, question), a pull request template and
+  `THIRD_PARTY_NOTICES.md` with the htmx and Geist font licenses.
+- CI also builds, lints and tests on Windows and macOS, not only Linux.
+
+### Changed
+
+- The name is written "Polyfarmer" in the dashboard and documentation; the program, crate and commands
+  stay lowercase (`polyfarmer`).
 
 ### Security
 

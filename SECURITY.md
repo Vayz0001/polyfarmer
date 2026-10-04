@@ -1,6 +1,6 @@
 # Security policy
 
-polyfarmer holds a Polymarket wallet key and places real orders, so security reports are taken
+Polyfarmer holds a Polymarket wallet key and places real orders, so security reports are taken
 seriously. Thank you for helping keep its users safe.
 
 ## Reporting a vulnerability
@@ -24,7 +24,7 @@ please tell me how to send it"*, with no details, and the maintainer will arrang
 
 ## What to expect
 
-polyfarmer is maintained by one person, so these are goals, not guarantees:
+Polyfarmer is maintained by one person, so these are goals, not guarantees:
 
 - an acknowledgement within **7 days**;
 - an initial assessment (accepted, need more information, or not a vulnerability) within **14 days**;
@@ -35,7 +35,7 @@ polyfarmer is maintained by one person, so these are goals, not guarantees:
 
 ## Supported versions
 
-polyfarmer is in beta. Only the latest release, and the current `main` branch, receive security
+Polyfarmer is in beta. Only the latest release, and the current `main` branch, receive security
 fixes. If you run an older version, update first.
 
 ## Scope
@@ -52,7 +52,7 @@ In scope, anything that lets someone who is *not* the owner:
 - crash or exhaust the process through the dashboard, such as unbounded memory growth or a request
   that panics a handler.
 
-Also in scope: a vulnerable or malicious dependency that is actually reachable in polyfarmer.
+Also in scope: a vulnerable or malicious dependency that is actually reachable in Polyfarmer.
 
 ## Out of scope
 
@@ -82,7 +82,7 @@ you act in good faith, test only against your own installation and wallet (use `
 --example serve` where you can), do not access or modify anyone else's data or funds, and give me a
 reasonable chance to fix the problem before disclosing it.
 
-## How polyfarmer protects you
+## How Polyfarmer protects you
 
 The measures in place are listed under "Security notes" in the [README](README.md): encrypted wallet
 at rest, owner-only files, argon2 passwords, per-source login throttling, bounded server-side sessions,
@@ -90,7 +90,7 @@ CSRF protection, a strict Content-Security-Policy, input validation, panic conta
 systemd unit. [`deny.toml`](deny.toml) holds the dependency policy, and every accepted advisory in it
 has a written reason and a review date.
 
-If you run polyfarmer yourself:
+If you run Polyfarmer yourself:
 
 - keep the dashboard on loopback and use Tailscale Serve, an SSH tunnel or an HTTPS proxy for remote
   access, with `DASHBOARD_SECURE_COOKIES=true` once it is served over HTTPS;

@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest an improvement or a new capability
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem you want solved first; a solution can follow. Changes to how orders are priced, placed or cancelled move real money, so they are discussed here before anyone writes code.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      placeholder: "When X happens, I have to Y by hand ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+    validations:
+      required: false
+  - type: dropdown
+    id: trading
+    attributes:
+      label: Would this change trading behaviour?
+      description: Pricing, when orders are placed, replaced or cancelled, or the protection settings.
+      options:
+        - "No (dashboard, docs, setup or tooling)"
+        - "Yes (affects orders)"
+        - "Not sure"
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would be willing to work on this and open a pull request.
+          required: false

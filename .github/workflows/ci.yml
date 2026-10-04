@@ -54,6 +54,35 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
+  # The same build, lints and tests on the other systems we support. Kept as its own job
+  # (not a matrix on the one above) so the required check name above never changes.
+  platforms:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    env:
+      # Windows: use the precompiled assembly for aws-lc-sys instead of requiring NASM (see README).
+      AWS_LC_SYS_PREBUILT_NASM: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust (stable)
+        run: rustup toolchain install stable --profile minimal --component clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
+
   dependencies:
     name: Dependency policy (cargo-deny)
     runs-on: ubuntu-latest
