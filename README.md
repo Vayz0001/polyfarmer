@@ -11,8 +11,9 @@
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](#install)
 [![Status: beta](https://img.shields.io/badge/status-beta-yellow.svg)](#project-status)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/DEsbgyxC3z)
 
-[Install](#install) · [First run](#first-run) · [Remote access](#reaching-the-dashboard-remotely) · [Security](#security) · [FAQ](#faq-and-troubleshooting) · [Contributing](CONTRIBUTING.md)
+[Install](#install) · [First run](#first-run) · [Remote access](#reaching-the-dashboard-remotely) · [Security](#security) · [FAQ](#faq-and-troubleshooting) · [Contributing](CONTRIBUTING.md) · [Discord](https://discord.gg/DEsbgyxC3z)
 
 <img src="docs/screenshots/markets.png" alt="The Polyfarmer dashboard: your markets with live status, distance from the midpoint and reward score" width="860">
 
@@ -338,13 +339,12 @@ between releases (see the [changelog](CHANGELOG.md)). Known limits today:
   outside 10 to 90 cents. The dashboard shows your reward weight before you start.
 - It runs from source. Prebuilt downloads and Docker images are not available yet.
 
-## Contributing
+## Community & Contributing
 
-Bug reports, ideas and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first; it
-covers setup on Linux, macOS and Windows, the checks every change must pass, and how to propose changes to
-trading behaviour. Found a security problem? Please follow [SECURITY.md](SECURITY.md) instead of opening a
-public issue.
+Support and discussion happen on our **[Discord Server](https://discord.gg/DEsbgyxC3z)**.
 
+Bug reports, ideas, and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first; it
+covers setup on Linux, macOS, and Windows, the checks every change must pass, and our PR review process (tagging maintainers on Discord for review). Found a security problem? Please follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
 ## License and credits
 
 Released under the [MIT license](LICENSE). The dashboard uses [htmx](https://htmx.org) and the
