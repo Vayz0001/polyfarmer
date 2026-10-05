@@ -1,0 +1,777 @@
+#!/usr/bin/env python3
+"""
+scripts/seed_hacktoberfest_issues.py
+Generates and seeds a 100-issue backlog across Easy, Medium, and Hard difficulty tiers
+for Hacktoberfest and open-source community contributors.
+
+Usage:
+  python scripts/seed_hacktoberfest_issues.py --json          # Outputs issues.json
+  python scripts/seed_hacktoberfest_issues.py --dry-run       # Previews all 100 issues
+  python scripts/seed_hacktoberfest_issues.py --submit        # Creates them on GitHub via `gh issue create`
+"""
+
+import argparse
+import json
+import subprocess
+import sys
+
+ISSUES = [
+    # ── TIER 1: EASY / GOOD FIRST ISSUE (1 - 35) ──────────────────────────────
+    {
+        "id": 1,
+        "title": "docs: add dark mode screenshot gallery to README",
+        "difficulty": "easy",
+        "labels": ["good first issue", "documentation", "hacktoberfest"],
+        "body": "### Problem\nThe README currently contains one screenshot of the markets table. Newcomers want to preview the live orderbook ladder, positions, and rewards charts before installing.\n\n### Proposal\nCapture crisp webp/png screenshots from demo mode (`DEMO=1 cargo run --example serve`) for `/positions`, `/rewards`, and `/markets/view` and add them to a dedicated gallery table in `README.md`.\n\n### Acceptance Criteria\n- Screenshots stored in `docs/screenshots/`\n- README displays table with preview thumbnails"
+    },
+    {
+        "id": 2,
+        "title": "ui: add keyboard shortcut '/' to focus market URL search bar",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nNavigating to the search bar on `/markets` requires moving the cursor and clicking the text input.\n\n### Proposal\nAdd a global keydown event listener in `assets/app.js` so pressing `/` (when not already typing in an input) automatically focuses `#url-input`.\n\n### Acceptance Criteria\n- Pressing `/` focuses the search bar\n- Typing inside inputs/textareas does not trigger the shortcut"
+    },
+    {
+        "id": 3,
+        "title": "ui: add copy-to-clipboard button for wallet proxy address",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nIn Settings -> Wallet, users must manually select and copy their detected Polymarket proxy address.\n\n### Proposal\nAdd a small copy icon button next to the address in `templates/setup.html` using the native Clipboard API with temporary visual feedback ('✓ Copied').\n\n### Acceptance Criteria\n- Clicking button copies address to clipboard\n- Brief tooltip indicates success"
+    },
+    {
+        "id": 4,
+        "title": "docs: add Windows PowerShell command examples to README",
+        "difficulty": "easy",
+        "labels": ["good first issue", "documentation", "hacktoberfest"],
+        "body": "### Problem\nSeveral command snippets in the README use Unix syntax (`export VAR=val`), which fails on Windows PowerShell.\n\n### Proposal\nInclude PowerShell equivalents (`$env:VAR = 'val'`) alongside bash commands in the setup and troubleshooting sections.\n\n### Acceptance Criteria\n- Windows tab in README displays PowerShell syntax"
+    },
+    {
+        "id": 5,
+        "title": "ui: replace anchor tags in group pause/resume with buttons to prevent scroll jumps",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "bug", "hacktoberfest"],
+        "body": "### Problem\nClicking 'pause both' in `templates/_markets_table.html` navigates to `<a href='#'>`, causing the browser viewport to jump abruptly to the top of the page.\n\n### Proposal\nReplace `<a href='#'>` with `<button type='button' class='btn-link'>` so HTMX executes the action without altering scroll position.\n\n### Acceptance Criteria\n- Clicking pause/resume maintains exact scroll position\n- URL fragment remains unchanged"
+    },
+    {
+        "id": 6,
+        "title": "ui: add tooltip explaining tick-snapping on market view",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nNew users are confused when their entered order price is automatically adjusted down to the nearest market tick.\n\n### Proposal\nAdd an info tooltip icon next to the Price input in `templates/market_view.html` explaining that bids are snapped to the contract's tick size.\n\n### Acceptance Criteria\n- Tooltip displays contract tick size and explains downward snapping"
+    },
+    {
+        "id": 7,
+        "title": "fix: add missing 15-second auto-refresh trigger to positions page",
+        "difficulty": "easy",
+        "labels": ["good first issue", "bug", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\n`templates/positions.html` claims 'refreshed every 15s' in the header, but `#pos-body` lacks the HTMX polling interval attribute.\n\n### Proposal\nUpdate `#pos-body` in `templates/positions.html` to `hx-trigger='load, pf:state from:body, every 15s'`.\n\n### Acceptance Criteria\n- Positions table refreshes every 15 seconds without full page reload"
+    },
+    {
+        "id": 8,
+        "title": "docs: document all HTTP security headers and CSP policy in SECURITY.md",
+        "difficulty": "easy",
+        "labels": ["good first issue", "documentation", "security", "hacktoberfest"],
+        "body": "### Problem\n`SECURITY.md` mentions that hardening headers exist, but does not document the exact CSP directives or HSTS behavior.\n\n### Proposal\nDocument the CSP directives, frame-ancestors, X-Content-Type-Options, and cookie security flags in `SECURITY.md`.\n\n### Acceptance Criteria\n- Clear table of all applied security headers and their defense rationale"
+    },
+    {
+        "id": 9,
+        "title": "ui: display active market count badge in sidebar navigation",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nThe sidebar link for 'Markets' does not show how many markets are currently active.\n\n### Proposal\nAdd a numeric badge next to 'Markets' in `templates/base.html` displaying `{{ active_market_count }}`.\n\n### Acceptance Criteria\n- Badge shows total tracked markets count\n- Updates dynamically with HTMX state refreshes"
+    },
+    {
+        "id": 10,
+        "title": "test: add unit test verifying snap_to_tick behavior on sub-cent ticks",
+        "difficulty": "easy",
+        "labels": ["good first issue", "testing", "engine", "hacktoberfest"],
+        "body": "### Problem\n`TokenBook::snap_to_tick` is tested on 0.01 tick sizes, but lacks coverage for 0.001 or 0.005 ticks.\n\n### Proposal\nAdd test cases in `src/engine/orderbook.rs` verifying sub-cent tick rounding.\n\n### Acceptance Criteria\n- Unit tests pass with `cargo test orderbook`"
+    },
+    {
+        "id": 11,
+        "title": "ui: highlight current route in mobile navigation drawer",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nOn mobile viewports, the active page does not have an active styling state in the slide-out navigation.\n\n### Proposal\nApply `.active` class to matching route item in mobile drawer navigation.\n\n### Acceptance Criteria\n- Active route visually highlighted on mobile viewports"
+    },
+    {
+        "id": 12,
+        "title": "docs: add troubleshooting guide for 'Address already in use' error",
+        "difficulty": "easy",
+        "labels": ["good first issue", "documentation", "hacktoberfest"],
+        "body": "### Problem\nUsers running other services on port 8080 encounter startup errors.\n\n### Proposal\nAdd an FAQ entry explaining how to set `DASHBOARD_BIND=127.0.0.1:8090` in `.env`.\n\n### Acceptance Criteria\n- FAQ entry explains port conflicts and environment overrides"
+    },
+    {
+        "id": 13,
+        "title": "ui: add clear button to search input in market browse view",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nClearing the filter keyword on `/markets/browse` requires manually backspacing.\n\n### Proposal\nAdd a clickable '×' clear button inside the search field that clears text and triggers immediate filter update.\n\n### Acceptance Criteria\n- Clicking '×' clears query and refreshes results table"
+    },
+    {
+        "id": 14,
+        "title": "fix: correct broken intra-doc links in rustdoc comments",
+        "difficulty": "easy",
+        "labels": ["good first issue", "rust", "documentation", "hacktoberfest"],
+        "body": "### Problem\n`cargo doc` generates warnings for `src/wallet_detect.rs:227` and `src/web/dashboard.rs:1`.\n\n### Proposal\nFix intra-doc link references to resolve cleanly without warnings.\n\n### Acceptance Criteria\n- `cargo doc --no-deps -D warnings` completes with 0 warnings"
+    },
+    {
+        "id": 15,
+        "title": "ui: format large numbers with commas in rewards history table",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nVolumes and share counts over 1,000 are rendered as plain unformatted digits (e.g. 154200).\n\n### Proposal\nAdd a number formatting helper to format integers with thousands separators (154,200).\n\n### Acceptance Criteria\n- Tables format thousands with commas"
+    },
+    {
+        "id": 16,
+        "title": "ui: add animated spinner to login submission button",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nArgon2 password verification takes 200–500ms; during this time the login button shows no loading state.\n\n### Proposal\nUse HTMX class toggle `.htmx-request` to show a small CSS spinner on the button during submit.\n\n### Acceptance Criteria\n- Button shows loading state while form submits"
+    },
+    {
+        "id": 17,
+        "title": "test: add integration test for invalid session cookie rejection",
+        "difficulty": "easy",
+        "labels": ["good first issue", "testing", "hacktoberfest"],
+        "body": "### Problem\n`tests/web.rs` tests valid logins, but does not explicitly assert that an arbitrary cookie string redirects to `/login`.\n\n### Proposal\nAdd test asserting `Cookie: id=garbage` returns `303 See Other` to `/login`.\n\n### Acceptance Criteria\n- Test passes in `cargo test --test web`"
+    },
+    {
+        "id": 18,
+        "title": "docs: add architecture diagram to CONTRIBUTING.md",
+        "difficulty": "easy",
+        "labels": ["good first issue", "documentation", "hacktoberfest"],
+        "body": "### Problem\nNew contributors must read multiple files to understand how the web server, quoter, and executor interact.\n\n### Proposal\nAdd a clear Mermaid ASCII/flowchart diagram in `CONTRIBUTING.md` showing system components.\n\n### Acceptance Criteria\n- Diagram rendered cleanly in GitHub Markdown"
+    },
+    {
+        "id": 19,
+        "title": "ui: display connection latency indicator in status strip",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nThe status strip shows 'Feed Live', but does not indicate WebSocket ping latency.\n\n### Proposal\nDisplay ping round-trip time in milliseconds next to heartbeat status.\n\n### Acceptance Criteria\n- Status strip shows `Ping: XXms`"
+    },
+    {
+        "id": 20,
+        "title": "ui: add link to Polymarket event page from tracked market label",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nIn `/markets`, clicking the title opens the internal view, but there is no direct link to the external Polymarket event.\n\n### Proposal\nAdd an external link icon next to market titles pointing to `polymarket.com/event/...`.\n\n### Acceptance Criteria\n- External link opens Polymarket event in new tab with `rel='noopener noreferrer'`"
+    },
+    {
+        "id": 21,
+        "title": "docs: document environment variables table in README",
+        "difficulty": "easy",
+        "labels": ["good first issue", "documentation", "hacktoberfest"],
+        "body": "### Problem\nREADME mentions `.env.example`, but does not provide an inline reference table of key configuration variables.\n\n### Proposal\nAdd a Markdown table documenting `DASHBOARD_BIND`, `DATA_DIR`, `POLYGON_RPC_URL`, and `DASHBOARD_SECURE_COOKIES`.\n\n### Acceptance Criteria\n- Complete config table in README"
+    },
+    {
+        "id": 22,
+        "title": "ui: add confirm prompt before removing a market",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nClicking the trash icon immediately sends `hx-delete`, which can be clicked accidentally.\n\n### Proposal\nAdd `hx-confirm='Remove this market and cancel active orders?'` to the delete button.\n\n### Acceptance Criteria\n- Browser shows confirmation dialog before deletion"
+    },
+    {
+        "id": 23,
+        "title": "test: add test asserting CSRF failure on missing token",
+        "difficulty": "easy",
+        "labels": ["good first issue", "testing", "security", "hacktoberfest"],
+        "body": "### Problem\nVerify that state-changing POST requests without a CSRF parameter are rejected.\n\n### Proposal\nAdd integration test in `tests/web.rs` asserting 400 or redirection on POST without `csrf`.\n\n### Acceptance Criteria\n- Integration test passes"
+    },
+    {
+        "id": 24,
+        "title": "ui: add empty-state illustration when zero markets are tracked",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nWhen no markets are tracked, `/markets` renders an empty table body without guidance.\n\n### Proposal\nRender an empty-state message with an 'Add your first market' button when `configs.is_empty()`.\n\n### Acceptance Criteria\n- Empty state renders when market list is empty"
+    },
+    {
+        "id": 25,
+        "title": "docs: add guide for running behind Caddy reverse proxy",
+        "difficulty": "easy",
+        "labels": ["good first issue", "documentation", "hacktoberfest"],
+        "body": "### Problem\nREADME mentions Caddy but does not provide an example `Caddyfile` configuration.\n\n### Proposal\nAdd a brief Caddyfile snippet with `reverse_proxy 127.0.0.1:8080` in `README.md`.\n\n### Acceptance Criteria\n- Valid Caddy snippet in documentation"
+    },
+    {
+        "id": 26,
+        "title": "ui: add export activity log button as CSV",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "feature", "hacktoberfest"],
+        "body": "### Problem\nOperators troubleshooting order history must manually read `alerts.json` on disk.\n\n### Proposal\nAdd an 'Export CSV' button on `/activity` that downloads recent alerts as a CSV file.\n\n### Acceptance Criteria\n- CSV download triggers with timestamp, level, and message columns"
+    },
+    {
+        "id": 27,
+        "title": "test: verify that health status returns 200 OK without auth",
+        "difficulty": "easy",
+        "labels": ["good first issue", "testing", "hacktoberfest"],
+        "body": "### Problem\nContainer orchestrators need an unauthenticated health check probe.\n\n### Proposal\nAdd test asserting `/health` returns 200 OK without requiring a session cookie.\n\n### Acceptance Criteria\n- Health probe verified in integration test"
+    },
+    {
+        "id": 28,
+        "title": "ui: show estimated daily earnings in rewards header",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nThe rewards header shows 7-day total, but not the current run-rate.\n\n### Proposal\nCalculate 7-day daily average and display `~$X.XX / day` next to total.\n\n### Acceptance Criteria\n- Estimated daily average displayed in rewards overview"
+    },
+    {
+        "id": 29,
+        "title": "docs: add systemd service troubleshooting guide",
+        "difficulty": "easy",
+        "labels": ["good first issue", "documentation", "hacktoberfest"],
+        "body": "### Problem\nUsers deploying the systemd service may encounter permission errors with `data/`.\n\n### Proposal\nAdd a section explaining `journalctl -u polyfarmer -f` and directory ownership.\n\n### Acceptance Criteria\n- Clear troubleshooting steps documented"
+    },
+    {
+        "id": 30,
+        "title": "ui: preserve selected sort column across browse pagination",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nPaging through markets browse resets sort order to default.\n\n### Proposal\nInclude current `order_by` and `position` query parameters in pagination URLs.\n\n### Acceptance Criteria\n- Paginating preserves active sort column"
+    },
+    {
+        "id": 31,
+        "title": "fix: sanitize user-entered market URLs before resolving",
+        "difficulty": "easy",
+        "labels": ["good first issue", "bug", "hacktoberfest"],
+        "body": "### Problem\nPasting a URL with trailing whitespace or query parameters (`?r=1`) can fail slug extraction.\n\n### Proposal\nTrim whitespace and strip URL query strings before extracting event slugs in `gamma_resolve.rs`.\n\n### Acceptance Criteria\n- URL with query params resolves correctly"
+    },
+    {
+        "id": 32,
+        "title": "ui: add color-coded badge for order distance from midpoint",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nIn `/markets`, distance from mid is rendered as plain text.\n\n### Proposal\nRender green badge if within optimal reward zone (≤ 2.5¢), yellow if moderate, red if > 5¢.\n\n### Acceptance Criteria\n- Color-coded badges displayed in market table"
+    },
+    {
+        "id": 33,
+        "title": "docs: document demo mode environment variables in .env.example",
+        "difficulty": "easy",
+        "labels": ["good first issue", "documentation", "hacktoberfest"],
+        "body": "### Problem\n`DEMO_WALLET` is supported by `examples/serve.rs`, but not documented in `.env.example`.\n\n### Proposal\nAdd `DEMO_WALLET` documentation in `.env.example`.\n\n### Acceptance Criteria\n- Variable documented with description in `.env.example`"
+    },
+    {
+        "id": 34,
+        "title": "ui: add version number display in dashboard footer",
+        "difficulty": "easy",
+        "labels": ["good first issue", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nUsers reporting issues cannot easily verify which binary version is running.\n\n### Proposal\nRender `v{{ env!('CARGO_PKG_VERSION') }}` in the dashboard sidebar footer.\n\n### Acceptance Criteria\n- Current crate version displayed in footer"
+    },
+    {
+        "id": 35,
+        "title": "test: add test asserting strict Content-Security-Policy headers",
+        "difficulty": "easy",
+        "labels": ["good first issue", "testing", "security", "hacktoberfest"],
+        "body": "### Problem\nEnsure no regression introduces `unsafe-eval` into the CSP header.\n\n### Proposal\nAssert in `tests/web.rs` that `script-src` does not contain `unsafe-eval` or `unsafe-inline`.\n\n### Acceptance Criteria\n- Test passes and verifies strict CSP"
+    },
+
+    # ── TIER 2: MEDIUM / CORE FEATURES & TOOLING (36 - 75) ────────────────────
+    {
+        "id": 36,
+        "title": "feat: multi-stage distroless Dockerfile and docker-compose.yml",
+        "difficulty": "medium",
+        "labels": ["enhancement", "docker", "deployment", "hacktoberfest"],
+        "body": "### Problem\nPolyfarmer currently runs only from source. Operators want a containerized deployment.\n\n### Proposal\nCreate a multi-stage Dockerfile (`cargo-chef` cache stage + `gcr.io/distroless/cc-debian12`) running as unprivileged UID 10001 with `/data` volume.\n\n### Acceptance Criteria\n- `docker build` succeeds\n- Container boots with `DEMO=1` cleanly"
+    },
+    {
+        "id": 37,
+        "title": "feat: backfill missing daily reward snapshots after downtime",
+        "difficulty": "medium",
+        "labels": ["enhancement", "rewards", "hacktoberfest"],
+        "body": "### Problem\n`maybe_snapshot` in `src/rewards/history.rs` only checks `yesterday`. If offline for 48+ hours, intervening days are lost.\n\n### Proposal\nOn boot, inspect latest snapshot date and query missing days up to 14 days backwards.\n\n### Acceptance Criteria\n- History gaps are automatically backfilled on startup"
+    },
+    {
+        "id": 38,
+        "title": "feat: pre-validate complementary leg distance on both-sides farming",
+        "difficulty": "medium",
+        "labels": ["enhancement", "engine", "safety", "hacktoberfest"],
+        "body": "### Problem\nIn both-sides placement, if Leg B's best bid is smaller than the entered distance, target price is ≤ 0 and quoting silently deadlocks.\n\n### Proposal\nValidate in `start_farming` that `best_bid_b > distance`. If false, return descriptive validation error.\n\n### Acceptance Criteria\n- Both-sides form rejects distance larger than opposite bid"
+    },
+    {
+        "id": 39,
+        "title": "feat: add timeout recovery to OrderStatus::Placing",
+        "difficulty": "medium",
+        "labels": ["bug", "engine", "reliability", "hacktoberfest"],
+        "body": "### Problem\nIf an HTTP place call hangs indefinitely, `OrderStatus::Placing` has no timeout handler and freezes quoting permanently.\n\n### Proposal\nAdd `since: Instant` to `OrderStatus::Placing` and recover to `Idle` after 30 seconds if unresolved.\n\n### Acceptance Criteria\n- Stuck placing status recovers to `Idle` after 30s timeout"
+    },
+    {
+        "id": 40,
+        "title": "feat: offline mock RPC tests for wallet detection fallback",
+        "difficulty": "medium",
+        "labels": ["testing", "rpc", "hacktoberfest"],
+        "body": "### Problem\n`src/wallet_detect.rs` tests offline ABI encoding, but does not test RPC network fallback or timeout budgets.\n\n### Proposal\nAdd integration tests with mock HTTP responses simulating 429 rate limits and fallback across RPC URLs.\n\n### Acceptance Criteria\n- Mock test exercises fallback list within timeout budget"
+    },
+    {
+        "id": 41,
+        "title": "feat: add webhook notification support for critical alerts (Discord/Telegram)",
+        "difficulty": "medium",
+        "labels": ["feature", "alerts", "hacktoberfest"],
+        "body": "### Problem\nOperators must monitor the dashboard to notice WebSocket drops or auto-pause events.\n\n### Proposal\nAdd optional `WEBHOOK_URL` environment variable in `config.rs` to post `AlertLevel::Warn` and `Error` events.\n\n### Acceptance Criteria\n- Critical alerts post JSON payload to configured webhook"
+    },
+    {
+        "id": 42,
+        "title": "feat: launchd service configuration for macOS background daemon",
+        "difficulty": "medium",
+        "labels": ["enhancement", "macos", "deployment", "hacktoberfest"],
+        "body": "### Problem\nPolyfarmer provides a systemd service for Linux, but no native daemon template for macOS.\n\n### Proposal\nAdd `deploy/com.polyfarmer.daemon.plist` with launchd instructions in README.\n\n### Acceptance Criteria\n- Valid launchd plist template tested on macOS"
+    },
+    {
+        "id": 43,
+        "title": "feat: Windows scheduled task background service script",
+        "difficulty": "medium",
+        "labels": ["enhancement", "windows", "deployment", "hacktoberfest"],
+        "body": "### Problem\nWindows users must keep a terminal window open to run Polyfarmer.\n\n### Proposal\nAdd `deploy/install-service.ps1` to configure Polyfarmer as a Windows Scheduled Task or NSSM service.\n\n### Acceptance Criteria\n- PowerShell script configures auto-start background task"
+    },
+    {
+        "id": 44,
+        "title": "feat: unify order action execution between app.rs and ws_manager.rs",
+        "difficulty": "medium",
+        "labels": ["refactor", "engine", "hacktoberfest"],
+        "body": "### Problem\nQuoting execution logic in `src/app.rs` duplicates ~350 lines from `src/engine/ws_manager.rs`.\n\n### Proposal\nExtract shared action execution (`Place`, `Cancel`, `Replace`) into a common async module.\n\n### Acceptance Criteria\n- Code duplication removed; all tests pass"
+    },
+    {
+        "id": 45,
+        "title": "feat: add rate limit backoff to Polymarket public Data API lookups",
+        "difficulty": "medium",
+        "labels": ["enhancement", "rewards", "hacktoberfest"],
+        "body": "### Problem\nFrequent page refreshes can trigger 429 HTTP responses from Polymarket Data API.\n\n### Proposal\nImplement exponential backoff and jitter for portfolio and rewards lookups.\n\n### Acceptance Criteria\n- 429 responses trigger retry with backoff"
+    },
+    {
+        "id": 46,
+        "title": "feat: add CLI flag --check-config to validate setup without starting web server",
+        "difficulty": "medium",
+        "labels": ["enhancement", "cli", "hacktoberfest"],
+        "body": "### Problem\nOperators want to verify credentials and RPC connections in CI or scripts without binding a port.\n\n### Proposal\nAdd `polyfarmer --check-config` that verifies store, markets file, and RPC connectivity then exits 0.\n\n### Acceptance Criteria\n- Exits 0 if config valid, non-zero if invalid"
+    },
+    {
+        "id": 47,
+        "title": "feat: automated GitHub Actions cross-platform release pipeline",
+        "difficulty": "medium",
+        "labels": ["ci/cd", "release", "hacktoberfest"],
+        "body": "### Problem\nReleases are not automated; users must compile from source on every machine.\n\n### Proposal\nAdd `.github/workflows/release.yml` triggered on tags (`v*`) compiling release binaries for Linux, macOS, and Windows.\n\n### Acceptance Criteria\n- Tag triggers build and attaches binaries to GitHub Releases"
+    },
+    {
+        "id": 48,
+        "title": "feat: add Windows NTFS DACL owner-only file permissions in fsutil.rs",
+        "difficulty": "medium",
+        "labels": ["security", "windows", "hacktoberfest"],
+        "body": "### Problem\nOn Windows, `create_private_dir` and `new_private_file` fall back to ambient inheritance without setting owner-only ACLs.\n\n### Proposal\nImplement Windows security descriptors setting owner-only access for `data/` and `master.key`.\n\n### Acceptance Criteria\n- Files created on Windows restrict access to creator owner"
+    },
+    {
+        "id": 49,
+        "title": "feat: memory dump protection on Windows using SetProcessMitigationPolicy",
+        "difficulty": "medium",
+        "labels": ["security", "windows", "hacktoberfest"],
+        "body": "### Problem\n`harden_process` in `src/app.rs` is a no-op on Windows, leaving memory vulnerable to Windows Error Reporting crash dumps.\n\n### Proposal\nCall Windows APIs to disable crash dumps and disable handle inheritance.\n\n### Acceptance Criteria\n- Windows crash dump prevention active in release builds"
+    },
+    {
+        "id": 50,
+        "title": "feat: add link to market view from rewards today table rows",
+        "difficulty": "medium",
+        "labels": ["enhancement", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nMarket titles in `/rewards/table` are plain text strings and do not link to the internal market view.\n\n### Proposal\nCross-reference `condition_id` against tracked configs and render titles as hyperlinks to `/markets/view?slug=...`.\n\n### Acceptance Criteria\n- Farmed markets link to market view in rewards table"
+    },
+    {
+        "id": 51,
+        "title": "feat: add Prometheus metrics endpoint for headless monitoring",
+        "difficulty": "medium",
+        "labels": ["feature", "monitoring", "hacktoberfest"],
+        "body": "### Problem\nEnterprise operators monitoring multiple instances need Prometheus metrics.\n\n### Proposal\nAdd `/metrics` endpoint exporting live orders count, active markets, ws status, and latency.\n\n### Acceptance Criteria\n- Prometheus text format metrics served on `/metrics`"
+    },
+    {
+        "id": 52,
+        "title": "feat: add max daily loss protection circuit breaker",
+        "difficulty": "medium",
+        "labels": ["feature", "safety", "trading", "hacktoberfest"],
+        "body": "### Problem\nIf unexpected adverse fills occur across multiple markets, there is no aggregate daily capital cap.\n\n### Proposal\nTrack net filled USD value over rolling 24 hours; pause all markets if limit exceeded.\n\n### Acceptance Criteria\n- Auto-pauses all quoting if cumulative fill size exceeds configured threshold"
+    },
+    {
+        "id": 53,
+        "title": "feat: add interactive price chart zoom and pan on market view",
+        "difficulty": "medium",
+        "labels": ["enhancement", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nThe price history chart displays fixed 1-week resolution without zoom controls.\n\n### Proposal\nAdd 1D, 1W, 1M time range filters to `/markets/view/chart`.\n\n### Acceptance Criteria\n- Range buttons reload chart data with selected interval"
+    },
+    {
+        "id": 54,
+        "title": "feat: add automated database backup command for data/ directory",
+        "difficulty": "medium",
+        "labels": ["enhancement", "tooling", "hacktoberfest"],
+        "body": "### Problem\nBacking up `data/` while the process is actively writing can capture inconsistent files.\n\n### Proposal\nAdd `polyfarmer --backup <path>.tar.gz` that cleanly snapshots configuration and encrypted keys.\n\n### Acceptance Criteria\n- Backup archive generated and verified restoreable"
+    },
+    {
+        "id": 55,
+        "title": "feat: add dark/light theme persistence in local storage and session",
+        "difficulty": "medium",
+        "labels": ["ui/ux", "enhancement", "hacktoberfest"],
+        "body": "### Problem\nTheme toggle relies on localStorage only; initial SSR paint can flash before client script executes.\n\n### Proposal\nPersist theme preference in session cookie so initial HTML renders with correct `data-theme` attribute.\n\n### Acceptance Criteria\n- Zero flash of incorrect theme on initial page load"
+    },
+    {
+        "id": 56,
+        "title": "feat: add batch order cancellation button on overview dashboard",
+        "difficulty": "medium",
+        "labels": ["feature", "safety", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nCancelling all orders currently requires pausing markets individually or terminating the bot.\n\n### Proposal\nAdd an 'Emergency Cancel All Orders' button in the dashboard header requiring double-confirmation.\n\n### Acceptance Criteria\n- Cancels all live resting orders immediately across all markets"
+    },
+    {
+        "id": 57,
+        "title": "feat: add integration test for simultaneous multi-market WebSocket price updates",
+        "difficulty": "medium",
+        "labels": ["testing", "engine", "hacktoberfest"],
+        "body": "### Problem\nVerify that rapid bursts of price changes across 10 tokens do not cause channel congestion.\n\n### Proposal\nAdd load test simulating 500 concurrent price events through WebSocket channel.\n\n### Acceptance Criteria\n- All events processed without dropped channel messages"
+    },
+    {
+        "id": 58,
+        "title": "feat: add gas price monitoring for Polygon balance queries",
+        "difficulty": "medium",
+        "labels": ["enhancement", "rpc", "hacktoberfest"],
+        "body": "### Problem\nDuring Polygon network congestion, RPC calls can timeout.\n\n### Proposal\nLog gas price warnings when gas exceeds 200 Gwei.\n\n### Acceptance Criteria\n- High gas alerts logged to activity feed"
+    },
+    {
+        "id": 59,
+        "title": "feat: add support for custom user-agent header in CLOB requests",
+        "difficulty": "medium",
+        "labels": ["enhancement", "network", "hacktoberfest"],
+        "body": "### Problem\nHTTP requests to Polymarket use default reqwest user agent.\n\n### Proposal\nSet custom User-Agent identifying Polyfarmer version.\n\n### Acceptance Criteria\n- Outgoing requests carry `Polyfarmer/vX.Y.Z` user agent"
+    },
+    {
+        "id": 60,
+        "title": "feat: add audit logging for all settings and password modifications",
+        "difficulty": "medium",
+        "labels": ["security", "logging", "hacktoberfest"],
+        "body": "### Problem\nChanges to passwords or wallet keys leave no persistent audit trail.\n\n### Proposal\nAppend security audit entries to `alerts.json` on password change or wallet re-entry.\n\n### Acceptance Criteria\n- Security modifications recorded in alerts log"
+    },
+    {
+        "id": 61,
+        "title": "feat: add property-based test for TokenBook bid_depth_between",
+        "difficulty": "medium",
+        "labels": ["testing", "proptest", "hacktoberfest"],
+        "body": "### Problem\n`bid_depth_between` is tested on fixed price levels, but needs randomized invariant verification.\n\n### Proposal\nAdd `proptest` harness asserting monotonic depth increase with wider intervals.\n\n### Acceptance Criteria\n- 1,000 randomized proptest iterations pass"
+    },
+    {
+        "id": 62,
+        "title": "feat: add CLI utility polyfarmer-keygen to generate offline test wallets",
+        "difficulty": "medium",
+        "labels": ["enhancement", "tooling", "hacktoberfest"],
+        "body": "### Problem\nTesting setup requires finding or generating a private key externally.\n\n### Proposal\nAdd sub-command `polyfarmer keygen` printing random valid test key and address.\n\n### Acceptance Criteria\n- Generates random valid secp256k1 key and Ethereum address"
+    },
+    {
+        "id": 63,
+        "title": "feat: add HTTP request body size metrics and rejection test",
+        "difficulty": "medium",
+        "labels": ["testing", "security", "hacktoberfest"],
+        "body": "### Problem\nVerify that requests exceeding `MAX_BODY_BYTES` (64KB) are rejected before memory allocation.\n\n### Proposal\nAdd integration test posting 128KB payload and asserting 413 Payload Too Large.\n\n### Acceptance Criteria\n- 413 status returned on oversized request"
+    },
+    {
+        "id": 64,
+        "title": "feat: add market auto-resume timer after volatility pause",
+        "difficulty": "medium",
+        "labels": ["feature", "engine", "trading", "hacktoberfest"],
+        "body": "### Problem\nWhen best bid moves past volatility limit, the market is paused and requires manual resume.\n\n### Proposal\nAdd optional `auto_resume_minutes` config that automatically resumes if price stabilizes.\n\n### Acceptance Criteria\n- Auto-resumes after configured minutes if bid within range"
+    },
+    {
+        "id": 65,
+        "title": "feat: add visual indicator for markets close to expiry",
+        "difficulty": "medium",
+        "labels": ["ui/ux", "enhancement", "hacktoberfest"],
+        "body": "### Problem\nMarkets expiring in less than 24 hours look identical to markets expiring in 30 days.\n\n### Proposal\nHighlight expiration column in amber if < 24h, red if < 1h.\n\n### Acceptance Criteria\n- Near-expiry markets visually distinguished"
+    },
+    {
+        "id": 66,
+        "title": "feat: add support for reading password from file or secret manager",
+        "difficulty": "medium",
+        "labels": ["enhancement", "security", "hacktoberfest"],
+        "body": "### Problem\nHeadless container environments need automated password seeding on first run.\n\n### Proposal\nSupport `ADMIN_PASSWORD_FILE` environment variable to initialize password without web UI.\n\n### Acceptance Criteria\n- Initializes admin password from file if set on fresh install"
+    },
+    {
+        "id": 67,
+        "title": "feat: add structured JSON log formatter option",
+        "difficulty": "medium",
+        "labels": ["enhancement", "logging", "hacktoberfest"],
+        "body": "### Problem\nCloud log aggregators (Datadog, Loki) require JSON formatted stdout.\n\n### Proposal\nSupport `LOG_FORMAT=json` in `tracing_subscriber` initialization.\n\n### Acceptance Criteria\n- Emits single-line JSON log events when configured"
+    },
+    {
+        "id": 68,
+        "title": "feat: add automatic retry with backoff for failed initial WebSocket connection",
+        "difficulty": "medium",
+        "labels": ["bug", "engine", "network", "hacktoberfest"],
+        "body": "### Problem\nIf DNS or network drops during startup, initial WS connect can fail immediately.\n\n### Proposal\nAdd retry loop with exponential backoff on initial connection failure.\n\n### Acceptance Criteria\n- Retries initial WS connection up to 5 times before failing"
+    },
+    {
+        "id": 69,
+        "title": "feat: add simulated paper trading execution mode",
+        "difficulty": "medium",
+        "labels": ["feature", "engine", "trading", "hacktoberfest"],
+        "body": "### Problem\nDemo mode uses static fake orders; users want a live paper-trading mode that tracks simulated fills.\n\n### Proposal\nAdd `PAPER_TRADING=1` mode that evaluates live books and simulates fills when best ask crosses bid.\n\n### Acceptance Criteria\n- Simulates paper fills against live book without placing real orders"
+    },
+    {
+        "id": 70,
+        "title": "feat: add pagination to activity feed history view",
+        "difficulty": "medium",
+        "labels": ["ui/ux", "enhancement", "hacktoberfest"],
+        "body": "### Problem\n`/activity` currently truncates alerts to the latest 100 entries without pagination.\n\n### Proposal\nAdd 'Load More' button loading previous 100 alerts via HTMX.\n\n### Acceptance Criteria\n- Paginates alerts seamlessly without full page reload"
+    },
+    {
+        "id": 71,
+        "title": "feat: add market tag filtering in browse view",
+        "difficulty": "medium",
+        "labels": ["enhancement", "ui/ux", "hacktoberfest"],
+        "body": "### Problem\nUsers cannot filter markets by category (Politics, Crypto, Sports, Macro).\n\n### Proposal\nAdd category dropdown filter in `/markets/browse`.\n\n### Acceptance Criteria\n- Filters browse list by selected category"
+    },
+    {
+        "id": 72,
+        "title": "feat: add graceful shutdown timeout for in-flight HTTP requests",
+        "difficulty": "medium",
+        "labels": ["engine", "reliability", "hacktoberfest"],
+        "body": "### Problem\nOn SIGTERM, if an HTTP order cancel is in-flight, process should allow 5 seconds to complete.\n\n### Proposal\nWrap shutdown sequence with `tokio::time::timeout(Duration::from_secs(5))`.\n\n### Acceptance Criteria\n- In-flight cancel calls allowed up to 5s before force exit"
+    },
+    {
+        "id": 73,
+        "title": "feat: add automated integrity check for markets.json file corruption",
+        "difficulty": "medium",
+        "labels": ["reliability", "storage", "hacktoberfest"],
+        "body": "### Problem\nIf machine loses power during write, `markets.json` could be partially written.\n\n### Proposal\nMaintain `.backup` copy and restore from backup if JSON parse fails.\n\n### Acceptance Criteria\n- Corrupt JSON falls back to backup with warning"
+    },
+    {
+        "id": 74,
+        "title": "feat: add unit tests for CSRF token expiration and rotation",
+        "difficulty": "medium",
+        "labels": ["testing", "security", "hacktoberfest"],
+        "body": "### Problem\nVerify that CSRF token rotates on login and cannot be reused across sessions.\n\n### Proposal\nAdd test asserting CSRF token from Session A is rejected in Session B.\n\n### Acceptance Criteria\n- Cross-session CSRF rejection verified in test"
+    },
+    {
+        "id": 75,
+        "title": "feat: add dark mode high-contrast accessibility theme",
+        "difficulty": "medium",
+        "labels": ["ui/ux", "accessibility", "hacktoberfest"],
+        "body": "### Problem\nCertain gray text colors have lower contrast ratios than WCAG 2.1 AA standards.\n\n### Proposal\nAdd `data-theme='high-contrast'` with minimum 4.5:1 text contrast ratios.\n\n### Acceptance Criteria\n- Meets WCAG 2.1 AA contrast requirements"
+    },
+
+    # ── TIER 3: HARD / ENGINE, CONCURRENCY & SECURITY (76 - 100) ──────────────
+    {
+        "id": 76,
+        "title": "core: SIMD-accelerated level traversal and depth aggregation in TokenBook",
+        "difficulty": "hard",
+        "labels": ["core", "performance", "simd", "engine"],
+        "body": "### Problem\n`TokenBook::bid_depth_between` iterates over a `HashMap<Decimal, Decimal>` using software decimal arithmetic on every price change event. Under high-throughput feeds, hash map lookups cause CPU cache misses.\n\n### Proposal\nRepresent top-32 order book levels as flat contiguous arrays of fixed-point prices and quantities. Implement AVX2 / NEON SIMD vector comparison to filter price intervals and sum depth in single vector passes.\n\n### Acceptance Criteria\n- Benchmark in `benches/orderbook.rs` shows >= 3x speedup\n- Passes all existing unit tests and `tests/e2e.rs`"
+    },
+    {
+        "id": 77,
+        "title": "core: real-time private user WebSocket execution channel integration",
+        "difficulty": "hard",
+        "labels": ["core", "engine", "websocket", "trading"],
+        "body": "### Problem\nPolyfarmer currently connects only to the public market book WebSocket. It is blind to fills in real-time; order fills are only inferred asynchronously when cancelling or polling the Data API.\n\n### Proposal\nConnect to Polymarket's authenticated user WebSocket feed (`/ws/user`). Parse live `fill` and `execution` messages, transition order status to `Filled` in sub-millisecond time, and immediately trigger inventory tracking.\n\n### Acceptance Criteria\n- Real-time fill event triggers immediate status transition\n- Avoids duplicate order placement after fill"
+    },
+    {
+        "id": 78,
+        "title": "security: formal verification of TokenBook and Quoter invariants using Kani",
+        "difficulty": "hard",
+        "labels": ["security", "formal-methods", "kani"],
+        "body": "### Problem\nUnit tests check discrete price cases, but cannot prove the absence of integer overflow, division by zero, or negative price targets across all possible 64-bit inputs.\n\n### Proposal\nWrite bounded model checking proofs using the Kani Rust Verifier (`#[kani::proof]`) for `TokenBook::snap_to_tick` and `quoter::evaluate` proving target price is strictly positive and never exceeds best bid.\n\n### Acceptance Criteria\n- `cargo kani` verifies proofs with zero counterexamples"
+    },
+    {
+        "id": 79,
+        "title": "security: memory safety and undefined behavior verification with Miri in CI",
+        "difficulty": "hard",
+        "labels": ["security", "miri", "ci/cd"],
+        "body": "### Problem\nCryptographic routines and zeroize drops execute pointer arithmetic that could violate LLVM strict provenance under edge cases.\n\n### Proposal\nConfigure a dedicated Miri verification job in CI running with `-Zmiri-tree-borrows -Zmiri-strict-provenance` over `creds.rs` and `fsutil.rs`.\n\n### Acceptance Criteria\n- Clean Miri execution without provenance or aliasing errors"
+    },
+    {
+        "id": 80,
+        "title": "core: deterministic lock-free order state machine with crossbeam-channel",
+        "difficulty": "hard",
+        "labels": ["core", "concurrency", "engine"],
+        "body": "### Problem\n`AppState` is currently wrapped in a global `Arc<RwLock<AppState>>`. High-frequency lock contention between the 30s timer, WS events, and web dashboard causes lock waits.\n\n### Proposal\nRefactor engine state into an actor-based lock-free message passing architecture using bounded SPSC/MPMC channels. Quoting decisions occur sequentially on a dedicated single-threaded pinned actor.\n\n### Acceptance Criteria\n- Eliminates `RwLock` contention on hot pricing path\n- End-to-end latency reduced under high event load"
+    },
+    {
+        "id": 81,
+        "title": "core: continuous fuzz testing harness with cargo-fuzz and libFuzzer",
+        "difficulty": "hard",
+        "labels": ["testing", "fuzzing", "security"],
+        "body": "### Problem\nMalicious or malformed WebSocket payloads could trigger panics or out-of-memory errors in JSON parsing or orderbook delta processing.\n\n### Proposal\nImplement `fuzz/fuzz_targets/fuzz_ws_message.rs` using `cargo-fuzz` and `arbitrary::Arbitrary` to continuously fuzz WebSocket message parsing.\n\n### Acceptance Criteria\n- Fuzzer executes 1,000,000 iterations without crash or unhandled panic"
+    },
+    {
+        "id": 82,
+        "title": "security: SLSA Level 3 build provenance and Cosign keyless signing",
+        "difficulty": "hard",
+        "labels": ["security", "supply-chain", "ci/cd"],
+        "body": "### Problem\nRelease binaries lack cryptographic proof of origin. Users cannot verify that binaries were compiled directly from tagged source code.\n\n### Proposal\nImplement `.github/workflows/release.yml` with `actions/attest-build-provenance` and Sigstore Cosign keyless signing via ambient GitHub OIDC tokens.\n\n### Acceptance Criteria\n- Generated binaries verified with `gh attestation verify` and `cosign verify-blob`"
+    },
+    {
+        "id": 83,
+        "title": "core: zero-downtime multi-wallet account switching architecture",
+        "difficulty": "hard",
+        "labels": ["core", "engine", "architecture"],
+        "body": "### Problem\nPolyfarmer currently supports only one wallet at a time and requires a full process restart to switch accounts.\n\n### Proposal\nRefactor `Executor` to support multiple isolated wallet contexts simultaneously, enabling switching accounts or farming across multiple wallets without process restart.\n\n### Acceptance Criteria\n- Switching wallets cancels orders on old account and starts new engine without restart"
+    },
+    {
+        "id": 84,
+        "title": "core: deterministic instruction count performance regression gating with CodSpeed",
+        "difficulty": "hard",
+        "labels": ["performance", "ci/cd", "benchmarking"],
+        "body": "### Problem\nStandard microbenchmarks in GitHub Actions suffer from CPU throttling noise, making automated performance regression detection impossible.\n\n### Proposal\nIntegrate CodSpeed into CI to gate pull requests on deterministic CPU instruction counts ($I_r$) and heap allocations.\n\n### Acceptance Criteria\n- Fails PR if critical quoting functions show > 3% instruction regression"
+    },
+    {
+        "id": 85,
+        "title": "engine: MEV and latency protection: private transaction submission RPC",
+        "difficulty": "hard",
+        "labels": ["engine", "mev", "trading"],
+        "body": "### Problem\nSubmitting transactions over public Polygon RPC nodes can expose wallet actions to mempool frontrunning.\n\n### Proposal\nIntegrate support for private RPC relays (e.g. FastLane / MEV-Blocker) for on-chain interactions.\n\n### Acceptance Criteria\n- Transactions routed via private RPC when configured"
+    },
+    {
+        "id": 86,
+        "title": "security: hardware wallet (Ledger / Trezor) signing support via EIP-712",
+        "difficulty": "hard",
+        "labels": ["security", "hardware-wallet", "crypto"],
+        "body": "### Problem\nUsers holding substantial capital refuse to paste plaintext private keys on disk, even when encrypted.\n\n### Proposal\nIntegrate HID transport for Ledger hardware wallets to sign EIP-712 order structures directly on hardware.\n\n### Acceptance Criteria\n- Orders signed via connected Ledger device"
+    },
+    {
+        "id": 87,
+        "title": "engine: multi-market portfolio-level correlation and risk modeling",
+        "difficulty": "hard",
+        "labels": ["engine", "risk", "trading"],
+        "body": "### Problem\nQuoting multiple correlated markets (e.g. 'Will Fed cut by 25bps' and 'Will Fed cut by 50bps') can double portfolio exposure.\n\n### Proposal\nImplement cross-market condition correlation matrix that caps aggregate capital exposure across mutually dependent markets.\n\n### Acceptance Criteria\n- Prevents cumulative exposure on correlated condition IDs"
+    },
+    {
+        "id": 88,
+        "title": "core: differential mutation testing pipeline with cargo-mutants in CI",
+        "difficulty": "hard",
+        "labels": ["testing", "mutation-testing", "ci/cd"],
+        "body": "### Problem\nCode coverage alone does not prove test assertion strength. Code changes can pass tests while introducing logic regressions.\n\n### Proposal\nIntegrate `cargo-mutants` running on PR diffs with `--in-diff`, rejecting PRs that leave generated mutants alive.\n\n### Acceptance Criteria\n- Mutation gate passes only if all mutant injections are caught by tests"
+    },
+    {
+        "id": 89,
+        "title": "engine: historical order book replay simulator for backtesting quoter strategies",
+        "difficulty": "hard",
+        "labels": ["engine", "backtesting", "tooling"],
+        "body": "### Problem\nTesting quoter rule modifications requires waiting for live market moves in real-time.\n\n### Proposal\nBuild an offline backtest engine that ingests recorded Polymarket WebSocket tick logs and simulates quoter execution and PnL.\n\n### Acceptance Criteria\n- CLI tool replays tick file and prints simulated fills and reward score"
+    },
+    {
+        "id": 90,
+        "title": "core: zero-allocation JSON streaming parser for WebSocket book updates",
+        "difficulty": "hard",
+        "labels": ["core", "performance", "parser"],
+        "body": "### Problem\nParsing WebSocket messages using `serde_json::Value` allocates dozens of heap strings per price tick.\n\n### Proposal\nImplement a zero-copy DOM-less parser using `simd-json` or custom deserializer borrowing directly from WebSocket frame buffers.\n\n### Acceptance Criteria\n- Benchmark proves zero heap allocations during price tick parsing"
+    },
+    {
+        "id": 91,
+        "title": "security: automated memory zeroization audit for all private key copies",
+        "difficulty": "hard",
+        "labels": ["security", "crypto"],
+        "body": "### Problem\nWhile `Zeroizing` is used in `creds.rs`, intermediate strings during form deserialization could remain in heap memory.\n\n### Proposal\nImplement custom serde deserializer that parses private key directly into pinned mlocked zeroizing memory without temporary string buffers.\n\n### Acceptance Criteria\n- Memory scan confirms zero plaintext keys in process memory dump"
+    },
+    {
+        "id": 92,
+        "title": "engine: automatic dynamic pegging distance based on real-time bid-ask spread",
+        "difficulty": "hard",
+        "labels": ["engine", "algorithms", "trading"],
+        "body": "### Problem\nStatic distance (e.g. 2.0¢) becomes suboptimal when market spread widens or tightens dramatically.\n\n### Proposal\nImplement dynamic pegging algorithm that scales distance proportionally with current market spread while staying within reward score zones.\n\n### Acceptance Criteria\n- Distance adjusts dynamically based on spread expansion/contraction"
+    },
+    {
+        "id": 93,
+        "title": "core: distributed multi-node failover with Raft consensus",
+        "difficulty": "hard",
+        "labels": ["architecture", "high-availability"],
+        "body": "### Problem\nRunning a single instance introduces a single point of failure if the host machine loses network connectivity.\n\n### Proposal\nImplement active-passive cluster leader election using Raft. Standby node monitors heartbeat and assumes quoting if leader fails.\n\n### Acceptance Criteria\n- Standby node assumes quoting within 10s of primary failure"
+    },
+    {
+        "id": 94,
+        "title": "engine: WebSocket connection multiplexing across multiple regional endpoints",
+        "difficulty": "hard",
+        "labels": ["engine", "network", "performance"],
+        "body": "### Problem\nA single WebSocket connection can experience routing jitter or packet loss.\n\n### Proposal\nConnect redundant WebSocket feeds across multiple geographic endpoints and deduplicate price messages using sequence numbers.\n\n### Acceptance Criteria\n- Drops latency spikes by consuming earliest arriving packet"
+    },
+    {
+        "id": 95,
+        "title": "security: hardware security module (PKCS#11 / AWS KMS) signing backend",
+        "difficulty": "hard",
+        "labels": ["security", "enterprise", "crypto"],
+        "body": "### Problem\nEnterprise operators require key material to be non-exportable and stored in cloud HSM or Vault.\n\n### Proposal\nAbstract `Executor` signing behind a generic `Signer` trait supporting PKCS#11 and AWS KMS.\n\n### Acceptance Criteria\n- Signs EIP-712 orders via external KMS endpoint without local private key"
+    },
+    {
+        "id": 96,
+        "title": "core: formal verification of session store concurrency and eviction rules",
+        "difficulty": "hard",
+        "labels": ["formal-methods", "concurrency", "security"],
+        "body": "### Problem\nConcurrent session creation, password rotation, and self-cleaning eviction could exhibit race conditions under high load.\n\n### Proposal\nModel `BoundedSessionStore` in TLA+ or Kani proving bounded memory ceiling and immediate invalidation on password change.\n\n### Acceptance Criteria\n- Formal specification verifies safety and liveness invariants"
+    },
+    {
+        "id": 97,
+        "title": "engine: auto-hedging inventory fills via opposite outcome market orders",
+        "difficulty": "hard",
+        "labels": ["engine", "risk", "trading"],
+        "body": "### Problem\nWhen a resting BUY order fills, the user holds directional inventory exposure without automatic hedging.\n\n### Proposal\nAdd optional 'Auto-Hedge' mode: upon detecting a fill on Token Yes, immediately submit limit sell or opposite buy within configured slippage.\n\n### Acceptance Criteria\n- Fill triggers immediate compensatory order on complementary token"
+    },
+    {
+        "id": 98,
+        "title": "core: eBPF network probe for microsecond CLOB latency telemetry",
+        "difficulty": "hard",
+        "labels": ["performance", "ebpf", "linux"],
+        "body": "### Problem\nApplication-level latency measurements include userspace scheduling jitter.\n\n### Proposal\nProvide an optional eBPF tracepoint program measuring kernel TCP socket latency to Polymarket endpoints.\n\n### Acceptance Criteria\n- Emits sub-millisecond network latency histograms"
+    },
+    {
+        "id": 99,
+        "title": "security: automated reproducible builds verification pipeline",
+        "difficulty": "hard",
+        "labels": ["security", "reproducible-builds", "ci/cd"],
+        "body": "### Problem\nBinaries built on different runners can produce divergent hashes due to timestamps or path prefixes.\n\n### Proposal\nConfigure `SOURCE_DATE_EPOCH` and `cargo-rebuild` in CI, compiling on two independent runners and proving bit-for-bit identical SHA256 hashes.\n\n### Acceptance Criteria\n- Two distinct runner builds yield identical binary checksums"
+    },
+    {
+        "id": 100,
+        "title": "core: self-healing network partition recovery with state reconciliation",
+        "difficulty": "hard",
+        "labels": ["core", "engine", "reliability"],
+        "body": "### Problem\nDuring split-brain network recovery, local order state may diverge from exchange order state.\n\n### Proposal\nImplement full state reconciliation protocol on reconnect: query exchange open orders, reconcile with local state, and prune ghost orders before resuming.\n\n### Acceptance Criteria\n- Automatically clears un-tracked ghost orders upon reconnect"
+    }
+]
+
+def main():
+    parser = argparse.ArgumentParser(description="Seed 100 Hacktoberfest issues to GitHub repository")
+    parser.add_argument("--json", action="store_true", help="Dump all issues to issues.json")
+    parser.add_argument("--dry-run", action="store_true", help="Print summary list of all 100 issues")
+    parser.add_argument("--submit", action="store_true", help="Create issues on GitHub repository via `gh issue create`")
+    args = parser.parse_args()
+
+    if args.json:
+        with open("issues.json", "w", encoding="utf-8") as f:
+            json.dump(ISSUES, f, indent=2)
+        print(f"Successfully generated issues.json with {len(ISSUES)} issues.")
+        return
+
+    if args.dry_run:
+        print(f"Total Issues: {len(ISSUES)}")
+        counts = {"easy": 0, "medium": 0, "hard": 0}
+        for item in ISSUES:
+            counts[item["difficulty"]] += 1
+            print(f"[{item['difficulty'].upper():6}] #{item['id']:03d}: {item['title']} (Labels: {', '.join(item['labels'])})")
+        print("\nBreakdown:")
+        for k, v in counts.items():
+            print(f"  {k.title()}: {v} issues")
+        return
+
+    if args.submit:
+        # Check for gh cli
+        try:
+            subprocess.run(["gh", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        except Exception:
+            print("Error: GitHub CLI (`gh`) is not installed or not in PATH.")
+            print("Install it or run with `--json` to export issues.json.")
+            sys.exit(1)
+
+        print(f"Submitting {len(ISSUES)} issues to GitHub repository via `gh issue create`...")
+        for item in ISSUES:
+            label_args = []
+            for l in item["labels"]:
+                label_args.extend(["--label", l])
+            
+            cmd = ["gh", "issue", "create", "--title", item["title"], "--body", item["body"]] + label_args
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                print(f"Created #{item['id']:03d}: {item['title']} -> {res.stdout.strip()}")
+            except subprocess.CalledProcessError as e:
+                print(f"Failed to create #{item['id']}: {e.stderr.strip()}")
+        print("Issue seeding complete!")
+        return
+
+    parser.print_help()
+
+if __name__ == "__main__":
+    main()

@@ -3,27 +3,23 @@
 Thanks for helping. Polyfarmer trades real money, so the bar for changes is "easy to review and
 hard to get wrong". This page tells you how to get set up and what a good contribution looks like.
 
-## Reporting bugs and asking questions
+## Community, Support and Questions
 
-- **Bugs:** open an [issue](https://github.com/Vayz0001/polyfarmer/issues/new/choose) using the bug report
-  form. It asks for your operating system, how you run Polyfarmer, the version or commit, and the relevant
-  log lines. **Remove private keys, setup codes, wallet addresses you want to keep private, and session
-  cookies from anything you paste.**
-- **Ideas and feature requests:** use the feature request form and describe the problem first; a solution
-  can come after.
-- **Questions:** search the [FAQ in the README](README.md#faq-and-troubleshooting) and existing issues first,
-  then open an issue with the question form.
-- **Security problems:** never in public. See [SECURITY.md](SECURITY.md).
-
+- **Discord Server:** All active developer discussion, real-time support, and questions happen on our **[Discord Server (https://discord.gg/DEsbgyxC3z)](https://discord.gg/DEsbgyxC3z)**.
+- **Bugs:** Open an [issue](https://github.com/Vayz0001/polyfarmer/issues/new/choose) using the bug report form. It asks for your operating system, how you run Polyfarmer, the version or commit, and the relevant log lines. **Remove private keys, setup codes, wallet addresses you want to keep private, and session cookies from anything you paste.**
+- **Ideas and feature requests:** Use the feature request form and describe the problem first; a solution can come after.
+- **Questions:** Search the [FAQ in the README](README.md#faq-and-troubleshooting) and ask in the `#support` or `#dev` channel on [Discord](https://discord.gg/DEsbgyxC3z).
+- **Security problems:** Never in public. See [SECURITY.md](SECURITY.md).
 ## Before you start
 
 - **Security problems:** do not open a public issue. Follow [SECURITY.md](SECURITY.md).
-- **Bugs and small fixes:** a pull request is welcome; an issue first is optional.
+- **Find or open an issue first:** To avoid duplicate work, check existing issues before starting. Comment on an issue to claim it before opening a PR.
+- **One issue per contributor:** Please claim only one issue at a time. If an assigned issue has no activity or draft PR within 7 days, it will be unassigned for others.
 - **New features, and anything that changes trading behaviour** (how orders are priced, when they
   are placed, cancelled or replaced, what counts as protection): please **open an issue and agree
   the approach first**. Those changes move money, so they are discussed before they are written.
-- Never include a private key, token or `.env` in a commit, an issue or a log you paste.
-
+- **Hacktoberfest & quality standards:** We welcome open-source contributors! To keep review overhead manageable, PRs that only fix trivial typos in markdown, reorder imports, or submit unverified mass-refactorings will be marked `invalid`/`spam`. Every code change must add or update tests.
+- Never include a private key, token, or `.env` in a commit, an issue, or a log you paste.
 ## Setting up
 
 Polyfarmer builds on Linux, macOS and Windows. Install the toolchain for your system by following the
@@ -46,18 +42,30 @@ the same checks run on your branch.
 
 ## Checks that must pass
 
-Run these before you push. They are the same checks CI runs:
+Run these before you push. They are the exact checks CI runs:
 
 ```bash
+# 1. Rust code formatting
 cargo fmt --all --check
+
+# 2. Rust Clippy lints (zero warnings allowed)
 cargo clippy --all-targets --locked -- -D warnings
+
+# 3. Unit and integration tests
 cargo test --locked
-cargo deny check          # dependency policy; install once with: cargo install cargo-deny
+
+# 4. End-to-end live TCP server & quoter tests
+cargo test --test e2e --locked
+
+# 5. Frontend code quality and token duplication gate (fallow)
+npx fallow dupes assets
+
+# 6. Dependency policy & license audit
+cargo deny check
 ```
 
 `cargo fmt --all` fixes formatting for you (settings are in `rustfmt.toml`). `Cargo.lock` is
 committed; commit it with any dependency change.
-
 ## How the code is laid out
 
 | Path | What lives there |
@@ -100,22 +108,24 @@ committed; commit it with any dependency change.
 - **Settings:** if you add an environment variable, document it in `.env.example`; a test fails
   otherwise.
 
-## Commit messages
+## Git branch and commit conventions
 
-Use the style already in the history: an imperative, sentence-case subject with no prefix and no
-trailing period, then a body that explains what changed and why.
+Use descriptive branch names:
+- `feat/short-description` for new features or capabilities
+- `fix/short-description` for bug fixes
+- `docs/short-description` for documentation improvements
+- `test/short-description` for test harness enhancements
 
+Commit messages follow the Conventional Commits format (`type: Imperative description`):
 ```
-Stop unbounded memory growth: bounded caches, no leaked strings, tail reads
-
-- ws_manager: the disconnect reason was leaked on every receive error ...
+feat: add automated E2E daemon lifecycle test suite
+fix: prevent race condition in order replacement depth check
+docs: add Hacktoberfest contribution guidelines
 ```
-
-## Pull requests
 
 1. Fork, create a branch, make your change, and run the checks above.
-2. Open the pull request against `main` and describe what and why, how you tested it, and anything
-   a reviewer should look at closely (especially security or trading behaviour).
-3. Be ready for review feedback. Small, clear pull requests are merged faster.
+2. Open the pull request against `main` and describe what and why, how you tested it, and anything a reviewer should look at closely (especially security or trading behaviour).
+3. **Tag Maintainers on Discord:** After submitting your PR, post the link in our **[Discord Server (https://discord.gg/DEsbgyxC3z)](https://discord.gg/DEsbgyxC3z)** in the `#pr-reviews` / `#dev` channel and tag the maintainers so it is queued for review.
+4. Be ready for review feedback. Small, clear pull requests are merged faster.
 
 By contributing you agree that your work is released under the project's [MIT license](LICENSE).
