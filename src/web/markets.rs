@@ -54,6 +54,41 @@ static BROWSE: LazyLock<Arc<TtlCache<Arc<markets_browse::RewardsMultiResponse>>>
     LazyLock::new(|| Arc::new(TtlCache::with_capacity(Duration::from_secs(60), 64)));
 const BROWSE_PAGE_SIZE: u32 = 30;
 
+/// Schemes we will resolve and hand to the Polymarket Gamma API. Anything else
+/// (file://, javascript:, data:, …) is either useless for a market lookup or an
+/// injection surface, so it is rejected before we touch the network.
+const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https"];
+
+/// Sanitize a user-entered market/event URL before resolving it.
+///
+/// Pasted URLs can contain invisible control characters (NUL, BEL, ESC, …)
+/// that slip through copy/paste, OCR, or hand-editing and confuse the slug
+/// extractor (`extract_slug`) into producing garbage. They are stripped here
+/// except for tab/newline which are normalized away by `trim` anyway. The
+/// scheme is then validated: only `http`/`https` reach the Gamma client, so a
+/// pasted `javascript:` or `file:` URL never becomes an outbound request.
+///
+/// Returns the cleaned URL on success, or an error message suitable for the
+/// user-facing error template.
+fn sanitize_market_url(raw: &str) -> Result<String, String> {
+    let cleaned: String = raw.chars().filter(|&c| !c.is_control()).collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return Err("Paste a Polymarket market or event URL first.".into());
+    }
+    let scheme = trimmed
+        .split("://")
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !ALLOWED_URL_SCHEMES.iter().any(|s| *s == scheme) {
+        return Err(format!(
+            "URL must start with http:// or https:// (got \"{scheme}\")."
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
 fn browse_key(q: &str, sort: &str, dir: &str, cursor: &str) -> String {
     format!("{q}|{sort}|{dir}|{cursor}")
 }
@@ -1179,11 +1214,11 @@ struct MarketPickerTemplate {
 /// event with one tradeable market) goes straight to the view; an event with
 /// several candidates shows a picker instead of guessing.
 pub async fn resolve_url(session: Session, Query(p): Query<ResolveUrlParams>) -> Response {
-    let url = p.url.trim();
-    if url.is_empty() {
-        return view_error(&session, "Paste a Polymarket market or event URL first.").await;
-    }
-    match tokio::time::timeout(NETWORK_TIMEOUT, gamma_resolve::resolve_url(url)).await {
+    let url = match sanitize_market_url(&p.url) {
+        Ok(u) => u,
+        Err(msg) => return view_error(&session, &msg).await,
+    };
+    match tokio::time::timeout(NETWORK_TIMEOUT, gamma_resolve::resolve_url(&url)).await {
         Ok(Ok(gamma_resolve::Resolved::Single(mr))) => {
             Redirect::to(&format!("/markets/view?slug={}", mr.market_slug)).into_response()
         }
@@ -1609,5 +1644,41 @@ mod tests {
     fn event_urls() {
         assert_eq!(poly_event_url("ev", "mk"), "https://polymarket.com/event/ev/mk");
         assert_eq!(poly_event_url("mk", "mk"), "https://polymarket.com/event/mk");
+    }
+
+    #[test]
+    fn sanitize_market_url_strips_control_chars_and_validates_scheme() {
+        // Happy path: a plain https URL survives unchanged (apart from surrounding whitespace).
+        let clean = sanitize_market_url(
+            "  https://polymarket.com/event/2024-elections/donald-trump  ",
+        )
+        .unwrap();
+        assert_eq!(clean, "https://polymarket.com/event/2024-elections/donald-trump");
+
+        // Control characters (NUL, BEL, ESC, newline) embedded by a paste are removed.
+        let with_ctrl =
+            sanitize_market_url("https://polymarket.com/event/\u{0007}trump\u{001b}").unwrap();
+        assert_eq!(with_ctrl, "https://polymarket.com/event/trump");
+
+        // Tab is a control char and gets stripped too — the slug extractor relies
+        // on `/event/<slug>` splitting on `/`, so a stray tab mid-slug would
+        // otherwise produce a phantom slug.
+        let with_tab =
+            sanitize_market_url("https://polymarket.com/event/\trump").unwrap();
+        assert_eq!(with_tab, "https://polymarket.com/event/rtrump");
+
+        // Empty / whitespace-only input is rejected before the network call.
+        assert!(sanitize_market_url("").is_err());
+        assert!(sanitize_market_url("   \n\t  ").is_err());
+
+        // Only http(s) schemes are accepted.
+        assert!(sanitize_market_url("javascript:alert(1)").is_err());
+        assert!(sanitize_market_url("file:///etc/passwd").is_err());
+        assert!(sanitize_market_url("data:text/html,<script>").is_err());
+
+        // http (not just https) is allowed — Gamma happily 301s http to https.
+        assert!(sanitize_market_url("http://polymarket.com/event/x").is_ok());
+        // Scheme matching is case-insensitive.
+        assert!(sanitize_market_url("HTTPS://polymarket.com/event/x").is_ok());
     }
 }
