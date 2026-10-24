@@ -66,6 +66,9 @@ This is everything that will be in the first public beta (0.1.0).
 - Every form value is range-checked; a handler panic is contained and returns a generic error.
 - The process disables core dumps and ptrace; the systemd unit drops all capabilities and restricts
   syscalls and address families.
+- Updated rustls, rustls-webpki, webpki-root-certs and tokio to the first fixed releases for advisories published
+  in October 2026 (TLS secrets in `Debug` output, a key-exchange downgrade, distrusted emSign intermediates, an
+  `AsyncFd` unsoundness), found by the weekly dependency check.
 - Updated dependencies to clear three reachable advisories and a yanked crate, and updated the vendored
   htmx to 2.0.10.
 

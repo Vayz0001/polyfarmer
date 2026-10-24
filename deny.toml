@@ -20,6 +20,8 @@ yanked = "deny"
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained but finished: a compile-time proc-macro used by alloy-primitives. It never runs in the shipped binary and has no known vulnerability." },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is unmaintained: compile-time only (alloy-sol-macro), no vulnerability, absent from the shipped binary." },
+    { id = "RUSTSEC-2026-0374", reason = "basic-toml is unmaintained: compile-time only (askama_derive reads askama.toml with it), no vulnerability, absent from the shipped binary. Clears when askama drops it." },
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 timing variability (depends on compiler and CPU). Pulled in by elliptic-curve 0.13 through alloy-signer; the fix is crypto-bigint 0.7, which needs alloy/k256 0.14, and the Polymarket SDK (0.7.0 and the latest 0.8.0) still requires alloy 1.x. Exposure is limited to signing a few orders a minute on the owner's own machine, where no remote party measures signing time. Move with the SDK; see the review date." },
 ]
 
 [licenses]
