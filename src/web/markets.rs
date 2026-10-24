@@ -63,10 +63,12 @@ const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https"];
 ///
 /// Pasted URLs can contain invisible control characters (NUL, BEL, ESC, …)
 /// that slip through copy/paste, OCR, or hand-editing and confuse the slug
-/// extractor (`extract_slug`) into producing garbage. They are stripped here
-/// except for tab/newline which are normalized away by `trim` anyway. The
-/// scheme is then validated: only `http`/`https` reach the Gamma client, so a
-/// pasted `javascript:` or `file:` URL never becomes an outbound request.
+/// extractor (`extract_slug`) into producing garbage. They are stripped here.
+/// Share links (e.g. `.../event/some-market?tid=123` or `...#fragment`) also
+/// carry query strings and fragments that would leak into the slug, so
+/// everything from the first `?` or `#` onward is cut as well. The scheme is
+/// then validated: only `http`/`https` reach the Gamma client, so a pasted
+/// `javascript:` or `file:` URL never becomes an outbound request.
 ///
 /// Returns the cleaned URL on success, or an error message suitable for the
 /// user-facing error template.
@@ -80,7 +82,17 @@ fn sanitize_market_url(raw: &str) -> Result<String, String> {
     if !ALLOWED_URL_SCHEMES.iter().any(|s| *s == scheme) {
         return Err(format!("URL must start with http:// or https:// (got \"{scheme}\")."));
     }
-    Ok(trimmed.to_string())
+    // Drop query strings and fragments: share links append tracking params
+    // (?tid=...) and anchors (#...) that would otherwise pollute the slug the
+    // extractor derives from the path.
+    let path_only = match trimmed.find(['?', '#']) {
+        Some(idx) => &trimmed[..idx],
+        None => trimmed,
+    };
+    if path_only.is_empty() {
+        return Err("Paste a Polymarket market or event URL first.".into());
+    }
+    Ok(path_only.to_string())
 }
 
 fn browse_key(q: &str, sort: &str, dir: &str, cursor: &str) -> String {
@@ -1655,6 +1667,24 @@ mod tests {
         // otherwise produce a phantom slug.
         let with_tab = sanitize_market_url("https://polymarket.com/event/tru\tmp").unwrap();
         assert_eq!(with_tab, "https://polymarket.com/event/trump");
+
+        // `\trump`: the tab precedes "rump", so the cleaned slug is "rump",
+        // not "rtrump" (reviewer case, PR #115).
+        let leading_tab = sanitize_market_url("https://polymarket.com/event/\trump").unwrap();
+        assert_eq!(leading_tab, "https://polymarket.com/event/rump");
+
+        // Share links: query strings and fragments are stripped before the
+        // slug extractor sees them (e.g. Polymarket ?tid= tracking params).
+        let with_query = sanitize_market_url("https://polymarket.com/event/some-market?tid=123").unwrap();
+        assert_eq!(with_query, "https://polymarket.com/event/some-market");
+        let with_frag = sanitize_market_url("https://polymarket.com/event/some-market#top").unwrap();
+        assert_eq!(with_frag, "https://polymarket.com/event/some-market");
+        // Everything from the first '?' or '#' goes, whatever order they appear in.
+        let with_both = sanitize_market_url("https://polymarket.com/event/x?a=1#b").unwrap();
+        assert_eq!(with_both, "https://polymarket.com/event/x");
+        // Control characters and query strings combined.
+        let mixed = sanitize_market_url("https://polymarket.com/event/\trump?src=share\n").unwrap();
+        assert_eq!(mixed, "https://polymarket.com/event/rump");
 
         // Empty / whitespace-only input is rejected before the network call.
         assert!(sanitize_market_url("").is_err());
