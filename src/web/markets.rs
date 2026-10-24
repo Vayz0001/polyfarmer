@@ -76,15 +76,9 @@ fn sanitize_market_url(raw: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("Paste a Polymarket market or event URL first.".into());
     }
-    let scheme = trimmed
-        .split("://")
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let scheme = trimmed.split("://").next().unwrap_or("").to_ascii_lowercase();
     if !ALLOWED_URL_SCHEMES.iter().any(|s| *s == scheme) {
-        return Err(format!(
-            "URL must start with http:// or https:// (got \"{scheme}\")."
-        ));
+        return Err(format!("URL must start with http:// or https:// (got \"{scheme}\")."));
     }
     Ok(trimmed.to_string())
 }
@@ -1649,23 +1643,18 @@ mod tests {
     #[test]
     fn sanitize_market_url_strips_control_chars_and_validates_scheme() {
         // Happy path: a plain https URL survives unchanged (apart from surrounding whitespace).
-        let clean = sanitize_market_url(
-            "  https://polymarket.com/event/2024-elections/donald-trump  ",
-        )
-        .unwrap();
+        let clean = sanitize_market_url("  https://polymarket.com/event/2024-elections/donald-trump  ").unwrap();
         assert_eq!(clean, "https://polymarket.com/event/2024-elections/donald-trump");
 
         // Control characters (NUL, BEL, ESC, newline) embedded by a paste are removed.
-        let with_ctrl =
-            sanitize_market_url("https://polymarket.com/event/\u{0007}trump\u{001b}").unwrap();
+        let with_ctrl = sanitize_market_url("https://polymarket.com/event/\u{0007}trump\u{001b}").unwrap();
         assert_eq!(with_ctrl, "https://polymarket.com/event/trump");
 
         // Tab is a control char and gets stripped too — the slug extractor relies
         // on `/event/<slug>` splitting on `/`, so a stray tab mid-slug would
         // otherwise produce a phantom slug.
-        let with_tab =
-            sanitize_market_url("https://polymarket.com/event/\trump").unwrap();
-        assert_eq!(with_tab, "https://polymarket.com/event/rtrump");
+        let with_tab = sanitize_market_url("https://polymarket.com/event/tru\tmp").unwrap();
+        assert_eq!(with_tab, "https://polymarket.com/event/trump");
 
         // Empty / whitespace-only input is rejected before the network call.
         assert!(sanitize_market_url("").is_err());
