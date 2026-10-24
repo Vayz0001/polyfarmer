@@ -8,6 +8,10 @@ ignore = [
     # Compiled and accepted (the first two: reasons in deny.toml).
     "RUSTSEC-2024-0436",
     "RUSTSEC-2026-0173",
+    # basic-toml: unmaintained, compile-time only (askama_derive). crypto-bigint 0.5: timing
+    # variability, blocked on alloy 1.x via the Polymarket SDK. Reasons in deny.toml.
+    "RUSTSEC-2026-0374",
+    "RUSTSEC-2026-0387",
     # lru unsoundness needs a key type whose Drop panics. alloy-provider only keys
     # its caches by u64 block numbers and B256 hashes, which cannot panic on drop,
     # so it is not reachable. Fixed in lru >= 0.18.2, which needs a newer alloy.
