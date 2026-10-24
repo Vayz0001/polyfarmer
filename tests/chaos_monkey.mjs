@@ -4,12 +4,26 @@
 //   1. Zero uncaught JavaScript errors (window.onerror, unhandledrejection).
 //   2. Zero Content-Security-Policy (CSP) violations.
 //   3. Zero backend 500/502/503 HTTP status responses.
+//
+// WARNING: run this ONLY against demo mode (`DEMO=1 cargo run --example serve`).
+// It clicks buttons at random, so on a live instance with a wallet it could start
+// farming, pause markets or cancel real orders. It refuses to run unless you
+// confirm the target is a demo:
+//
+//   CHAOS_TARGET_IS_DEMO=yes node tests/chaos_monkey.mjs
 
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.BASE_URL || "http://127.0.0.1:8080";
 const MONKEY_EVENTS = parseInt(process.env.MONKEY_EVENTS || "1000", 10);
 const EVENT_INTERVAL_MS = 15; // ~66 events per second
+
+if (process.env.CHAOS_TARGET_IS_DEMO !== "yes") {
+  console.error("Refusing to run: this script clicks at random and must only target demo mode.");
+  console.error(`Start the demo (DEMO=1 cargo run --example serve), then run with CHAOS_TARGET_IS_DEMO=yes.`);
+  console.error(`Target would have been: ${BASE_URL}`);
+  process.exit(2);
+}
 
 (async () => {
   let browser;
