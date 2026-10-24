@@ -48,6 +48,9 @@ This is everything that will be in the first public beta (0.1.0).
 
 - The name is written "Polyfarmer" in the dashboard and documentation; the program, crate and commands
   stay lowercase (`polyfarmer`).
+- `tests/chaos_monkey.mjs` refuses to run unless `CHAOS_TARGET_IS_DEMO=yes` is set, because it clicks at
+  random and could act on a live instance.
+- The Code of Conduct names a contact address for reports.
 
 ### Security
 
@@ -82,3 +85,5 @@ This is everything that will be in the first public beta (0.1.0).
 
 - Three old command-line smoke-test binaries, five unused engine helpers, and a redirect for a URL
   from an unreleased earlier UI.
+- The one-off script and data used to create the Hacktoberfest issues (`issues.json`,
+  `scripts/seed_hacktoberfest_issues.py`). They stay in Git history.
