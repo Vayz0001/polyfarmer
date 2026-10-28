@@ -77,6 +77,9 @@ This is everything that will be in the first public beta (0.1.0).
 
 ### Fixed
 
+- Today's reward total on Overview and Rewards now shows while you farm: it is the sum of the per-market amounts,
+  so it always matches the rows (Polymarket's day-total figure lags during the day). The three places that show
+  today's rewards now share one cached request.
 - Unbounded memory growth: a string leaked on every WebSocket error, caches that never evicted, and a
   refresh task that could stay stuck after a panic. Reading the activity log no longer loads the whole
   file.

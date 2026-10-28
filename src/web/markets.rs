@@ -29,16 +29,13 @@ use crate::types::{MarketConfig, OrderStatus, WsCommand};
 use super::auth::{csrf_token, verify_csrf};
 use super::dashboard::{cents, render_markets_table, until};
 use super::input;
+use super::rewards;
 use super::shell::{render, shell, Shell};
 use super::state::WebState;
 
 /// Hard upper bound on any handler-initiated network call — a request
 /// handler must not hang on a flaky upstream.
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(8);
-/// `user_earnings_and_markets_config` scans every reward-eligible market server-
-/// side (can't be scoped to one market) — give it a longer budget. Only runs
-/// in the async Your-position fragment.
-const POSITION_EARNINGS_TIMEOUT: Duration = Duration::from_secs(20);
 /// Polymarket's pagination sentinel (base64 of "-1").
 const TERMINAL_CURSOR: &str = "LTE=";
 /// Book levels per side on the ladder (the ladder area scrolls).
@@ -584,22 +581,16 @@ pub async fn view_position(State(state): State<WebState>, Query(p): Query<Positi
                 .unwrap_or_default()
         }
     };
-    let earn_fut = tokio::time::timeout(
-        POSITION_EARNINGS_TIMEOUT,
-        executor.user_earnings_and_markets_config(Utc::now().date_naive()),
-    );
+    let earn_fut = rewards::today_entries(&state, executor.clone());
     let (scoring, earn_res) = tokio::join!(scoring_fut, earn_fut);
 
     let (reward_pct, earnings_today) = match earn_res {
-        Ok(Ok(entries)) => entries
+        Ok(entries) => entries
             .iter()
             .find(|e| e.condition_id.to_string().eq_ignore_ascii_case(&p.cid))
-            .map(|e| {
-                let earned: Decimal = e.earnings.iter().map(|a| a.earnings).sum();
-                (Some(format!("{:.2}%", e.earning_percentage)), Some(format!("${earned:.2}")))
-            })
+            .map(|e| (Some(format!("{:.2}%", e.earning_percentage)), Some(format!("${:.2}", rewards::earned(e)))))
             .unwrap_or((None, None)),
-        _ => (None, None),
+        Err(_) => (None, None),
     };
 
     let legs: Vec<PositionLeg> = legs_cfg
