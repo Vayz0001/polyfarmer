@@ -78,16 +78,26 @@ fn sanitize_market_url(raw: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("Paste a Polymarket market or event URL first.".into());
     }
-    let scheme = trimmed.split("://").next().unwrap_or("").to_ascii_lowercase();
-    if !ALLOWED_URL_SCHEMES.iter().any(|s| *s == scheme) {
-        return Err(format!("URL must start with http:// or https:// (got \"{scheme}\")."));
-    }
+
+    // If the URL has a scheme, it must be http or https. Scheme-less URLs
+    // (e.g. "polymarket.com/event/x") are accepted and prepended with https://.
+    let normalized = if let Some(scheme_end) = trimmed.find("://") {
+        let scheme = trimmed[..scheme_end].to_ascii_lowercase();
+        if !ALLOWED_URL_SCHEMES.iter().any(|s| *s == scheme) {
+            return Err(format!("URL scheme must be http or https (got \"{scheme}\")."));
+        }
+        trimmed.to_string()
+    } else {
+        // No scheme present — prepend https:// so the URL is valid.
+        format!("https://{}", trimmed)
+    };
+
     // Drop query strings and fragments: share links append tracking params
-    // (?tid=...) and anchors (#...) that would otherwise pollute the slug the
-    // extractor derives from the path.
-    let path_only = match trimmed.find(['?', '#']) {
-        Some(idx) => &trimmed[..idx],
-        None => trimmed,
+    // (?tid=...) and anchors (#...) that would otherwise pollute the slug
+    // the extractor derives from the path.
+    let path_only = match normalized.find(['?', '#']) {
+        Some(idx) => &normalized[..idx],
+        None => &normalized,
     };
     if path_only.is_empty() {
         return Err("Paste a Polymarket market or event URL first.".into());
@@ -1699,5 +1709,13 @@ mod tests {
         assert!(sanitize_market_url("http://polymarket.com/event/x").is_ok());
         // Scheme matching is case-insensitive.
         assert!(sanitize_market_url("HTTPS://polymarket.com/event/x").is_ok());
+
+        // Scheme-less URLs are accepted and prepended with https://.
+        let schemeless = sanitize_market_url("polymarket.com/event/some-market").unwrap();
+        assert_eq!(schemeless, "https://polymarket.com/event/some-market");
+
+        // Scheme-less with trailing slash is normalised.
+        let with_slash = sanitize_market_url("polymarket.com/event/x/").unwrap();
+        assert_eq!(with_slash, "https://polymarket.com/event/x/");
     }
 }
