@@ -323,31 +323,47 @@ impl Executor {
     /// Your reward-eligible markets with both the market's reward config and
     /// your own earning_percentage/earnings for the given date.
     ///
-    /// Unfiltered, this endpoint returns *every* reward-eligible market on
-    /// the platform (500+) with your (mostly-zero) percentage attached — the
-    /// SDK's typed request doesn't expose an only-my-markets filter the way
-    /// the raw HTTP API does. Walking all of it fully paginated is what
-    /// caused this to time out against the live API. Mitigated two ways:
-    /// sort by `earning_percentage` descending so markets you actually have
-    /// a stake in land on the first page(s), and cap how many pages we walk
-    /// so a cold/empty wallet can't hang on an exhaustive walk. Filtering to
-    /// "markets I'm actually tracking" is still done by the caller against
-    /// `AppState.configs`.
+    /// Unfiltered, this endpoint returns *every* reward-eligible market on the
+    /// platform (14,000+) with your (mostly-zero) numbers attached, and the
+    /// SDK's typed request doesn't expose an only-my-markets filter. So it is
+    /// walked twice, each sorted descending and stopped at the first market
+    /// that doesn't matter: by `earnings` (markets that paid you today,
+    /// including ones you have since paused or left) and by
+    /// `earning_percentage` (markets you hold a share in right now, including
+    /// ones that haven't paid yet). The two lists are merged. Sorting by share
+    /// alone lost paused markets: their share drops to 0 and they sink among
+    /// thousands of zero rows, past the page cap.
     pub async fn user_earnings_and_markets_config(&self, date: NaiveDate) -> Result<Vec<UserRewardsEarningResponse>> {
+        let (paid, sharing) = tokio::try_join!(
+            self.reward_markets_walk(date, "earnings", has_earnings),
+            self.reward_markets_walk(date, "earning_percentage", has_share),
+        )?;
+        Ok(merge_reward_markets(paid, sharing))
+    }
+
+    /// One descending walk of `rewards/user/markets`, keeping the rows for
+    /// which `relevant` holds and stopping at the first one that doesn't (the
+    /// rest of a descending sort can't be relevant either), or at the page cap.
+    async fn reward_markets_walk(
+        &self,
+        date: NaiveDate,
+        order_by: &str,
+        relevant: fn(&UserRewardsEarningResponse) -> bool,
+    ) -> Result<Vec<UserRewardsEarningResponse>> {
         const MAX_PAGES: u32 = 5;
-        let request =
-            UserRewardsEarningRequest::builder().date(date).order_by("earning_percentage").position("DESC").build();
-        let mut all = Vec::new();
+        let request = UserRewardsEarningRequest::builder().date(date).order_by(order_by).position("DESC").build();
+        let mut kept = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..MAX_PAGES {
             let page = self.client.user_earnings_and_markets_config(&request, cursor.clone()).await?;
-            all.extend(page.data);
-            if page.next_cursor == TERMINAL_CURSOR {
+            let reached_end = page.data.iter().any(|e| !relevant(e));
+            kept.extend(page.data.into_iter().filter(relevant));
+            if reached_end || page.next_cursor == TERMINAL_CURSOR {
                 break;
             }
             cursor = Some(page.next_cursor);
         }
-        Ok(all)
+        Ok(kept)
     }
 
     /// Collateral (pUSD) balance available to the exchange, in USD. Read-only;
@@ -358,5 +374,67 @@ impl Executor {
         let req = BalanceAllowanceRequest::builder().asset_type(AssetType::Collateral).build();
         let resp = self.client.balance_allowance(req).await?;
         Ok(resp.balance / Decimal::from(1_000_000u32))
+    }
+}
+
+fn has_earnings(e: &UserRewardsEarningResponse) -> bool {
+    e.earnings.iter().map(|a| a.earnings).sum::<Decimal>() > Decimal::ZERO
+}
+
+fn has_share(e: &UserRewardsEarningResponse) -> bool {
+    e.earning_percentage > Decimal::ZERO
+}
+
+/// Union of the two reward-market walks, one row per market (`paid` first).
+fn merge_reward_markets(
+    paid: Vec<UserRewardsEarningResponse>,
+    sharing: Vec<UserRewardsEarningResponse>,
+) -> Vec<UserRewardsEarningResponse> {
+    let mut merged = paid;
+    for e in sharing {
+        if !merged.iter().any(|m| m.condition_id == e.condition_id) {
+            merged.push(e);
+        }
+    }
+    merged
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    fn entry(cid: u8, pct: &str, earned: &str) -> UserRewardsEarningResponse {
+        let zero = format!("0x{}", "0".repeat(40));
+        serde_json::from_value(serde_json::json!({
+            "condition_id": format!("0x{cid:064x}"),
+            "question": "Q", "market_slug": "m", "event_slug": "e", "image": "",
+            "rewards_max_spread": "3", "rewards_min_size": "50", "market_competitiveness": "1",
+            "maker_address": zero, "earning_percentage": pct,
+            "earnings": [{ "asset_address": zero, "earnings": earned, "asset_rate": "1" }],
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn paused_market_with_earnings_is_kept_and_markets_are_not_doubled() {
+        // Paused: no share any more, but it paid earlier today.
+        let paused = entry(1, "0", "0.40");
+        // Farming now and already paid: comes back from both walks.
+        let active = entry(2, "12.5", "0.10");
+        // Just started: a share, nothing paid yet.
+        let fresh = entry(3, "3", "0");
+
+        assert!(has_earnings(&paused) && !has_share(&paused));
+        assert!(has_share(&fresh) && !has_earnings(&fresh));
+
+        let merged = merge_reward_markets(vec![paused.clone(), active.clone()], vec![active, fresh]);
+        let ids: Vec<_> = merged.iter().map(|e| e.condition_id).collect();
+        assert_eq!(
+            ids,
+            vec![entry(1, "0", "0").condition_id, entry(2, "0", "0").condition_id, entry(3, "0", "0").condition_id]
+        );
+        let total: Decimal = merged.iter().flat_map(|e| &e.earnings).map(|a| a.earnings).sum();
+        assert_eq!(total, dec!(0.50));
     }
 }
