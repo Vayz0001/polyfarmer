@@ -24,7 +24,7 @@ use crate::types::{MarketConfig, OrderStatus};
 
 use super::activity::{recent_views, AlertView};
 use super::auth::csrf_token;
-use super::rewards::{history_series, rewards_chart_svg, sum_last_days};
+use super::rewards::{fetch_today_entries, history_series, rewards_chart_svg, sum_last_days, today_key, total_earned};
 use super::shell::{balance_swr, engine_status, render, shell, EngineStatus, Shell};
 use super::state::WebState;
 
@@ -362,22 +362,16 @@ pub async fn overview_kpis(State(state): State<WebState>) -> Html<String> {
             .await
             .ok()
     };
-    let today_fut = async {
-        let executor = executor.clone()?;
+    // Today's rewards come from a slow call: show the cached total and refresh
+    // it in the background so the other numbers never wait for it.
+    let today = executor.clone().and_then(|executor| {
         state
             .caches
-            .rewards_today
-            .get_or_fetch("today", || async {
-                let today = Utc::now().date_naive();
-                let entries = tokio::time::timeout(ACCOUNT_TIMEOUT, executor.total_earnings_for_user_for_day(today))
-                    .await
-                    .map_err(|_| eyre::eyre!("timeout"))??;
-                Ok::<_, eyre::Report>(entries.iter().map(|e| e.earnings).sum::<Decimal>())
-            })
-            .await
-            .ok()
-    };
-    let (value, today) = tokio::join!(value_fut, today_fut);
+            .reward_markets
+            .get_swr(&today_key(), move || fetch_today_entries(executor))
+            .map(|entries| total_earned(&entries))
+    });
+    let value = value_fut.await;
     let st = engine_status(&state).await;
 
     render(&KpisTemplate {

@@ -2,6 +2,7 @@
 //! (lazy — the underlying call is slow), plus the self-built daily history log
 //! (`rewards::history`) as a 30-day chart and table, all on one page.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use askama::Template;
@@ -14,6 +15,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tower_sessions::Session;
 
+use crate::engine::executor::Executor;
 use crate::rewards::portfolio;
 use crate::storage::load_reward_history;
 use crate::types::RewardHistoryFile;
@@ -21,7 +23,6 @@ use crate::types::RewardHistoryFile;
 use super::shell::{render, shell, Shell};
 use super::state::WebState;
 
-const NETWORK_TIMEOUT: Duration = Duration::from_secs(8);
 /// `user_earnings_and_markets_config` is the heaviest call here — it sorts/
 /// scores across every reward-eligible market server-side (the SDK's request
 /// type can't scope it to "my markets" — see
@@ -80,6 +81,42 @@ pub(super) fn rewards_chart_svg(series: &[(NaiveDate, Decimal)]) -> String {
         })
         .collect();
     format!("<svg viewBox=\"0 0 {W} {H}\" class=\"bars-svg\" preserveAspectRatio=\"none\" role=\"img\">{bars}</svg>")
+}
+
+// ── Today's earnings (shared) ───────────────────────────────────────────────
+
+/// Fetch today's per-market reward entries. `'static`, so Overview can run it
+/// as a background refresh (`get_swr`) without holding up its other numbers.
+pub(super) async fn fetch_today_entries(executor: Arc<Executor>) -> eyre::Result<Arc<Vec<UserRewardsEarningResponse>>> {
+    let today = Utc::now().date_naive();
+    let entries = tokio::time::timeout(MARKETS_CONFIG_TIMEOUT, executor.user_earnings_and_markets_config(today))
+        .await
+        .map_err(|_| eyre::eyre!("Polymarket took too long to answer — it retries on the next refresh."))??;
+    Ok(Arc::new(entries))
+}
+
+/// Cache key for today's entries: the UTC date, so totals reset at midnight UTC.
+pub(super) fn today_key() -> String {
+    Utc::now().date_naive().to_string()
+}
+
+/// Today's per-market reward entries, cached (see `Caches::reward_markets`).
+pub(super) async fn today_entries(
+    state: &WebState,
+    executor: Arc<Executor>,
+) -> eyre::Result<Arc<Vec<UserRewardsEarningResponse>>> {
+    state.caches.reward_markets.get_or_fetch(&today_key(), || fetch_today_entries(executor)).await
+}
+
+/// What one market has paid so far today.
+pub(super) fn earned(e: &UserRewardsEarningResponse) -> Decimal {
+    e.earnings.iter().map(|a| a.earnings).sum()
+}
+
+/// Today's total across markets: the sum of the per-market amounts, so it always
+/// matches the rows. (Polymarket's day-total endpoint lags during the day.)
+pub(super) fn total_earned(entries: &[UserRewardsEarningResponse]) -> Decimal {
+    entries.iter().map(earned).sum()
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -199,21 +236,10 @@ pub async fn table(State(state): State<WebState>) -> Html<String> {
     };
     let tracked: Vec<String> =
         state.engine.read().await.configs.iter().map(|c| c.condition_id.to_lowercase()).collect();
-    let today = Utc::now().date_naive();
 
-    let rows_fut = tokio::time::timeout(MARKETS_CONFIG_TIMEOUT, executor.user_earnings_and_markets_config(today));
-    let total_fut = tokio::time::timeout(NETWORK_TIMEOUT, executor.total_earnings_for_user_for_day(today));
-    let (rows_res, total_res) = tokio::join!(rows_fut, total_fut);
-
-    let rows = match rows_res {
-        Ok(Ok(entries)) => entries
-            .into_iter()
-            // The call can't be scoped to "my markets" server-side — only
-            // show markets with an actual stake.
-            .filter(|e| e.earning_percentage > Decimal::ZERO || !e.earnings.is_empty())
-            .map(|e| to_reward_row(e, &tracked))
-            .collect(),
-        Ok(Err(e)) => {
+    let entries = match today_entries(&state, executor).await {
+        Ok(entries) => entries,
+        Err(e) => {
             return render(&RewardsTableTemplate {
                 engine_running: true,
                 rows: Vec::new(),
@@ -221,28 +247,23 @@ pub async fn table(State(state): State<WebState>) -> Html<String> {
                 error: Some(format!("Could not load reward data: {e}")),
             })
         }
-        Err(_) => {
-            return render(&RewardsTableTemplate {
-                engine_running: true,
-                rows: Vec::new(),
-                today_total: None,
-                error: Some("Polymarket took too long to answer — it retries on the next refresh.".to_string()),
-            })
-        }
     };
-    // Non-fatal: today's total may legitimately not be ready yet.
-    let today_total = match total_res {
-        Ok(Ok(entries)) => Some(format!("${:.4}", entries.iter().map(|e| e.earnings).sum::<Decimal>())),
-        _ => None,
-    };
+    let today_total = Some(format!("${:.4}", total_earned(&entries)));
+    let rows = entries
+        .iter()
+        // The call can't be scoped to "my markets" server-side — only
+        // show markets with an actual stake.
+        .filter(|e| e.earning_percentage > Decimal::ZERO || !e.earnings.is_empty())
+        .map(|e| to_reward_row(e, &tracked))
+        .collect();
     render(&RewardsTableTemplate { engine_running: true, rows, today_total, error: None })
 }
 
-fn to_reward_row(e: UserRewardsEarningResponse, tracked: &[String]) -> RewardRow {
-    let earnings_today: Decimal = e.earnings.iter().map(|a| a.earnings).sum();
+fn to_reward_row(e: &UserRewardsEarningResponse, tracked: &[String]) -> RewardRow {
+    let earnings_today = earned(e);
     let cid = e.condition_id.to_string().to_lowercase();
     RewardRow {
-        label: e.question,
+        label: e.question.clone(),
         percentage: format!("{:.2}%", e.earning_percentage),
         earnings_today: format!("${earnings_today:.4}"),
         min_size: format!("{} sh", e.rewards_min_size.normalize()),
@@ -275,5 +296,28 @@ mod tests {
         assert_eq!(sum_last_days(&s, 7), dec!(2));
         assert_eq!(sum_last_days(&s, 30), dec!(7));
         assert!(rewards_chart_svg(&s).contains("<rect"));
+    }
+
+    fn entry(cid: u8, earnings: &[&str]) -> UserRewardsEarningResponse {
+        let zero = format!("0x{}", "0".repeat(40));
+        let earnings: Vec<_> = earnings
+            .iter()
+            .map(|e| serde_json::json!({ "asset_address": zero, "earnings": e, "asset_rate": "1" }))
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "condition_id": format!("0x{cid:064x}"),
+            "question": "Q", "market_slug": "m", "event_slug": "e", "image": "",
+            "rewards_max_spread": "3", "rewards_min_size": "50", "market_competitiveness": "1",
+            "maker_address": zero, "earning_percentage": "1.5", "earnings": earnings,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn today_total_is_the_sum_of_the_market_rows() {
+        let entries = vec![entry(1, &["0.25", "0.05"]), entry(2, &["1.10"]), entry(3, &[])];
+        assert_eq!(earned(&entries[0]), dec!(0.30));
+        assert_eq!(total_earned(&entries), dec!(1.40));
+        assert_eq!(total_earned(&[]), Decimal::ZERO);
     }
 }

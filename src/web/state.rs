@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use polymarket_client_sdk_v2::clob::types::response::UserRewardsEarningResponse;
 use rust_decimal::Decimal;
 use tokio::sync::{broadcast, mpsc, Notify, RwLock};
 
@@ -24,7 +25,7 @@ use super::session_store::BoundedSessionStore;
 const SCORING_TTL: Duration = Duration::from_secs(15);
 const BALANCE_TTL: Duration = Duration::from_secs(15);
 const PORTFOLIO_TTL: Duration = Duration::from_secs(15);
-const REWARDS_TTL: Duration = Duration::from_secs(60);
+const REWARDS_TTL: Duration = Duration::from_secs(30);
 const PAYOUTS_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Clone)]
@@ -83,8 +84,9 @@ pub struct Caches {
     pub positions: Arc<TtlCache<Vec<Position>>>,
     pub value: Arc<TtlCache<Decimal>>,
     pub activity: Arc<TtlCache<Vec<Activity>>>,
-    /// Today's accrued reward total (single key). Polymarket updates it slowly.
-    pub rewards_today: Arc<TtlCache<Decimal>>,
+    /// Today's per-market reward entries (earning % and $ so far), keyed by
+    /// UTC date. One heavy call shared by Overview, Rewards and the market view.
+    pub reward_markets: Arc<TtlCache<Arc<Vec<UserRewardsEarningResponse>>>>,
     /// Full reward payout history (one payout a day — slow-moving).
     pub reward_payouts: Arc<TtlCache<Vec<Activity>>>,
 }
@@ -97,7 +99,7 @@ impl Default for Caches {
             positions: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
             value: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
             activity: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
-            rewards_today: Arc::new(TtlCache::new(REWARDS_TTL)),
+            reward_markets: Arc::new(TtlCache::new(REWARDS_TTL)),
             reward_payouts: Arc::new(TtlCache::new(PAYOUTS_TTL)),
         }
     }
