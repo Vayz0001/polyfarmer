@@ -36,7 +36,8 @@ manage everything from a local web dashboard.
   never sent anywhere except to sign orders for Polymarket.
 - **Safety first.** Every order is protected by settings you control, and everything is cancelled when
   something looks wrong.
-- **See what you earn.** Live order book, reward score for each order, positions, daily and all-time rewards.
+- **See what you earn.** Live order book, reward score for each order, positions, today's rewards by market, daily
+  payouts, and your rank among liquidity providers.
 
 ### Protection for every order
 
@@ -57,7 +58,7 @@ manage everything from a local web dashboard.
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/markets.png" alt="Markets page listing every leg with status, distance, score, size and expiry"><br><sub><b>Markets</b>: every leg with its status, distance from the midpoint, reward score, size and expiry. Pause, resume, edit in place or remove.</sub></td>
-    <td width="50%"><img src="docs/screenshots/rewards.png" alt="Rewards page with daily and all-time rewards"><br><sub><b>Rewards</b>: today's accrual, a 30-day history and the all-time total.</sub></td>
+    <td width="50%"><img src="docs/screenshots/rewards.png" alt="Rewards page with today's earnings by market, daily payouts and LP rank"><br><sub><b>Rewards</b>: today's earnings for each market you farm, yesterday's payout, a 30-day payout chart, the all-time total and your LP rank.</sub></td>
   </tr>
 </table>
 
@@ -277,7 +278,9 @@ The short version, since this program holds a wallet key:
   value you enter is range-checked.
 - Secrets are written owner-only and atomically on Linux and macOS, the process disables core dumps on
   Linux, and the systemd unit drops everything it does not need.
-- Polyfarmer talks only to Polymarket, a Polygon RPC, and the browser you connect.
+- Polyfarmer talks only to Polymarket, a Polygon RPC, and the browser you connect. The one exception is the LP
+  rank on the Rewards page: it downloads the public leaderboard files of [PolyRewards](https://polyrewards.fun), a
+  community site, and finds your wallet in them locally. Your address is never sent to it.
 
 Details, the limits of what is covered, and how to report a vulnerability privately are in
 [SECURITY.md](SECURITY.md).

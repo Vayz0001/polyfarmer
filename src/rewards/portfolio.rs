@@ -8,6 +8,7 @@
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use chrono::{DateTime, NaiveDate, Utc};
 use eyre::Result;
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -145,20 +146,33 @@ pub async fn reward_payouts(user: &str) -> Result<Vec<Activity>> {
     Ok(all)
 }
 
-/// All-time reward summary over a set of payouts.
-pub struct RewardTotals {
-    pub total: Decimal,
-    pub payouts: usize,
-    /// Unix seconds of the earliest payout.
-    pub first_ts: Option<i64>,
+/// One day's liquidity rewards as paid out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DailyPayout {
+    /// The UTC day the rewards were earned.
+    pub earned_day: NaiveDate,
+    /// When the (first) payout for that day landed.
+    pub paid_at: DateTime<Utc>,
+    pub amount: Decimal,
 }
 
-pub fn summarize_rewards(payouts: &[Activity]) -> RewardTotals {
-    RewardTotals {
-        total: payouts.iter().map(|a| a.usdc_size).sum(),
-        payouts: payouts.len(),
-        first_ts: payouts.iter().map(|a| a.timestamp).min(),
+/// Group payouts by day, newest first. Polymarket pays each UTC day's rewards
+/// shortly after the following midnight UTC, so a payout dated D is for D − 1.
+pub fn daily_payouts(payouts: &[Activity]) -> Vec<DailyPayout> {
+    let mut days: Vec<DailyPayout> = Vec::new();
+    for a in payouts {
+        let Some(paid_at) = DateTime::<Utc>::from_timestamp(a.timestamp, 0) else { continue };
+        let Some(earned_day) = paid_at.date_naive().pred_opt() else { continue };
+        match days.iter_mut().find(|d| d.earned_day == earned_day) {
+            Some(d) => {
+                d.amount += a.usdc_size;
+                d.paid_at = d.paid_at.min(paid_at);
+            }
+            None => days.push(DailyPayout { earned_day, paid_at, amount: a.usdc_size }),
+        }
     }
+    days.sort_by_key(|d| std::cmp::Reverse(d.earned_day));
+    days
 }
 
 #[derive(Debug, Deserialize)]
@@ -233,11 +247,44 @@ mod tests {
         .unwrap();
         assert!(page.pagination.has_more);
         assert_eq!(page.pagination.next_cursor.as_deref(), Some("abc"));
-        let t = summarize_rewards(&page.data);
-        assert_eq!(t.total.to_string(), "3.75");
-        assert_eq!((t.payouts, t.first_ts), (2, Some(10)));
+        let total: Decimal = page.data.iter().map(|a| a.usdc_size).sum();
+        assert_eq!(total.to_string(), "3.75");
 
         let v: ValueResp = serde_json::from_str(r#"{"data":{"proxy_wallet":"0x1","value":2481.2971}}"#).unwrap();
         assert_eq!(v.data.value.to_string(), "2481.2971");
+    }
+
+    fn payout(ts: i64, usd: &str) -> Activity {
+        serde_json::from_value(serde_json::json!({ "timestamp": ts, "type": "REWARD", "usdc_size": usd })).unwrap()
+    }
+
+    #[test]
+    fn payouts_group_by_the_day_they_were_earned() {
+        // 2026-10-29 00:00:10 UTC, 2026-10-28 00:05:14 and 03:00:00 UTC (two payouts, one day).
+        let days =
+            daily_payouts(&[payout(1793232010, "39.2737"), payout(1793145914, "1.5"), payout(1793156400, "0.5")]);
+        let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        assert_eq!(days.len(), 2);
+        assert_eq!((days[0].earned_day, days[0].amount.to_string()), (d("2026-10-28"), "39.2737".into()));
+        assert_eq!((days[1].earned_day, days[1].amount.to_string()), (d("2026-10-27"), "2.0".into()));
+        assert_eq!(days[1].paid_at.timestamp(), 1793145914);
+        assert!(daily_payouts(&[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod live {
+    /// Against the live Data API (`cargo test -- --ignored`): an active LP
+    /// wallet has one payout per earned day, paid just after midnight UTC.
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn real_payouts_are_one_per_day() {
+        let raw = super::reward_payouts("0x9d84ce0306f8551e02efef1680475fc0f1dc1344").await.unwrap();
+        let days = super::daily_payouts(&raw);
+        assert!(days.len() > 30, "{} days", days.len());
+        for d in days.iter().take(30) {
+            assert_eq!(d.paid_at.date_naive().pred_opt(), Some(d.earned_day));
+        }
+        println!("raw {} -> {} days; newest {:?}", raw.len(), days.len(), days.first());
     }
 }

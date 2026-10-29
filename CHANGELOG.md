@@ -43,6 +43,8 @@ This is everything that will be in the first public beta (0.1.0).
   through Homebrew).
 - A logo: a blue stem with a green leaf. The dashboard shows it in the sidebar, and browser tabs have a favicon
   and touch icon for the first time. Ready-made variants (transparent, dark blue, black) are in `docs/brand`.
+- Your rank among Polymarket liquidity providers on the Rewards page, with a "Top 1%"-style tier, from the public
+  leaderboard files of PolyRewards (a community site). Your wallet is looked up locally; its address is never sent.
 
 ### Changed
 
@@ -51,6 +53,12 @@ This is everything that will be in the first public beta (0.1.0).
 - `tests/chaos_monkey.mjs` refuses to run unless `CHAOS_TARGET_IS_DEMO=yes` is set, because it clicks at
   random and could act on a live instance.
 - The Code of Conduct names a contact address for reports.
+- A clearer Rewards page. The top row shows today so far, yesterday, the last 7 days, all time and your LP rank.
+  "Today, by market" lists only the markets you farm (with their status) plus any market that paid today. The daily
+  chart and table are one "Daily payouts" panel. The Overview rewards panel loads in the background.
+- Reward history now comes from your actual payouts in Polymarket's activity feed, so it starts from your first
+  payout ever, not from the day Polyfarmer was installed, and can't miss or misrecord a day.
+- The demo (`examples/serve`) can run on another port with `DASHBOARD_BIND`, and shows sample reward data.
 
 ### Security
 
@@ -82,6 +90,7 @@ This is everything that will be in the first public beta (0.1.0).
   today's rewards now share one cached request.
 - Today's rewards now include markets you have paused or stopped farming since they paid. Before, those dropped out of
   the per-market list and the total once their live share fell to 0%.
+- "Today, by market" no longer lists hundreds of markets you don't farm.
 - Unbounded memory growth: a string leaked on every WebSocket error, caches that never evicted, and a
   refresh task that could stay stuck after a panic. Reading the activity log no longer loads the whole
   file.
@@ -95,3 +104,5 @@ This is everything that will be in the first public beta (0.1.0).
   from an unreleased earlier UI.
 - The one-off script and data used to create the Hacktoberfest issues (`issues.json`,
   `scripts/seed_hacktoberfest_issues.py`). They stay in Git history.
+- The daily reward snapshot file (`data/reward_history.json`) and its `REWARD_HISTORY_FILE` setting; history comes
+  from Polymarket's payout records instead. An existing file is simply no longer read.

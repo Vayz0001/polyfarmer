@@ -19,12 +19,13 @@ use rust_decimal_macros::dec;
 use tower_sessions::Session;
 
 use crate::rewards::{gamma_resolve, market_data, portfolio};
-use crate::storage::load_reward_history;
 use crate::types::{MarketConfig, OrderStatus};
 
 use super::activity::{recent_views, AlertView};
 use super::auth::csrf_token;
-use super::rewards::{fetch_today_entries, history_series, rewards_chart_svg, sum_last_days, today_key, total_earned};
+use super::rewards::{
+    fetch_today_entries, history_series, load_payouts, rewards_chart_svg, sum_last_days, today_key, total_earned,
+};
 use super::shell::{balance_swr, engine_status, render, shell, EngineStatus, Shell};
 use super::state::WebState;
 
@@ -289,27 +290,49 @@ struct OverviewTemplate {
     st: EngineStatus,
     has_wallet: bool,
     rows: Vec<MarketRow>,
-    chart_svg: String,
-    rewards_7d: String,
-    rewards_30d: String,
     alerts: Vec<AlertView>,
 }
 
 pub async fn overview(State(state): State<WebState>, session: Session) -> Html<String> {
     let st = engine_status(&state).await;
     let rows = build_rows(&state).await;
-    let history = load_reward_history(&state.reward_history_file).unwrap_or_default();
-    let series = history_series(&history, 30);
     render(&OverviewTemplate {
         shell: shell(&session, "overview").await,
         st,
         has_wallet: state.store.has_wallet(),
         rows,
-        chart_svg: rewards_chart_svg(&series),
-        rewards_7d: usd(sum_last_days(&series, 7)),
-        rewards_30d: usd(sum_last_days(&series, 30)),
         alerts: recent_views(&state, 6),
     })
+}
+
+#[derive(Template)]
+#[template(path = "_overview_rewards.html")]
+struct OverviewRewardsTemplate {
+    error: Option<String>,
+    chart_svg: String,
+    rewards_7d: String,
+    rewards_30d: String,
+}
+
+/// GET /overview/rewards — last 7 / 30 days of payouts and the daily chart.
+pub async fn overview_rewards(State(state): State<WebState>) -> Html<String> {
+    match load_payouts(&state).await {
+        Ok(days) => {
+            let series = history_series(&days, 30);
+            render(&OverviewRewardsTemplate {
+                error: None,
+                chart_svg: rewards_chart_svg(&series),
+                rewards_7d: usd(sum_last_days(&series, 7)),
+                rewards_30d: usd(sum_last_days(&series, 30)),
+            })
+        }
+        Err(e) => render(&OverviewRewardsTemplate {
+            error: Some(e),
+            chart_svg: String::new(),
+            rewards_7d: String::new(),
+            rewards_30d: String::new(),
+        }),
+    }
 }
 
 #[derive(Template)]
@@ -364,13 +387,12 @@ pub async fn overview_kpis(State(state): State<WebState>) -> Html<String> {
     };
     // Today's rewards come from a slow call: show the cached total and refresh
     // it in the background so the other numbers never wait for it.
-    let today = executor.clone().and_then(|executor| {
-        state
-            .caches
-            .reward_markets
-            .get_swr(&today_key(), move || fetch_today_entries(executor))
-            .map(|entries| total_earned(&entries))
-    });
+    let cache = &state.caches.reward_markets;
+    let today = match executor.clone() {
+        Some(executor) => cache.get_swr(&today_key(), move || fetch_today_entries(executor)),
+        None => cache.peek(&today_key()).map(|(v, _)| v),
+    }
+    .map(|entries| total_earned(&entries));
     let value = value_fut.await;
     let st = engine_status(&state).await;
 

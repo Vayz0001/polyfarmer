@@ -13,13 +13,15 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{Duration, Utc};
+use polyfarmer::cache::TtlCache;
 use polyfarmer::creds::CredentialStore;
 use polyfarmer::engine::orderbook::TokenBook;
 use polyfarmer::engine::ws_manager::AppState;
+use polyfarmer::rewards::lp_rank::LpRank;
 use polyfarmer::rewards::{gamma_resolve, market_data, markets_browse};
-use polyfarmer::storage::{append_alert, save_reward_history};
-use polyfarmer::types::{Alert, AlertLevel, EnginePhase, MarketConfig, OrderStatus, RewardHistoryFile, RewardSnapshot};
-use polyfarmer::web::{events, router, WebState};
+use polyfarmer::storage::append_alert;
+use polyfarmer::types::{Alert, AlertLevel, EnginePhase, MarketConfig, OrderStatus};
+use polyfarmer::web::{events, router, Caches, WebState};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tokio::sync::RwLock;
@@ -32,15 +34,24 @@ async fn main() {
 
     let engine = Arc::new(RwLock::new(AppState::new(format!("{dir}/markets.json").into())));
     let (alert_tx, _) = tokio::sync::broadcast::channel(64);
-    let state = WebState::with_config(
+    let mut state = WebState::with_config(
         Arc::new(store),
         Arc::clone(&engine),
         None,
-        format!("{dir}/reward_history.json").into(),
         alert_tx,
         format!("{dir}/alerts.json").into(),
         Arc::new(tokio::sync::Notify::new()),
     );
+    if demo && std::env::var("DEMO_WALLET").is_err() {
+        // Sample reward data never expires, so it isn't replaced by real (empty) reads.
+        let forever = std::time::Duration::from_secs(10 * 365 * 86_400);
+        state.caches = Arc::new(Caches {
+            reward_payouts: Arc::new(TtlCache::new(forever)),
+            reward_markets: Arc::new(TtlCache::new(forever)),
+            lp_rank: Arc::new(TtlCache::new(forever)),
+            ..Caches::default()
+        });
+    }
 
     if demo {
         seed_demo(&state, dir).await;
@@ -53,8 +64,8 @@ async fn main() {
     events::spawn_state_watcher(state.clone());
     polyfarmer::web::prewarm_browse();
 
-    let bind = "127.0.0.1:8080";
-    let listener = tokio::net::TcpListener::bind(bind).await.expect("bind");
+    let bind = std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());
+    let listener = tokio::net::TcpListener::bind(&bind).await.expect("bind");
     println!("dashboard preview → http://{bind}");
     let svc = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
     axum::serve(listener, svc).await.expect("serve");
@@ -69,8 +80,11 @@ async fn seed_demo(state: &WebState, dir: &str) {
         let key = format!("0x{}", hex::encode(rand::random::<[u8; 32]>()));
         state.store.set_wallet(&key, "0x0000000000000000000000000000000000000001").expect("set wallet");
     }
+    // DEMO_WALLET=<address> shows that wallet's real public payouts and rank;
+    // without it the Rewards page gets sample data.
     let wallet = std::env::var("DEMO_WALLET").ok();
-    state.set_wallet_address(wallet);
+    let sample_rewards = wallet.is_none();
+    state.set_wallet_address(Some(wallet.unwrap_or_else(|| DEMO_ADDRESS.into())));
     println!("\n  DEMO mode — password: demo-password\n");
 
     // Top reward markets by daily pool → one both-sides and two one-side farms.
@@ -141,19 +155,11 @@ async fn seed_demo(state: &WebState, dir: &str) {
         s.last_heartbeat_ok = Some(Instant::now());
     }
 
-    // Sample history + alerts (only once per demo dir).
-    let hist_path = std::path::PathBuf::from(format!("{dir}/reward_history.json"));
-    if !hist_path.exists() {
-        let today = Utc::now().date_naive();
-        let snapshots = (1..=30)
-            .map(|d| RewardSnapshot {
-                date: today - Duration::days(d),
-                total_earnings: Decimal::from((d * 37) % 23 + 4) / dec!(3) + dec!(1.25),
-                captured_at: Utc::now(),
-            })
-            .collect();
-        let _ = save_reward_history(&hist_path, &RewardHistoryFile { snapshots });
+    if sample_rewards {
+        seed_sample_rewards(state).await;
     }
+
+    // Sample alerts (only once per demo dir).
     let alerts_path = std::path::PathBuf::from(format!("{dir}/alerts.json"));
     if !alerts_path.exists() {
         let label =
@@ -199,6 +205,53 @@ async fn seed_demo(state: &WebState, dir: &str) {
             s.last_heartbeat_ok = Some(Instant::now());
         }
     });
+}
+
+const DEMO_ADDRESS: &str = "0x00000000000000000000000000000000000000de";
+
+/// 30 days of payouts, today's per-market earnings for the demo farms (plus one
+/// removed market that paid), and a leaderboard rank.
+async fn seed_sample_rewards(state: &WebState) {
+    let today = Utc::now().date_naive();
+    let payouts: Vec<_> = (1..=30)
+        .map(|d: i64| {
+            let paid = (today - Duration::days(d - 1)).and_hms_opt(0, 0, 10).unwrap().and_utc();
+            let usd = Decimal::from((d * 37) % 23 + 4) / dec!(3) + dec!(1.25);
+            serde_json::from_value(serde_json::json!({
+                "timestamp": paid.timestamp(), "type": "REWARD", "usdc_size": usd.round_dp(4).to_string(),
+            }))
+            .unwrap()
+        })
+        .collect();
+    state.caches.reward_payouts.put(DEMO_ADDRESS, payouts);
+
+    let zero = format!("0x{}", "0".repeat(40));
+    let entry = |cid: &str, question: &str, slug: &str, pct: &str, earned: &str, pool: &str| {
+        serde_json::from_value(serde_json::json!({
+            "condition_id": cid, "question": question, "market_slug": slug, "event_slug": slug, "image": "",
+            "rewards_max_spread": "3", "rewards_min_size": "100", "market_competitiveness": "1",
+            "maker_address": zero, "earning_percentage": pct,
+            "earnings": [{ "asset_address": zero, "earnings": earned, "asset_rate": "1" }],
+            "rewards_config": [{ "asset_address": zero, "start_date": "2026-01-01", "end_date": "2099-01-01",
+                                 "rate_per_day": pool, "total_rewards": "0" }],
+        }))
+        .unwrap()
+    };
+    let mut seen = Vec::new();
+    let mut entries = Vec::new();
+    for c in state.engine.read().await.configs.iter() {
+        if seen.contains(&c.condition_id) {
+            continue;
+        }
+        // Per demo market: farming, farming, waiting, paused (after earning earlier).
+        let (pct, earned) = [("4.12", "1.8312"), ("2.50", "0.9120"), ("0", "0"), ("0", "0.4400")][seen.len() % 4];
+        seen.push(c.condition_id.clone());
+        let slug = c.url.rsplit('/').next().unwrap_or_default();
+        entries.push(entry(&c.condition_id, &c.label, slug, pct, earned, "250"));
+    }
+    entries.push(entry(&format!("0x{}", "ab".repeat(32)), "A market you removed today", "", "0", "0.2150", "100"));
+    state.caches.reward_markets.put(&today.to_string(), Arc::new(entries));
+    state.caches.lp_rank.put(DEMO_ADDRESS, LpRank::Ranked { rank: 1_482, total: 171_709 });
 }
 
 fn to_token_book(b: &market_data::BookSnapshot) -> TokenBook {

@@ -6,7 +6,7 @@ use eyre::Result;
 use polymarket_client_sdk_v2::auth::state::Authenticated;
 use polymarket_client_sdk_v2::auth::Normal;
 use polymarket_client_sdk_v2::clob::types::request::UserRewardsEarningRequest;
-use polymarket_client_sdk_v2::clob::types::response::{TotalUserEarningResponse, UserRewardsEarningResponse};
+use polymarket_client_sdk_v2::clob::types::response::UserRewardsEarningResponse;
 use polymarket_client_sdk_v2::clob::types::SignatureType;
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal::Decimal;
@@ -306,18 +306,12 @@ impl Executor {
     // ── Reward data (read-only, display) ────────────────────────────────────
     // No retry/backoff here, unlike the order-management methods above — these
     // back dashboard reads, not money-moving actions. A transient failure just
-    // propagates to the caller (web handler shows "try again" / the daily
-    // poller retries on its next tick).
+    // propagates to the caller (the web handler shows "try again").
 
     /// Batch scoring check — one call for the whole markets table instead of
     /// one per row.
     pub async fn are_orders_scoring(&self, order_ids: &[&str]) -> Result<HashMap<String, bool>> {
         Ok(self.client.are_orders_scoring(order_ids).await?)
-    }
-
-    /// Total reward earnings (by asset) for a single UTC date.
-    pub async fn total_earnings_for_user_for_day(&self, date: NaiveDate) -> Result<Vec<TotalUserEarningResponse>> {
-        Ok(self.client.total_earnings_for_user_for_day(date).await?)
     }
 
     /// Your reward-eligible markets with both the market's reward config and

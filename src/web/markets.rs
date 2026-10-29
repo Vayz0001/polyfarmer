@@ -581,16 +581,16 @@ pub async fn view_position(State(state): State<WebState>, Query(p): Query<Positi
                 .unwrap_or_default()
         }
     };
-    let earn_fut = rewards::today_entries(&state, executor.clone());
+    let earn_fut = rewards::today_entries(&state);
     let (scoring, earn_res) = tokio::join!(scoring_fut, earn_fut);
 
     let (reward_pct, earnings_today) = match earn_res {
-        Ok(entries) => entries
+        Some(Ok(entries)) => entries
             .iter()
             .find(|e| e.condition_id.to_string().eq_ignore_ascii_case(&p.cid))
             .map(|e| (Some(format!("{:.2}%", e.earning_percentage)), Some(format!("${:.2}", rewards::earned(e)))))
             .unwrap_or((None, None)),
-        Err(_) => (None, None),
+        _ => (None, None),
     };
 
     let legs: Vec<PositionLeg> = legs_cfg

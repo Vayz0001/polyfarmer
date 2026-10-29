@@ -24,4 +24,4 @@ mod state;
 
 pub use markets::prewarm_browse;
 pub use router::router;
-pub use state::{EngineHandle, WebState};
+pub use state::{Caches, EngineHandle, WebState};

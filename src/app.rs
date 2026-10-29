@@ -107,7 +107,6 @@ pub async fn run() -> Result<()> {
                     Arc::clone(&store),
                     Arc::clone(&state),
                     config.polygon_rpc_url.clone(),
-                    config.reward_history_file.clone(),
                     alert_tx.clone(),
                     config.alerts_file.clone(),
                     Arc::clone(&quote_nudge),
@@ -248,18 +247,11 @@ pub async fn run() -> Result<()> {
     // ── Spawn: Heartbeat ──────────────────────────────────────────────────────
     heartbeat::spawn(Arc::clone(&executor), Arc::clone(&alerter), Arc::clone(&state), stop_rx.clone());
 
-    // ── Spawn: daily reward-history snapshot ──────────────────────────────────
     // markets.json needs no poll loop — the web handlers are the only write path
     // and mutate `AppState` directly; ws_manager's
     // connect loop always re-derives its subscription set fresh from
     // `AppState.configs` on every (re)connect, so there's nothing left to
     // reconcile from a periodic file diff.
-    crate::rewards::history::spawn(
-        Arc::clone(&executor),
-        Arc::clone(&alerter),
-        config.reward_history_file.clone(),
-        stop_rx.clone(),
-    );
 
     // ── Spawn: 30s quote timer (fallback re-evaluation) ───────────────────────
     {

@@ -41,12 +41,8 @@
           <h2>Rewards · last 30 days</h2>
           <a class="meta" href="/rewards">Details →</a>
         </div>
-        <div class="panel-body">
-          <div class="kv" style="margin-bottom:12px">
-            <div class="kv-row"><span class="k">Last 7 days</span><span class="v">{{ rewards_7d }}</span></div>
-            <div class="kv-row"><span class="k">Last 30 days</span><span class="v">{{ rewards_30d }}</span></div>
-          </div>
-          {{ chart_svg|safe }}
+        <div class="panel-body" hx-get="/overview/rewards" hx-trigger="load" hx-swap="innerHTML">
+          <div class="skel-rows"><span class="skel"></span><span class="skel"></span></div>
         </div>
       </section>
 

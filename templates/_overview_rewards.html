@@ -1,0 +1,9 @@
+{% if let Some(e) = error %}
+<div class="feed-empty">{{ e }}</div>
+{% else %}
+<div class="kv" style="margin-bottom:12px">
+  <div class="kv-row"><span class="k">Last 7 days</span><span class="v">{{ rewards_7d }}</span></div>
+  <div class="kv-row"><span class="k">Last 30 days</span><span class="v">{{ rewards_30d }}</span></div>
+</div>
+{{ chart_svg|safe }}
+{% endif %}

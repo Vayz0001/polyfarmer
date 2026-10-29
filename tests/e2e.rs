@@ -52,13 +52,12 @@ impl TestServer {
         let store = Arc::new(CredentialStore::open(&data_dir).expect("open credential store"));
         let markets_file = data_dir.join("markets.json");
         let alerts_file = data_dir.join("alerts.json");
-        let reward_history_file = data_dir.join("reward_history.json");
 
         let engine = Arc::new(RwLock::new(AppState::new(markets_file)));
         let (alert_tx, _) = broadcast::channel::<Alert>(64);
         let quote_nudge = Arc::new(Notify::new());
 
-        let state = WebState::with_config(store, engine, None, reward_history_file, alert_tx, alerts_file, quote_nudge);
+        let state = WebState::with_config(store, engine, None, alert_tx, alerts_file, quote_nudge);
 
         let app: Router = router(state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind ephemeral port");

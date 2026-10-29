@@ -14,6 +14,7 @@ use crate::cache::TtlCache;
 use crate::creds::CredentialStore;
 use crate::engine::executor::Executor;
 use crate::engine::ws_manager::AppState;
+use crate::rewards::lp_rank::LpRank;
 use crate::rewards::portfolio::{Activity, Position};
 use crate::types::{Alert, WsCommand};
 
@@ -27,6 +28,9 @@ const BALANCE_TTL: Duration = Duration::from_secs(15);
 const PORTFOLIO_TTL: Duration = Duration::from_secs(15);
 const REWARDS_TTL: Duration = Duration::from_secs(30);
 const PAYOUTS_TTL: Duration = Duration::from_secs(300);
+/// PolyRewards publishes about twice a day; the list itself is only downloaded
+/// again when it changes (see `rewards::lp_rank`).
+const LP_RANK_TTL: Duration = Duration::from_secs(3600);
 
 #[derive(Clone)]
 pub struct WebState {
@@ -49,9 +53,6 @@ pub struct WebState {
     /// channel from request handlers (market add/remove/pause, reward reads).
     /// `None` until `EnginePhase::Running`.
     pub engine_handle: EngineHandle,
-    /// Path to the self-built daily reward-history log (see `rewards::history`
-    /// — Polymarket has no range/history endpoint, only single-day queries).
-    pub reward_history_file: PathBuf,
     /// Live alert fan-out: the engine's `Alerter` publishes every alert here;
     /// the `/events` SSE endpoint subscribes to push them to the UI.
     pub alert_tx: broadcast::Sender<Alert>,
@@ -89,6 +90,8 @@ pub struct Caches {
     pub reward_markets: Arc<TtlCache<Arc<Vec<UserRewardsEarningResponse>>>>,
     /// Full reward payout history (one payout a day — slow-moving).
     pub reward_payouts: Arc<TtlCache<Vec<Activity>>>,
+    /// Your PolyRewards leaderboard rank, keyed by wallet address.
+    pub lp_rank: Arc<TtlCache<LpRank>>,
 }
 
 impl Default for Caches {
@@ -101,6 +104,7 @@ impl Default for Caches {
             activity: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
             reward_markets: Arc::new(TtlCache::new(REWARDS_TTL)),
             reward_payouts: Arc::new(TtlCache::new(PAYOUTS_TTL)),
+            lp_rank: Arc::new(TtlCache::new(LP_RANK_TTL)),
         }
     }
 }
@@ -149,23 +153,13 @@ impl WebState {
         polygon_rpc_url: Option<String>,
     ) -> Self {
         let (alert_tx, _) = broadcast::channel(16);
-        Self::with_config(
-            store,
-            engine,
-            polygon_rpc_url,
-            "data/reward_history.json".into(),
-            alert_tx,
-            "data/alerts.json".into(),
-            Arc::new(Notify::new()),
-        )
+        Self::with_config(store, engine, polygon_rpc_url, alert_tx, "data/alerts.json".into(), Arc::new(Notify::new()))
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn with_config(
         store: Arc<CredentialStore>,
         engine: Arc<RwLock<AppState>>,
         polygon_rpc_url: Option<String>,
-        reward_history_file: PathBuf,
         alert_tx: broadcast::Sender<Alert>,
         alerts_file: PathBuf,
         quote_nudge: Arc<Notify>,
@@ -179,7 +173,6 @@ impl WebState {
             polygon_rpc_url,
             wallet_ready: Arc::new(Notify::new()),
             engine_handle: EngineHandle::new(),
-            reward_history_file,
             alert_tx,
             state_tx,
             alerts_file,
