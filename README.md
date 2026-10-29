@@ -76,11 +76,11 @@ Pick your system:
 
    ```bash
    # Debian / Ubuntu
-   sudo apt install build-essential pkg-config libssl-dev git curl
+   sudo apt install build-essential cmake pkg-config libssl-dev git curl
    # Fedora
-   sudo dnf install gcc pkgconf-pkg-config openssl-devel git curl
+   sudo dnf install gcc cmake pkgconf-pkg-config openssl-devel git curl
    # Arch
-   sudo pacman -S base-devel openssl pkgconf git curl
+   sudo pacman -S base-devel cmake openssl pkgconf git curl
    ```
 
 2. Install Rust with [rustup](https://rustup.rs), then restart your terminal.
