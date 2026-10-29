@@ -101,8 +101,10 @@ pub struct LegRow {
     /// Reward-zone fit of the live order: Some(true) in zone, Some(false)
     /// drifted out, None unknown (not live / no reward params yet).
     pub in_zone: Option<bool>,
-    /// Scoring weight of the live order, "56%".
+    /// Scoring weight of the live order after Polymarket's two-sided rule, "19%".
     pub weight: Option<String>,
+    /// Hover text explaining `weight` (two-sided, one-sided ÷3, or nothing).
+    pub weight_note: String,
     /// Polymarket's own verdict on whether the live order is scoring.
     pub scoring: Option<bool>,
     /// How the engine places this leg: "2.0¢ below best bid".
@@ -115,6 +117,10 @@ pub struct LegRow {
     pub expires: String,
     pub expires_title: String,
     pub auto_pause: Option<String>,
+    token_id: String,
+    mid_value: Option<Decimal>,
+    /// This order's own weight, before the two-sided rule (live legs only).
+    raw_weight: Option<Decimal>,
 }
 
 /// One market (grouped by `condition_id`) with its 1–2 legs.
@@ -131,15 +137,19 @@ pub struct MarketRow {
 }
 
 /// Scoring verdicts for every live order, from a 15s cache — never blocks.
-async fn scoring_swr(state: &WebState, live_ids: Vec<String>) -> HashMap<String, bool> {
+async fn scoring_swr(state: &WebState, mut live_ids: Vec<String>) -> HashMap<String, bool> {
     if live_ids.is_empty() {
         return HashMap::new();
     }
     let Some((executor, _)) = state.engine_handle.get().await else { return HashMap::new() };
+    // Keyed by the exact set of live orders, so a removed, re-pegged or new
+    // order is looked up at once instead of waiting out a stale entry.
+    live_ids.sort_unstable();
+    let key = live_ids.join(",");
     state
         .caches
         .scoring
-        .get_swr("live", move || async move {
+        .get_swr(&key, move || async move {
             let refs: Vec<&str> = live_ids.iter().map(String::as_str).collect();
             tokio::time::timeout(ACCOUNT_TIMEOUT, executor.are_orders_scoring(&refs))
                 .await
@@ -186,11 +196,12 @@ pub(super) async fn build_rows(state: &WebState) -> Vec<MarketRow> {
             let first = legs_cfg[0];
             let slug = slug_of(&first.url);
             let max_spread = gamma_resolve::market_by_slug_swr(&slug).and_then(|m| m.rewards_max_spread);
-            let legs: Vec<LegRow> = legs_cfg
+            let mut legs: Vec<LegRow> = legs_cfg
                 .iter()
                 .enumerate()
                 .map(|(i, c)| leg_row(c, i, order_status.get(&c.id), tops.get(&c.token_id), max_spread, &scoring))
                 .collect();
+            apply_two_sided(&mut legs);
             MarketRow {
                 condition_id: cid,
                 label: first.label.clone(),
@@ -202,6 +213,30 @@ pub(super) async fn build_rows(state: &WebState) -> Vec<MarketRow> {
             }
         })
         .collect()
+}
+
+/// Polymarket scores a market's two sides together: with both sides live the
+/// weaker one sets the score; one side alone scores a third (midpoint 10–90¢)
+/// or nothing (outside). Each leg's raw weight becomes that market score.
+fn apply_two_sided(legs: &mut [LegRow]) {
+    let live: Vec<(String, Decimal)> = legs.iter().filter_map(|l| Some((l.token_id.clone(), l.raw_weight?))).collect();
+    for leg in legs.iter_mut() {
+        let (Some(w), Some(mid)) = (leg.raw_weight, leg.mid_value) else { continue };
+        let other = live.iter().filter(|(t, _)| *t != leg.token_id).map(|(_, w)| *w).max();
+        let effective = market_data::effective_weight(mid, w, other);
+        leg.weight = Some(pct(effective));
+        leg.weight_note = match other {
+            Some(o) if o > dec!(0) => {
+                format!("Two-sided: the weaker side sets the score. This order alone: {}.", pct(w))
+            }
+            _ if market_data::single_sided_allowed(mid) => format!(
+                "One-sided: Polymarket divides the score by 3. This order alone: {}. Farm both sides for full weight.",
+                pct(w)
+            ),
+            _ => "One-sided orders earn nothing while the midpoint is under 10¢ or over 90¢. Farm both sides."
+                .to_string(),
+        };
+    }
 }
 
 /// Shares behind a leg's USD size, as the engine would compute them
@@ -245,14 +280,14 @@ fn leg_row(
             _ => ("Waiting", "idle", None),
         }
     };
-    let (price, dmid, in_zone, weight, is_scoring) = match (&live, mid) {
+    let (price, dmid, in_zone, raw_weight, is_scoring) = match (&live, mid) {
         (Some((oid, p)), Some(m)) => {
             let w = max_spread.map(|v| market_data::score_weight(m, *p, v));
             (
                 Some(cents(*p)),
                 Some(format!("{:.1}", (m - *p) * dec!(100))),
                 w.map(|w| w > dec!(0)),
-                w.map(pct),
+                w,
                 scoring.get(oid).copied(),
             )
         }
@@ -270,7 +305,9 @@ fn leg_row(
         mid: mid.map(cents),
         dmid,
         in_zone,
-        weight,
+        // Set by `apply_two_sided` once the market's other leg is known.
+        weight: raw_weight.map(pct),
+        weight_note: String::new(),
         scoring: is_scoring,
         peg: format!("{}¢ below bid", cents(c.distance)),
         size: format!("${}", c.order_size.normalize()),
@@ -279,6 +316,9 @@ fn leg_row(
         expires: until(c.expires_at),
         expires_title: c.expires_at.format("%b %-d, %Y %H:%M UTC").to_string(),
         auto_pause: c.max_volatility.map(|v| format!("{}¢", cents(v))),
+        token_id: c.token_id.clone(),
+        mid_value: mid,
+        raw_weight,
     }
 }
 
@@ -562,6 +602,60 @@ mod tests {
         assert_eq!(shares_label(&c, None, None), None);
         // Degenerate price.
         assert_eq!(shares_label(&c, None, Some(dec!(0.02))), None);
+    }
+
+    fn leg(id: &str, token: &str, slot: usize, live_price: Option<Decimal>, mid: Decimal) -> LegRow {
+        let c = MarketConfig {
+            id: id.into(),
+            url: String::new(),
+            label: String::new(),
+            condition_id: "0xabc".into(),
+            token_id: token.into(),
+            token_label: String::new(),
+            tick_size: dec!(0.01),
+            distance: dec!(0.01),
+            min_depth_between: dec!(0),
+            order_size: dec!(100),
+            expires_at: Utc::now() + chrono::Duration::days(1),
+            paused: live_price.is_none(),
+            benchmark_bid: None,
+            max_volatility: None,
+        };
+        let status = live_price.map(|price| OrderStatus::Live { order_id: format!("o{id}"), price });
+        // A 2¢-wide book around `mid`.
+        let top = (Some(mid - dec!(0.01)), Some(mid + dec!(0.01)));
+        leg_row(&c, slot, status.as_ref(), Some(&top), Some(dec!(4)), &HashMap::new())
+    }
+
+    #[test]
+    fn score_follows_the_two_sided_rule() {
+        // Yes at mid 50¢, bid 49¢ (1¢ off, zone 4¢): alone ((4−1)/4)² = 56%.
+        // No at mid 50¢, bid 48¢ (2¢ off): alone 25%.
+        let both =
+            || vec![leg("y", "yes", 0, Some(dec!(0.49)), dec!(0.50)), leg("n", "no", 1, Some(dec!(0.48)), dec!(0.50))];
+
+        // Both sides live: the weaker side (25%) sets the score for both.
+        let mut legs = both();
+        apply_two_sided(&mut legs);
+        assert_eq!(legs[0].weight.as_deref(), Some("25%"));
+        assert_eq!(legs[1].weight.as_deref(), Some("25%"));
+        assert!(legs[0].weight_note.starts_with("Two-sided"));
+
+        // The No leg paused (or deleted): Yes alone scores 56% ÷ 3 = 19%.
+        let mut legs = vec![leg("y", "yes", 0, Some(dec!(0.49)), dec!(0.50)), leg("n", "no", 1, None, dec!(0.50))];
+        apply_two_sided(&mut legs);
+        assert_eq!(legs[0].weight.as_deref(), Some("19%"));
+        assert!(legs[0].weight_note.contains("divides the score by 3") && legs[0].weight_note.contains("56%"));
+        assert_eq!(legs[1].weight, None, "a paused leg has no score");
+        let mut alone = vec![leg("y", "yes", 0, Some(dec!(0.49)), dec!(0.50))];
+        apply_two_sided(&mut alone);
+        assert_eq!(alone[0].weight.as_deref(), Some("19%"));
+
+        // One-sided with the midpoint under 10¢: nothing.
+        let mut low = vec![leg("y", "yes", 0, Some(dec!(0.05)), dec!(0.06))];
+        apply_two_sided(&mut low);
+        assert_eq!(low[0].weight.as_deref(), Some("0%"));
+        assert!(low[0].weight_note.contains("earn nothing"));
     }
 
     #[test]

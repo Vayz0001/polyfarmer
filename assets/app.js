@@ -205,6 +205,12 @@
       $("#pf-modal-q").textContent = e.detail.question;
       pending = e.detail; m.hidden = false; $("#pf-modal-ok").focus();
     });
+    // While the dialog is open, don't let a background refresh replace the
+    // panel holding the clicked button: htmx silently drops a request whose
+    // element has left the page, so Confirm would do nothing.
+    document.body.addEventListener("htmx:beforeSwap", function (e) {
+      if (pending && e.detail.target && e.detail.target.contains(pending.elt)) e.detail.shouldSwap = false;
+    });
     $("#pf-modal-ok").onclick = function () { if (pending) { var d = pending; close(); d.issueRequest(true); } };
     $("#pf-modal-cancel").onclick = close;
     m.addEventListener("click", function (e) { if (e.target === m) close(); });
