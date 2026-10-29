@@ -10,7 +10,7 @@
       <table class="tbl">
         <thead><tr><th>Day earned (UTC)</th><th>Paid</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          {% for r in rows %}<tr><td>{{ r.day }}</td><td class="muted">{{ r.paid_at }}</td><td class="num pos">{{ r.amount }}</td></tr>{% endfor %}
+          {% for r in rows %}<tr><td>{{ r.day }}</td><td class="muted"><time class="pf-local" datetime="{{ r.paid_at.iso }}" data-date>{{ r.paid_at.utc }}</time></td><td class="num pos">{{ r.amount }}</td></tr>{% endfor %}
           {% if rows.is_empty() %}<tr><td colspan="3"><div class="feed-empty">No payouts yet. The first one lands just after midnight UTC following your first day of qualifying orders.</div></td></tr>{% endif %}
         </tbody>
       </table>

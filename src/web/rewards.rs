@@ -9,7 +9,7 @@ use std::time::Duration;
 use askama::Template;
 use axum::extract::State;
 use axum::response::Html;
-use chrono::{NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use polymarket_client_sdk_v2::clob::types::response::UserRewardsEarningResponse;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -183,17 +183,40 @@ fn money(v: Decimal) -> String {
     format!("${v:.2}")
 }
 
+/// A UTC moment shown as "07:00 (00:00 UTC)" in the viewer's own time zone.
+/// The server only knows UTC, so `app.js` (`PF.localTimes`) rewrites the text
+/// in the browser; without JavaScript the UTC text stays.
+pub struct LocalTime {
+    pub iso: String,
+    /// The fallback and the part in brackets, e.g. "00:00 UTC" or "Oct 29, 00:00 UTC".
+    pub utc: String,
+    pub with_date: bool,
+}
+
+impl LocalTime {
+    pub fn new(t: DateTime<Utc>, with_date: bool) -> Self {
+        let utc = if with_date { t.format("%b %-d, %H:%M UTC") } else { t.format("%H:%M UTC") }.to_string();
+        LocalTime { iso: t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true), utc, with_date }
+    }
+
+    /// Today's 00:00 UTC, when the reward day starts.
+    pub fn utc_midnight() -> Self {
+        Self::new(Utc::now().date_naive().and_time(chrono::NaiveTime::MIN).and_utc(), false)
+    }
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 #[derive(Template)]
 #[template(path = "rewards.html")]
 struct RewardsTemplate {
     shell: Shell,
+    midnight: LocalTime,
 }
 
 /// GET /rewards — the shell; every panel loads as its own fragment.
 pub async fn page(session: Session) -> Html<String> {
-    render(&RewardsTemplate { shell: shell(&session, "rewards").await })
+    render(&RewardsTemplate { shell: shell(&session, "rewards").await, midnight: LocalTime::utc_midnight() })
 }
 
 // ── KPI row ──────────────────────────────────────────────────────────────────
@@ -202,6 +225,8 @@ pub struct Kpi {
     pub label: &'static str,
     pub value: String,
     pub sub: String,
+    /// Shown after `sub`, in the viewer's time zone.
+    pub time: Option<LocalTime>,
     /// Green value (money earned).
     pub pos: bool,
 }
@@ -228,16 +253,20 @@ pub async fn kpis(State(state): State<WebState>) -> Html<String> {
         Some(Ok(entries)) => Kpi {
             label: "Today so far",
             value: money(total_earned(&entries)),
-            sub: "since 00:00 UTC".into(),
+            sub: "since".into(),
+            time: Some(LocalTime::utc_midnight()),
             pos: true,
         },
         Some(Err(_)) => Kpi {
             label: "Today so far",
             value: "—".into(),
             sub: "Polymarket didn't answer, retrying".into(),
+            time: None,
             pos: true,
         },
-        None => Kpi { label: "Today so far", value: "—".into(), sub: "engine not running".into(), pos: true },
+        None => {
+            Kpi { label: "Today so far", value: "—".into(), sub: "engine not running".into(), time: None, pos: true }
+        }
     };
 
     let mut kpis = vec![today_kpi];
@@ -248,16 +277,24 @@ pub async fn kpis(State(state): State<WebState>) -> Html<String> {
                 Some(d) => Kpi {
                     label: "Yesterday",
                     value: money(d.amount),
-                    sub: format!("paid {}", d.paid_at.format("%b %-d, %H:%M UTC")),
+                    sub: "paid".into(),
+                    time: Some(LocalTime::new(d.paid_at, true)),
                     pos: true,
                 },
-                None => Kpi { label: "Yesterday", value: money(Decimal::ZERO), sub: "no payout yet".into(), pos: true },
+                None => Kpi {
+                    label: "Yesterday",
+                    value: money(Decimal::ZERO),
+                    sub: "no payout yet".into(),
+                    time: None,
+                    pos: true,
+                },
             });
             let series = history_series(days, 30);
             kpis.push(Kpi {
                 label: "Last 7 days",
                 value: money(sum_last_days(&series, 7)),
                 sub: format!("30 days: {}", money(sum_last_days(&series, 30))),
+                time: None,
                 pos: true,
             });
             let total: Decimal = days.iter().map(|d| d.amount).sum();
@@ -270,11 +307,11 @@ pub async fn kpis(State(state): State<WebState>) -> Html<String> {
                 ),
                 None => "no payouts yet".into(),
             };
-            kpis.push(Kpi { label: "All time", value: money(total), sub, pos: true });
+            kpis.push(Kpi { label: "All time", value: money(total), sub, time: None, pos: true });
         }
         Err(e) => {
             for label in ["Yesterday", "Last 7 days", "All time"] {
-                kpis.push(Kpi { label, value: "—".into(), sub: e.clone(), pos: true });
+                kpis.push(Kpi { label, value: "—".into(), sub: e.clone(), time: None, pos: true });
             }
         }
     }
@@ -313,7 +350,7 @@ fn rank_view(state: &WebState) -> RankView {
 
 pub struct PayoutRow {
     pub day: String,
-    pub paid_at: String,
+    pub paid_at: LocalTime,
     pub amount: String,
 }
 
@@ -348,7 +385,7 @@ pub async fn history(State(state): State<WebState>) -> Html<String> {
             .iter()
             .map(|d| PayoutRow {
                 day: d.earned_day.format("%a %b %-d, %Y").to_string(),
-                paid_at: d.paid_at.format("%b %-d, %H:%M UTC").to_string(),
+                paid_at: LocalTime::new(d.paid_at, true),
                 amount: format!("${:.4}", d.amount),
             })
             .collect(),
@@ -498,6 +535,15 @@ mod tests {
         assert_eq!(sum_last_days(&s, 7), dec!(2));
         assert_eq!(sum_last_days(&s, 30), dec!(7));
         assert!(rewards_chart_svg(&s).contains("<rect"));
+    }
+
+    #[test]
+    fn local_time_carries_iso_and_utc_fallback() {
+        let t = DateTime::parse_from_rfc3339("2026-10-29T00:00:10Z").unwrap().with_timezone(&Utc);
+        let with_date = LocalTime::new(t, true);
+        assert_eq!((with_date.iso.as_str(), with_date.utc.as_str()), ("2026-10-29T00:00:10Z", "Oct 29, 00:00 UTC"));
+        assert_eq!(LocalTime::new(t, false).utc, "00:00 UTC");
+        assert!(LocalTime::utc_midnight().iso.ends_with("T00:00:00Z"));
     }
 
     #[test]

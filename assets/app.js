@@ -31,6 +31,27 @@
     });
   };
 
+  // UTC moments rendered by the server (<time class="pf-local">) → the viewer's
+  // own time with the UTC original in brackets: "07:00 (00:00 UTC)".
+  PF.localTimes = function (root) {
+    $$("time.pf-local[datetime]", root).forEach(function (el) {
+      var d = new Date(el.getAttribute("datetime"));
+      if (isNaN(d.getTime())) return;
+      var utc = el.getAttribute("data-utc") || el.textContent;
+      el.setAttribute("data-utc", utc);
+      el.title = d.toLocaleString();
+      if (d.getTimezoneOffset() === 0) { el.textContent = utc; return; }
+      var opts = { hour: "2-digit", minute: "2-digit" };
+      var dated = el.hasAttribute("data-date");
+      if (dated) { opts.month = "short"; opts.day = "numeric"; }
+      // The bracket repeats the date only when UTC is on a different day.
+      var sameDay = d.getUTCDate() === d.getDate();
+      var utcOpts = { hour: "2-digit", minute: "2-digit", timeZone: "UTC" };
+      if (dated && !sameDay) { utcOpts.month = "short"; utcOpts.day = "numeric"; }
+      el.textContent = d.toLocaleString(undefined, opts) + " (" + d.toLocaleString(undefined, utcOpts) + " UTC)";
+    });
+  };
+
   // ── theme ───────────────────────────────────────────────────────────────
   function theme() { return document.documentElement.dataset.theme || "dark"; }
   function setTheme(t) { document.documentElement.dataset.theme = t; setPref("pf-theme", t); syncPrefSegs(); }
@@ -505,8 +526,9 @@
     connectEvents();
     mvInit();
     PF.relTime();
+    PF.localTimes();
     setInterval(function () { PF.relTime(); }, 30000);
-    document.body.addEventListener("htmx:afterSwap", function (e) { PF.relTime(e.target); applyActivityFilter(); });
+    document.body.addEventListener("htmx:afterSwap", function (e) { PF.relTime(e.target); PF.localTimes(e.target); applyActivityFilter(); });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
 })();
