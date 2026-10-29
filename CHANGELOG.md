@@ -1,13 +1,15 @@
 # Changelog
 
 All notable changes to Polyfarmer are recorded here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions will follow
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html) once releases are tagged. While
-Polyfarmer is in beta (0.x), anything may change between releases.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). While Polyfarmer is in beta (0.x),
+anything may change between releases.
 
 ## [Unreleased]
 
-This is everything that will be in the first public beta (0.1.0).
+## [0.1.0] - 2026-10-29
+
+The first public beta.
 
 ### Added
 
@@ -111,3 +113,6 @@ This is everything that will be in the first public beta (0.1.0).
   `scripts/seed_hacktoberfest_issues.py`). They stay in Git history.
 - The daily reward snapshot file (`data/reward_history.json`) and its `REWARD_HISTORY_FILE` setting; history comes
   from Polymarket's payout records instead. An existing file is simply no longer read.
+
+[Unreleased]: https://github.com/Vayz0001/polyfarmer/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Vayz0001/polyfarmer/releases/tag/v0.1.0
