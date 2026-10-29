@@ -41,12 +41,13 @@
       el.setAttribute("data-utc", utc);
       el.title = d.toLocaleString();
       if (d.getTimezoneOffset() === 0) { el.textContent = utc; return; }
-      var opts = { hour: "2-digit", minute: "2-digit" };
+      // Local time in 12-hour form ("7:00 AM"); the UTC part stays 24-hour.
+      var opts = { hour: "numeric", minute: "2-digit", hour12: true };
       var dated = el.hasAttribute("data-date");
       if (dated) { opts.month = "short"; opts.day = "numeric"; }
       // The bracket repeats the date only when UTC is on a different day.
       var sameDay = d.getUTCDate() === d.getDate();
-      var utcOpts = { hour: "2-digit", minute: "2-digit", timeZone: "UTC" };
+      var utcOpts = { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "UTC" };
       if (dated && !sameDay) { utcOpts.month = "short"; utcOpts.day = "numeric"; }
       el.textContent = d.toLocaleString(undefined, opts) + " (" + d.toLocaleString(undefined, utcOpts) + " UTC)";
     });
