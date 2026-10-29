@@ -70,7 +70,7 @@ This is everything that will be in the first public beta (0.1.0).
   12-128 characters.
 - Login and setup-code throttling per source with escalating lockouts, plus a global ceiling.
 - Sessions are server-side, bounded in number, self-cleaning, expire after 12 hours idle or 7 days in
-  total, and are all invalidated when the password changes. The cookie is `HttpOnly`, `SameSite=Strict`,
+  total, and are all invalidated when the password changes. The cookie is `HttpOnly`, `SameSite=Lax`,
   and `Secure` with the `__Host-` prefix over HTTPS.
 - CSRF tokens on every state-changing request, cross-site requests refused, request bodies capped at
   64 KB.
@@ -93,6 +93,7 @@ This is everything that will be in the first public beta (0.1.0).
 - Today's rewards now include markets you have paused or stopped farming since they paid. Before, those dropped out of
   the per-market list and the total once their live share fell to 0%.
 - "Today, by market" no longer lists hundreds of markets you don't farm.
+- The Linux install steps include `cmake`, which the build needs on newer distributions such as Ubuntu 26.04.
 - Unbounded memory growth: a string leaked on every WebSocket error, caches that never evicted, and a
   refresh task that could stay stuck after a panic. Reading the activity log no longer loads the whole
   file.
