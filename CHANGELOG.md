@@ -7,6 +7,11 @@ anything may change between releases.
 
 ## [Unreleased]
 
+### Changed
+
+- The install steps use the latest release (`git clone --branch v0.1.0`) instead of `main`, and the README
+  explains how to update to a new version. CONTRIBUTING describes the release steps.
+
 ## [0.1.0] - 2026-10-29
 
 The first public beta.

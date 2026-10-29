@@ -128,4 +128,14 @@ docs: add Hacktoberfest contribution guidelines
 3. **Tag Maintainers on Discord:** After submitting your PR, post the link in our **[Discord Server (https://discord.gg/DEsbgyxC3z)](https://discord.gg/DEsbgyxC3z)** in the `#pr-reviews` / `#dev` channel and tag the maintainers so it is queued for review.
 4. Be ready for review feedback. Small, clear pull requests are merged faster.
 
+## Releasing (maintainers)
+
+Users install tagged releases; `main` is the development line.
+
+1. In a pull request: move the "Unreleased" entries in `CHANGELOG.md` under the new version and date, set
+   `version` in `Cargo.toml`, and change the three `git clone --branch vX.Y.Z` lines in the README's Install
+   section to the new tag.
+2. Merge it, wait for the checks on `main`, then on GitHub go to **Releases → Draft a new release**, create the
+   tag `vX.Y.Z` on `main`, and publish it (as a pre-release while the version is 0.x).
+
 By contributing you agree that your work is released under the project's [MIT license](LICENSE).

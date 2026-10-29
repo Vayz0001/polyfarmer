@@ -92,7 +92,7 @@ Pick your system:
 3. Download and run Polyfarmer.
 
    ```bash
-   git clone https://github.com/Vayz0001/polyfarmer.git
+   git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
    cd polyfarmer
    cargo run --release
    ```
@@ -123,7 +123,7 @@ Pick your system:
    setup link, and you continue with [First run](#first-run).
 
    ```bash
-   git clone https://github.com/Vayz0001/polyfarmer.git
+   git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
    cd polyfarmer
    cargo run --release
    ```
@@ -147,7 +147,7 @@ Pick your system:
    setup link, and you continue with [First run](#first-run).
 
    ```powershell
-   git clone https://github.com/Vayz0001/polyfarmer.git
+   git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
    cd polyfarmer
    cargo run --release
    ```
@@ -164,7 +164,24 @@ Pick your system:
 
 </details>
 
-The first build takes a few minutes. Later starts are instant. To update, run `git pull` and start it again.
+The first build takes a few minutes. Later starts are instant.
+
+These steps install the latest release (`v0.1.0`), the version that has been released and described in the
+[changelog](CHANGELOG.md). Git may print a note about a "detached HEAD": that is expected on a release.
+
+### Updating
+
+When a new version is out (see [Releases](https://github.com/Vayz0001/polyfarmer/releases)), read its
+changelog entry, stop Polyfarmer, and in the `polyfarmer` folder run:
+
+```bash
+git fetch --tags
+git checkout v0.2.0    # the version you are updating to
+cargo run --release
+```
+
+Your settings, wallet and markets are in the `data` folder and are kept. If you run it as a service, rebuild
+with `cargo build --release` and restart the service instead of `cargo run`.
 
 ## First run
 
