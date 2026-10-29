@@ -3,7 +3,7 @@
   <div class="kpi">
     <div class="k">{{ k.label }}</div>
     <div class="v{% if k.pos %} pos{% endif %}">{{ k.value }}</div>
-    <div class="s" title="{{ k.sub }}">{{ k.sub }}</div>
+    <div class="s">{{ k.sub }}{% if let Some(t) = k.time %} <time class="pf-local" datetime="{{ t.iso }}"{% if t.with_date %} data-date{% endif %}>{{ t.utc }}</time>{% endif %}</div>
   </div>
   {% endfor %}
   <div class="kpi">

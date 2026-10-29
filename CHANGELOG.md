@@ -58,6 +58,8 @@ This is everything that will be in the first public beta (0.1.0).
   chart and table are one "Daily payouts" panel. The Overview rewards panel loads in the background.
 - Overview: "Rewards today" moved next to "Resting in orders" and shows yesterday's payout underneath; the rewards
   panel adds a Yesterday row.
+- Reward times on the Rewards page are shown in your own time zone with UTC in brackets, e.g. "since 07:00
+  (00:00 UTC)". Without JavaScript they stay in UTC.
 - Reward history now comes from your actual payouts in Polymarket's activity feed, so it starts from your first
   payout ever, not from the day Polyfarmer was installed, and can't miss or misrecord a day.
 - The demo (`examples/serve`) can run on another port with `DASHBOARD_BIND`, and shows sample reward data.
