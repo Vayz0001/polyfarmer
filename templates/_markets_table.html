@@ -16,7 +16,7 @@
     <tr>
       <th>Market</th><th>Side</th><th>Status</th>
       <th class="num">Bid</th><th class="num" title="Mid price">Δ mid</th>
-      <th class="num">Score <span class="tip left" tabindex="0" data-tip="Reward weight of your live order: ((zone − distance from mid) / zone)². ✓ = Polymarket confirms it's scoring. 'out' = drifted outside the reward zone, earning nothing.">i</span></th>
+      <th class="num">Score <span class="tip left" tabindex="0" data-tip="Reward weight of your live order, ((zone − distance from mid) / zone)², after Polymarket's two-sided rule: with both sides live the weaker one counts; one side alone scores a third, or nothing under 10¢ / over 90¢. Hover a score for details. ✓ = Polymarket confirms it's scoring. 'out' = outside the reward zone, earning nothing.">i</span></th>
       <th>Peg</th><th class="num">Size</th><th class="num">Min depth</th><th>Expires</th><th></th>
     </tr>
   </thead>
@@ -49,7 +49,7 @@
       <td class="num">
         <span class="score-cell">
         {% if let Some(w) = leg.weight %}
-          {% if leg.in_zone == Some(true) %}<span class="zone in">{{ w }}</span>{% else %}<span class="zone out" title="Outside the reward zone — earning nothing right now">out</span>{% endif %}
+          {% if leg.in_zone == Some(true) %}<span class="zone in" title="{{ leg.weight_note }}">{{ w }}</span>{% else %}<span class="zone out" title="Outside the reward zone — earning nothing right now">out</span>{% endif %}
         {% else %}<span class="faint">—</span>{% endif %}
         {% match leg.scoring %}{% when Some(true) %}<span class="check" title="Polymarket: scoring">✓</span>{% when Some(false) %}<span class="cross" title="Polymarket: not scoring">✗</span>{% when None %}{% endmatch %}
         </span>

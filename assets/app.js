@@ -75,7 +75,7 @@
     wrap.appendChild(el);
     while (wrap.children.length > 4) wrap.firstChild.remove();
     requestAnimationFrame(function () { el.classList.add("show"); });
-    setTimeout(dismiss, ttl || 6000);
+    if (ttl !== -1) setTimeout(dismiss, ttl || 6000); // -1: stays until dismissed
   }
   PF.toast = toast;
 
@@ -205,6 +205,12 @@
       $("#pf-modal-q").textContent = e.detail.question;
       pending = e.detail; m.hidden = false; $("#pf-modal-ok").focus();
     });
+    // While the dialog is open, don't let a background refresh replace the
+    // panel holding the clicked button: htmx silently drops a request whose
+    // element has left the page, so Confirm would do nothing.
+    document.body.addEventListener("htmx:beforeSwap", function (e) {
+      if (pending && e.detail.target && e.detail.target.contains(pending.elt)) e.detail.shouldSwap = false;
+    });
     $("#pf-modal-ok").onclick = function () { if (pending) { var d = pending; close(); d.issueRequest(true); } };
     $("#pf-modal-cancel").onclick = close;
     m.addEventListener("click", function (e) { if (e.target === m) close(); });
@@ -219,6 +225,11 @@
     $("#pf-drawer-scrim").addEventListener("click", drawerClose);
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") drawerClose(); });
     document.body.addEventListener("htmx:afterSwap", function (e) { if (e.target.id === "pf-drawer" && e.target.innerHTML.trim()) drawerOpen(); });
+    // Errors from a row action (server sends HX-Trigger: {"pf-error": "…"}). A
+    // toast, because the panel's own banner is replaced by the next refresh.
+    document.body.addEventListener("pf-error", function (e) {
+      toast("Couldn't do that", (e.detail && e.detail.value) || "", "err", -1);
+    });
     document.body.addEventListener("pf-saved", function (e) {
       drawerClose();
       toast((e.detail && e.detail.value) || "Saved", "", "info", 3000);

@@ -1413,7 +1413,13 @@ async fn cancel_leg_order(state: &WebState, id: &str, order_id: &str) {
     }
 }
 
-/// POST /markets/{id}/remove — removes one leg and cancels its resting order.
+/// POST /markets/{id}/remove — cancels the leg's resting order, then removes it.
+///
+/// Order matters: the leg is paused first (the engine stops quoting it), its
+/// order is cancelled and confirmed gone, and only then is the leg removed. If
+/// the cancel can't be confirmed the leg stays, paused and saved, so the order
+/// is still tracked (and cancelled at the next start) instead of being left on
+/// Polymarket with nothing watching it.
 pub async fn remove_market(
     State(state): State<WebState>,
     session: Session,
@@ -1426,33 +1432,68 @@ pub async fn remove_market(
             .into_response();
     }
 
-    let (configs_snapshot, removed, orders_to_cancel, tokens_to_unsubscribe, markets_file) = {
+    // 1. Pause in memory and take the leg's order, if any.
+    let order_id = {
+        let mut s = state.engine.write().await;
+        if !s.configs.iter().any(|c| c.id == id) {
+            drop(s);
+            return render_markets_table(&state, &session, None).await;
+        }
+        for c in s.configs.iter_mut().filter(|c| c.id == id) {
+            c.paused = true;
+        }
+        match s.order_status.get(&id) {
+            Some(OrderStatus::Live { order_id, .. }) | Some(OrderStatus::Cancelling { order_id, .. }) => {
+                Some(order_id.clone())
+            }
+            // An order still being placed is cancelled by the placing task when
+            // it sees the status has moved on (see the quote loop in app.rs).
+            Some(OrderStatus::Placing { .. }) => {
+                s.order_status.insert(id.clone(), OrderStatus::Idle);
+                None
+            }
+            _ => None,
+        }
+    };
+
+    // 2. Cancel it and confirm it is off the book.
+    if let Some(order_id) = order_id {
+        let confirmed = match state.engine_handle.get().await {
+            Some((executor, _)) => executor.cancel_order_verified(&order_id).await,
+            None => Err(eyre::eyre!("the engine is not running")),
+        };
+        if let Err(why) = confirmed.and_then(|gone| if gone { Ok(()) } else { Err(eyre::eyre!("it is still live")) }) {
+            tracing::warn!("Remove {id}: could not confirm cancel of {order_id}: {why}");
+            let flash = match persist_configs(&state).await {
+                Ok(()) => format!(
+                    "Couldn't cancel its order on Polymarket ({why}). The market is paused and kept so the order stays \
+                     tracked — try removing it again."
+                ),
+                Err(e) => format!("Couldn't cancel its order on Polymarket ({why}), and saving failed: {e}"),
+            };
+            return render_markets_table(&state, &session, Some(flash)).await;
+        }
+        let mut s = state.engine.write().await;
+        s.order_status.insert(id.clone(), OrderStatus::Idle);
+    }
+
+    // 3. Remove the leg.
+    let (configs_snapshot, removed, tokens_to_unsubscribe, markets_file) = {
         let mut s = state.engine.write().await;
         let removed: Vec<_> = s.configs.iter().filter(|c| c.id == id).cloned().collect();
-        if removed.is_empty() {
-            drop(s);
-            return render_markets_table(&state, &session, None).await.into_response();
-        }
-        let mut orders_to_cancel = Vec::new();
-        for c in &removed {
-            if let Some(OrderStatus::Live { order_id, .. }) | Some(OrderStatus::Cancelling { order_id, .. }) =
-                s.order_status.get(&c.id)
-            {
-                orders_to_cancel.push(order_id.clone());
-            }
-            s.order_status.remove(&c.id);
-            s.place_failures.remove(&c.id);
-        }
         s.configs.retain(|c| c.id != id);
+        s.order_status.remove(&id);
+        s.place_failures.remove(&id);
         let tokens_to_unsubscribe: Vec<String> = removed
             .iter()
             .map(|c| c.token_id.clone())
             .filter(|tid| !s.configs.iter().any(|c| &c.token_id == tid))
             .collect();
-        (s.configs.clone(), removed, orders_to_cancel, tokens_to_unsubscribe, s.markets_file.clone())
+        (s.configs.clone(), removed, tokens_to_unsubscribe, s.markets_file.clone())
     };
 
     if let Err(e) = save_markets(&markets_file, &configs_snapshot) {
+        // Keep it (paused, no order) rather than lose it from the file.
         let mut s = state.engine.write().await;
         for c in &removed {
             s.order_status.insert(c.id.clone(), OrderStatus::Idle);
@@ -1460,21 +1501,30 @@ pub async fn remove_market(
         s.configs.extend(removed);
         drop(s);
         tracing::error!("Failed to save markets.json after remove: {}", e);
-        return render_markets_table(&state, &session, Some(format!("Failed to save: {e}"))).await.into_response();
+        return render_markets_table(
+            &state,
+            &session,
+            Some(format!("Its order was cancelled, but saving failed: {e}")),
+        )
+        .await
+        .into_response();
     }
 
-    let mut flash = None;
-    if let Some((executor, ws_cmd_tx)) = state.engine_handle.get().await {
-        if !orders_to_cancel.is_empty() {
-            if let Err(e) = executor.cancel_orders(&orders_to_cancel).await {
-                flash = Some(format!("Removed, but cancelling its order failed — check Polymarket: {e}"));
-            }
-        }
-        if !tokens_to_unsubscribe.is_empty() {
+    if !tokens_to_unsubscribe.is_empty() {
+        if let Some((_, ws_cmd_tx)) = state.engine_handle.get().await {
             let _ = ws_cmd_tx.send(WsCommand::Unsubscribe(tokens_to_unsubscribe)).await;
         }
     }
-    render_markets_table(&state, &session, flash).await.into_response()
+    render_markets_table(&state, &session, None).await
+}
+
+/// Write the current market list to markets.json.
+async fn persist_configs(state: &WebState) -> Result<(), String> {
+    let (configs, markets_file) = {
+        let s = state.engine.read().await;
+        (s.configs.clone(), s.markets_file.clone())
+    };
+    save_markets(&markets_file, &configs).map_err(|e| e.to_string())
 }
 
 /// Pause/resume one leg (`pausing` picks the direction).
@@ -1529,7 +1579,7 @@ async fn pause_resume(state: WebState, session: Session, ids: Vec<String>, csrf:
             break;
         }
     }
-    render_markets_table(&state, &session, flash).await.into_response()
+    render_markets_table(&state, &session, flash).await
 }
 
 pub async fn pause_market(

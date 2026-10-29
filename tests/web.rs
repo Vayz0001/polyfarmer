@@ -1153,3 +1153,101 @@ async fn a_failed_engine_start_hints_at_network_vpn_and_region_causes() {
     let (_, launch, _) = get_authed(&app, &cookie, "/setup/engine-status").await;
     assert!(launch.contains("VPN") && launch.contains("restricts some regions"), "launch screen hint");
 }
+
+/// One leg in `status` with its markets.json in a temp dir; returns the
+/// router, password, engine state and that file.
+fn app_with_leg(
+    status: polyfarmer::types::OrderStatus,
+) -> (Router, String, Arc<tokio::sync::RwLock<polyfarmer::engine::ws_manager::AppState>>, std::path::PathBuf) {
+    use polyfarmer::types::MarketConfig;
+    use rust_decimal_macros::dec;
+    let dir = unique_dir();
+    let store = CredentialStore::open(&dir).unwrap();
+    let pw = "test-password-123".to_string();
+    store.set_password(&pw).unwrap();
+    let markets_file = dir.join("markets.json");
+    let engine =
+        Arc::new(tokio::sync::RwLock::new(polyfarmer::engine::ws_manager::AppState::new(markets_file.clone())));
+    {
+        let mut s = engine.try_write().unwrap();
+        s.configs.push(MarketConfig {
+            id: "mar_leg".into(),
+            url: "https://polymarket.com/event/test-event/test-market".into(),
+            label: "Will the test pass?".into(),
+            condition_id: "0xabc".into(),
+            token_id: "123".into(),
+            token_label: "Yes".into(),
+            tick_size: dec!(0.01),
+            distance: dec!(0.02),
+            min_depth_between: dec!(500),
+            order_size: dec!(100),
+            expires_at: chrono::Utc::now() + chrono::Duration::days(7),
+            paused: false,
+            benchmark_bid: None,
+            max_volatility: None,
+        });
+        s.order_status.insert("mar_leg".into(), status);
+    }
+    (router(WebState::new(Arc::new(store), Arc::clone(&engine))), pw, engine, markets_file)
+}
+
+/// Body and the `HX-Trigger` header of a remove.
+async fn post_remove(app: &Router, pw: &str) -> (String, Option<String>) {
+    let cookie = login(app, pw).await;
+    let (_, page, rotated) = get_authed(app, &cookie, "/markets").await;
+    let cookie = rotated.unwrap_or(cookie);
+    let csrf = extract_csrf(&page);
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/markets/mar_leg/remove")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("csrf={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let trigger = res.headers().get("HX-Trigger").map(|v| v.to_str().unwrap().to_string());
+    (body_string(res).await, trigger)
+}
+
+#[tokio::test]
+async fn removing_a_leg_without_an_order_removes_it_in_one_go() {
+    let (app, pw, engine, markets_file) = app_with_leg(polyfarmer::types::OrderStatus::Idle);
+    let (body, trigger) = post_remove(&app, &pw).await;
+    assert!(!body.contains("Will the test pass?"), "{body}");
+    assert_eq!(trigger, None, "no error toast on success");
+    let s = engine.read().await;
+    assert!(s.configs.is_empty() && !s.order_status.contains_key("mar_leg"));
+    let saved = std::fs::read_to_string(markets_file).unwrap();
+    assert!(!saved.contains("mar_leg"), "{saved}");
+}
+
+#[tokio::test]
+async fn a_leg_whose_order_cannot_be_cancelled_is_kept_paused_not_removed() {
+    // A live order and no engine to cancel it with: removing must not drop the
+    // leg, or the order would sit on Polymarket with nothing tracking it.
+    let status =
+        polyfarmer::types::OrderStatus::Live { order_id: "0xorder".into(), price: rust_decimal_macros::dec!(0.4) };
+    let (app, pw, engine, markets_file) = app_with_leg(status);
+    let (body, trigger) = post_remove(&app, &pw).await;
+    assert!(body.contains("cancel its order on Polymarket") && body.contains("try removing it again"), "{body}");
+    // Also sent as a toast, which the panel's next refresh can't wipe.
+    let trigger = trigger.expect("HX-Trigger header");
+    let event: serde_json::Value = serde_json::from_str(&trigger).unwrap();
+    assert!(event["pf-error"].as_str().unwrap().contains("try removing it again"), "{trigger}");
+    assert!(body.contains("Will the test pass?"), "leg still listed");
+    let s = engine.read().await;
+    assert_eq!(s.configs.len(), 1);
+    assert!(s.configs[0].paused, "kept, and paused");
+    assert!(
+        matches!(s.order_status.get("mar_leg"), Some(polyfarmer::types::OrderStatus::Live { .. })),
+        "still tracked"
+    );
+    let saved = std::fs::read_to_string(markets_file).unwrap();
+    assert!(saved.contains("\"paused\": true"), "{saved}");
+}

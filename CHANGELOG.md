@@ -7,7 +7,22 @@ anything may change between releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- Removing a market often needed several clicks: the Markets table refreshes every few seconds, and a refresh while
+  the confirm dialog was open replaced the button, so Confirm silently did nothing. Refreshes now wait while the
+  dialog is open.
+- The Score on Markets and Overview ignored Polymarket's two-sided rule, so after pausing or removing one side the
+  other kept showing its two-sided score. It now shows what Polymarket scores: the weaker side when both are live,
+  a third for one side alone (midpoint 10-90¢), or nothing outside that range. Hover a score for the breakdown.
+- Polymarket's "scoring" check marks could stay stale for up to 15 seconds after an order changed.
+- Error messages on the Markets page vanished within a second, because the table's next refresh redrew it. They now
+  also appear as a toast that stays until you close it.
+
 ### Changed
+
+- Removing a market now cancels its order first and only removes it once the cancel is confirmed. If the cancel
+  fails, the market stays, paused, so its order is still tracked instead of being left on Polymarket unwatched.
 
 - The install steps use the latest release (`git clone --branch v0.1.0`) instead of `main`, and the README
   explains how to update to a new version. CONTRIBUTING describes the release steps.

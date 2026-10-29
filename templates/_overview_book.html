@@ -21,7 +21,7 @@
       <td><span class="pill {{ leg.status_class }}">{{ leg.status_label }}</span></td>
       <td class="num">{% if let Some(p) = leg.price %}{{ p }}¢{% else %}<span class="faint">—</span>{% endif %}</td>
       <td class="num">{% if let Some(d) = leg.dmid %}{{ d }}¢{% else %}<span class="faint">—</span>{% endif %}</td>
-      <td class="num"><span class="score-cell">{% if let Some(w) = leg.weight %}{% if leg.in_zone == Some(true) %}<span class="zone in">{{ w }}</span>{% else %}<span class="zone out">out</span>{% endif %}{% else %}<span class="faint">—</span>{% endif %}{% match leg.scoring %}{% when Some(true) %}<span class="check" title="Scoring">✓</span>{% when Some(false) %}<span class="cross" title="Not scoring">✗</span>{% when None %}{% endmatch %}</span></td>
+      <td class="num"><span class="score-cell">{% if let Some(w) = leg.weight %}{% if leg.in_zone == Some(true) %}<span class="zone in" title="{{ leg.weight_note }}">{{ w }}</span>{% else %}<span class="zone out">out</span>{% endif %}{% else %}<span class="faint">—</span>{% endif %}{% match leg.scoring %}{% when Some(true) %}<span class="check" title="Scoring">✓</span>{% when Some(false) %}<span class="cross" title="Not scoring">✗</span>{% when None %}{% endmatch %}</span></td>
     </tr>
     {% endfor %}
   </tbody>
