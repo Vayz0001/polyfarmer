@@ -16,9 +16,6 @@ pub struct Config {
     pub markets_file: PathBuf,
     /// alerts.json — append-only alert log (shown in the dashboard's Activity feed).
     pub alerts_file: PathBuf,
-    /// reward_history.json — daily reward-earnings snapshots (no Polymarket
-    /// history endpoint exists, so we build our own).
-    pub reward_history_file: PathBuf,
     /// Dashboard bind address (default localhost; override for tunnels/containers).
     pub dashboard_bind: String,
     /// Mark the session cookie `Secure` (HTTPS only). Turn on when the
@@ -38,21 +35,11 @@ impl Config {
         let data_dir = PathBuf::from(env::var("DATA_DIR").unwrap_or_else(|_| "data".to_string()));
         let markets_file = PathBuf::from(env::var("MARKETS_FILE").unwrap_or_else(|_| "data/markets.json".to_string()));
         let alerts_file = PathBuf::from(env::var("ALERTS_FILE").unwrap_or_else(|_| "data/alerts.json".to_string()));
-        let reward_history_file =
-            PathBuf::from(env::var("REWARD_HISTORY_FILE").unwrap_or_else(|_| "data/reward_history.json".to_string()));
         let dashboard_bind = env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
         let secure_cookies = env::var("DASHBOARD_SECURE_COOKIES").map(|v| is_truthy(&v)).unwrap_or(false);
         let polygon_rpc_url = env::var("POLYGON_RPC_URL").ok();
 
-        Ok(Config {
-            data_dir,
-            markets_file,
-            alerts_file,
-            reward_history_file,
-            dashboard_bind,
-            secure_cookies,
-            polygon_rpc_url,
-        })
+        Ok(Config { data_dir, markets_file, alerts_file, dashboard_bind, secure_cookies, polygon_rpc_url })
     }
 }
 
@@ -103,7 +90,7 @@ mod tests {
                 names.push(name.to_string());
             }
         }
-        assert!(names.len() >= 7, "expected to find the config variables, found {names:?}");
+        assert!(names.len() >= 6, "expected to find the config variables, found {names:?}");
         for name in names {
             assert!(example.contains(&format!("# {name}=")), "{name} is read by Config but missing from .env.example");
         }

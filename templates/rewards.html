@@ -4,44 +4,32 @@
 <div class="page-head">
   <div>
     <h1>Rewards</h1>
-    <div class="sub">Polymarket pays liquidity rewards daily after midnight UTC.</div>
+    <div class="sub">Polymarket pays each UTC day's liquidity rewards shortly after midnight UTC.</div>
   </div>
 </div>
 <div class="stack-lg">
-  <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
-    <div class="kpi"><div class="k">Last 7 days</div><div class="v pos">{{ total_7d }}</div></div>
-    <div class="kpi"><div class="k">Last 30 days</div><div class="v pos">{{ total_30d }}</div></div>
-    <div class="kpi"><div class="k">Best day (30d)</div><div class="v">{{ best_day }}</div></div>
-    <div class="kpi" hx-get="/rewards/alltime" hx-trigger="load" hx-swap="outerHTML">
-      <div class="k">All time</div><div class="skel v"></div>
+  <div id="rewards-kpis" hx-get="/rewards/kpis" hx-trigger="load, every 30s" hx-swap="innerHTML">
+    <div class="kpis">
+      <div class="kpi"><div class="k">Today so far</div><div class="skel v"></div></div>
+      <div class="kpi"><div class="k">Yesterday</div><div class="skel v"></div></div>
+      <div class="kpi"><div class="k">Last 7 days</div><div class="skel v"></div></div>
+      <div class="kpi"><div class="k">All time</div><div class="skel v"></div></div>
+      <div class="kpi"><div class="k">LP rank</div><div class="skel v"></div></div>
     </div>
   </div>
 
   <section class="panel">
-    <div class="panel-head"><h2>Today, by market</h2><span class="meta">live share of each market's pool · refreshes every 30s</span></div>
+    <div class="panel-head"><h2>Today, by market</h2><span class="meta">your live share of each market's pool · refreshes every 30s</span></div>
     <div id="rewards-today" hx-get="/rewards/table" hx-trigger="load, every 30s" hx-swap="innerHTML">
       <div class="skel-rows"><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>
     </div>
   </section>
 
-  <div class="grid side-main">
-    <section class="panel">
-      <div class="panel-head"><h2>Daily rewards · 30 days</h2></div>
-      <div class="panel-body">{{ chart_svg|safe }}</div>
-    </section>
-    <section class="panel">
-      <div class="panel-head"><h2>History</h2><span class="meta">captured daily by this bot</span></div>
-      {% if let Some(e) = history_error %}<div class="panel-body"><div class="alert err">{{ e }}</div></div>{% endif %}
-      <div style="max-height:320px;overflow-y:auto">
-        <table class="tbl">
-          <thead><tr><th>Date (UTC)</th><th class="num">Earned</th></tr></thead>
-          <tbody>
-            {% for r in rows %}<tr><td>{{ r.date }}</td><td class="num">{{ r.total }}</td></tr>{% endfor %}
-            {% if rows.is_empty() %}<tr><td colspan="2"><div class="feed-empty">The first snapshot lands the day after your first reward-eligible order goes live. Polymarket has no history API, so this builds up from here.</div></td></tr>{% endif %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  </div>
+  <section class="panel">
+    <div hx-get="/rewards/history" hx-trigger="load" hx-swap="innerHTML">
+      <div class="panel-head"><h2>Daily payouts · 30 days</h2></div>
+      <div class="skel-rows"><span class="skel"></span><span class="skel"></span></div>
+    </div>
+  </section>
 </div>
 {% endblock %}

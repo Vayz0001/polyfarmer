@@ -71,7 +71,7 @@ committed; commit it with any dependency change.
 | Path | What lives there |
 | --- | --- |
 | `src/engine/` | The trading engine: order book, quoting rules, order placement and cancellation, WebSocket feed, heartbeat |
-| `src/rewards/` | Polymarket reward data: market lookup, scoring maths, positions, reward history |
+| `src/rewards/` | Polymarket reward data: market lookup, scoring maths, positions, payouts, LP rank |
 | `src/web/` | The dashboard: routes, authentication, sessions, security headers, input validation |
 | `templates/`, `assets/` | Askama HTML templates, CSS and the small JavaScript files (htmx is vendored) |
 | `src/creds.rs`, `src/fsutil.rs`, `src/storage.rs` | Encrypted credentials and owner-only, atomic file writes |

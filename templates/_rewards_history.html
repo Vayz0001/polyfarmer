@@ -1,0 +1,20 @@
+<div class="panel-head"><h2>Daily payouts · 30 days</h2>{% if error.is_none() %}<span class="meta">{{ total_30d }} in 30 days · hover a bar for the day</span>{% endif %}</div>
+<div class="panel-body">
+  {% if let Some(e) = error %}
+  <div class="feed-empty">{{ e }}</div>
+  {% else %}
+  {{ chart_svg|safe }}
+  <details class="adv" style="margin-top:12px">
+    <summary><svg class="i sm"><use href="#i-chev"/></svg>Show as table ({{ rows.len() }} day{% if rows.len() != 1 %}s{% endif %})</summary>
+    <div style="max-height:320px;overflow-y:auto;margin-top:8px">
+      <table class="tbl">
+        <thead><tr><th>Day earned (UTC)</th><th>Paid</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+          {% for r in rows %}<tr><td>{{ r.day }}</td><td class="muted">{{ r.paid_at }}</td><td class="num pos">{{ r.amount }}</td></tr>{% endfor %}
+          {% if rows.is_empty() %}<tr><td colspan="3"><div class="feed-empty">No payouts yet. The first one lands just after midnight UTC following your first day of qualifying orders.</div></td></tr>{% endif %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+</div>

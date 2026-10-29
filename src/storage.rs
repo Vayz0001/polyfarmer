@@ -1,4 +1,4 @@
-use crate::types::{Alert, MarketConfig, RewardHistoryFile};
+use crate::types::{Alert, MarketConfig};
 use eyre::Result;
 use std::fs;
 use std::path::Path;
@@ -43,28 +43,6 @@ fn load_markets_inner(path: &Path) -> Result<Vec<MarketConfig>> {
 /// Called by the Rust bot when auto-removing a broken market after repeated failures.
 pub fn save_markets(path: &Path, configs: &[MarketConfig]) -> Result<()> {
     let data = serde_json::to_string_pretty(configs)? + "\n";
-    crate::fsutil::write_private_atomic(path, data.as_bytes())
-}
-
-// ── reward_history.json ────────────────────────────────────────────────────────
-// No Polymarket endpoint provides historical/range earnings (only single-day
-// queries) — this is built by polling once daily and appending here.
-
-/// Load reward history. Returns an empty file if it doesn't exist yet (day one).
-pub fn load_reward_history(path: &Path) -> Result<RewardHistoryFile> {
-    if !path.exists() {
-        return Ok(RewardHistoryFile::default());
-    }
-    let raw = fs::read_to_string(path)?;
-    if raw.trim().is_empty() {
-        return Ok(RewardHistoryFile::default());
-    }
-    Ok(serde_json::from_str(&raw)?)
-}
-
-/// Write reward history back to disk atomically (temp + rename).
-pub fn save_reward_history(path: &Path, history: &RewardHistoryFile) -> Result<()> {
-    let data = serde_json::to_string_pretty(history)? + "\n";
     crate::fsutil::write_private_atomic(path, data.as_bytes())
 }
 
@@ -209,7 +187,7 @@ mod tail_tests {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::types::{Alert, RewardHistoryFile};
+    use crate::types::Alert;
     use std::os::unix::fs::PermissionsExt;
 
     fn mode(p: &Path) -> u32 {
@@ -225,14 +203,12 @@ mod tests {
 
         let old = unsafe { libc::umask(0o000) };
         let r1 = save_markets(&dir.join("markets.json"), &[]);
-        let r2 = save_reward_history(&dir.join("reward_history.json"), &RewardHistoryFile::default());
-        let r3 = append_alert(&dir.join("alerts.json"), &Alert::info("hello"));
+        let r2 = append_alert(&dir.join("alerts.json"), &Alert::info("hello"));
         unsafe { libc::umask(old) };
         r1.unwrap();
         r2.unwrap();
-        r3.unwrap();
 
-        for f in ["markets.json", "reward_history.json", "alerts.json"] {
+        for f in ["markets.json", "alerts.json"] {
             assert_eq!(mode(&dir.join(f)), 0o600, "{f}");
         }
         // Still readable by the app, and appends keep working.

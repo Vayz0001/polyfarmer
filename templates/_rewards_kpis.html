@@ -1,0 +1,14 @@
+<div class="kpis">
+  {% for k in kpis %}
+  <div class="kpi">
+    <div class="k">{{ k.label }}</div>
+    <div class="v{% if k.pos %} pos{% endif %}">{{ k.value }}</div>
+    <div class="s" title="{{ k.sub }}">{{ k.sub }}</div>
+  </div>
+  {% endfor %}
+  <div class="kpi">
+    <div class="k">LP rank{% if let Some(t) = rank.tier %} <span class="tag accent">{{ t }}</span>{% endif %}</div>
+    <div class="v">{{ rank.value }}</div>
+    <div class="s">{{ rank.sub }} · <a href="{{ rank.link }}" target="_blank" rel="noopener noreferrer" title="Community leaderboard; your address is never sent to it">PolyRewards ↗</a></div>
+  </div>
+</div>
