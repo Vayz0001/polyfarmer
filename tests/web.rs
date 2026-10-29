@@ -56,6 +56,33 @@ async fn unauthenticated_dashboard_redirects_to_login() {
 }
 
 #[tokio::test]
+async fn reward_fragments_need_a_login() {
+    let (app, _) = test_app();
+    for path in ["/rewards", "/rewards/kpis", "/rewards/table", "/rewards/history", "/overview/rewards"] {
+        let res = app.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap();
+        assert!(res.status().is_redirection(), "{path}: got {}", res.status());
+        assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login", "{path}");
+    }
+}
+
+#[tokio::test]
+async fn reward_fragments_without_a_wallet_say_so_and_skip_the_network() {
+    let (app, pw) = test_app_with_market();
+    let cookie = login(&app, &pw).await;
+    let (status, kpis, _) = get_authed(&app, &cookie, "/rewards/kpis").await;
+    assert_eq!(status, StatusCode::OK);
+    for card in ["Today so far", "Yesterday", "Last 7 days", "All time", "LP rank"] {
+        assert!(kpis.contains(card), "missing {card}");
+    }
+    assert!(kpis.contains("engine not running") && kpis.contains("configure your wallet"));
+    assert!(kpis.contains("rel=\"noopener noreferrer\""), "external link must not leak the opener");
+    let (_, history, _) = get_authed(&app, &cookie, "/rewards/history").await;
+    assert!(history.contains("Configure your wallet"));
+    let (_, table, _) = get_authed(&app, &cookie, "/rewards/table").await;
+    assert!(table.contains("Engine not running"));
+}
+
+#[tokio::test]
 async fn login_page_renders_with_csrf() {
     let (app, _) = test_app();
     let res = app.oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
@@ -323,8 +350,11 @@ async fn every_page_and_fragment_renders() {
         "/positions",
         "/positions/table?tab=open",
         "/positions/table?tab=trades",
+        "/overview/rewards",
         "/rewards",
+        "/rewards/kpis",
         "/rewards/table",
+        "/rewards/history",
         "/activity",
         "/activity/recent",
         "/setup",
