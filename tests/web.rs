@@ -1191,7 +1191,8 @@ fn app_with_leg(
     (router(WebState::new(Arc::new(store), Arc::clone(&engine))), pw, engine, markets_file)
 }
 
-async fn post_remove(app: &Router, pw: &str) -> String {
+/// Body and the `HX-Trigger` header of a remove.
+async fn post_remove(app: &Router, pw: &str) -> (String, Option<String>) {
     let cookie = login(app, pw).await;
     let (_, page, rotated) = get_authed(app, &cookie, "/markets").await;
     let cookie = rotated.unwrap_or(cookie);
@@ -1210,14 +1211,16 @@ async fn post_remove(app: &Router, pw: &str) -> String {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    body_string(res).await
+    let trigger = res.headers().get("HX-Trigger").map(|v| v.to_str().unwrap().to_string());
+    (body_string(res).await, trigger)
 }
 
 #[tokio::test]
 async fn removing_a_leg_without_an_order_removes_it_in_one_go() {
     let (app, pw, engine, markets_file) = app_with_leg(polyfarmer::types::OrderStatus::Idle);
-    let body = post_remove(&app, &pw).await;
+    let (body, trigger) = post_remove(&app, &pw).await;
     assert!(!body.contains("Will the test pass?"), "{body}");
+    assert_eq!(trigger, None, "no error toast on success");
     let s = engine.read().await;
     assert!(s.configs.is_empty() && !s.order_status.contains_key("mar_leg"));
     let saved = std::fs::read_to_string(markets_file).unwrap();
@@ -1231,8 +1234,12 @@ async fn a_leg_whose_order_cannot_be_cancelled_is_kept_paused_not_removed() {
     let status =
         polyfarmer::types::OrderStatus::Live { order_id: "0xorder".into(), price: rust_decimal_macros::dec!(0.4) };
     let (app, pw, engine, markets_file) = app_with_leg(status);
-    let body = post_remove(&app, &pw).await;
+    let (body, trigger) = post_remove(&app, &pw).await;
     assert!(body.contains("cancel its order on Polymarket") && body.contains("try removing it again"), "{body}");
+    // Also sent as a toast, which the panel's next refresh can't wipe.
+    let trigger = trigger.expect("HX-Trigger header");
+    let event: serde_json::Value = serde_json::from_str(&trigger).unwrap();
+    assert!(event["pf-error"].as_str().unwrap().contains("try removing it again"), "{trigger}");
     assert!(body.contains("Will the test pass?"), "leg still listed");
     let s = engine.read().await;
     assert_eq!(s.configs.len(), 1);

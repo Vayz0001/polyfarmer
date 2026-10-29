@@ -1437,7 +1437,7 @@ pub async fn remove_market(
         let mut s = state.engine.write().await;
         if !s.configs.iter().any(|c| c.id == id) {
             drop(s);
-            return render_markets_table(&state, &session, None).await.into_response();
+            return render_markets_table(&state, &session, None).await;
         }
         for c in s.configs.iter_mut().filter(|c| c.id == id) {
             c.paused = true;
@@ -1471,7 +1471,7 @@ pub async fn remove_market(
                 ),
                 Err(e) => format!("Couldn't cancel its order on Polymarket ({why}), and saving failed: {e}"),
             };
-            return render_markets_table(&state, &session, Some(flash)).await.into_response();
+            return render_markets_table(&state, &session, Some(flash)).await;
         }
         let mut s = state.engine.write().await;
         s.order_status.insert(id.clone(), OrderStatus::Idle);
@@ -1515,7 +1515,7 @@ pub async fn remove_market(
             let _ = ws_cmd_tx.send(WsCommand::Unsubscribe(tokens_to_unsubscribe)).await;
         }
     }
-    render_markets_table(&state, &session, None).await.into_response()
+    render_markets_table(&state, &session, None).await
 }
 
 /// Write the current market list to markets.json.
@@ -1579,7 +1579,7 @@ async fn pause_resume(state: WebState, session: Session, ids: Vec<String>, csrf:
             break;
         }
     }
-    render_markets_table(&state, &session, flash).await.into_response()
+    render_markets_table(&state, &session, flash).await
 }
 
 pub async fn pause_market(

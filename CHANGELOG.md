@@ -16,6 +16,8 @@ anything may change between releases.
   other kept showing its two-sided score. It now shows what Polymarket scores: the weaker side when both are live,
   a third for one side alone (midpoint 10-90¢), or nothing outside that range. Hover a score for the breakdown.
 - Polymarket's "scoring" check marks could stay stale for up to 15 seconds after an order changed.
+- Error messages on the Markets page vanished within a second, because the table's next refresh redrew it. They now
+  also appear as a toast that stays until you close it.
 
 ### Changed
 

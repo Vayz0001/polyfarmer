@@ -75,7 +75,7 @@
     wrap.appendChild(el);
     while (wrap.children.length > 4) wrap.firstChild.remove();
     requestAnimationFrame(function () { el.classList.add("show"); });
-    setTimeout(dismiss, ttl || 6000);
+    if (ttl !== -1) setTimeout(dismiss, ttl || 6000); // -1: stays until dismissed
   }
   PF.toast = toast;
 
@@ -225,6 +225,11 @@
     $("#pf-drawer-scrim").addEventListener("click", drawerClose);
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") drawerClose(); });
     document.body.addEventListener("htmx:afterSwap", function (e) { if (e.target.id === "pf-drawer" && e.target.innerHTML.trim()) drawerOpen(); });
+    // Errors from a row action (server sends HX-Trigger: {"pf-error": "…"}). A
+    // toast, because the panel's own banner is replaced by the next refresh.
+    document.body.addEventListener("pf-error", function (e) {
+      toast("Couldn't do that", (e.detail && e.detail.value) || "", "err", -1);
+    });
     document.body.addEventListener("pf-saved", function (e) {
       drawerClose();
       toast((e.detail && e.detail.value) || "Saved", "", "info", 3000);

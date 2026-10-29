@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use askama::Template;
 use axum::extract::State;
-use axum::response::Html;
+use axum::http::HeaderValue;
+use axum::response::{Html, IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -555,12 +556,42 @@ struct MarketsTableTemplate {
 
 /// The markets table fragment — target of state-event refreshes and of every
 /// row action (which return it re-rendered, with an error banner on failure).
-pub(super) async fn render_markets_table(state: &WebState, session: &Session, flash: Option<String>) -> Html<String> {
+/// An error also goes out as a `pf-error` event (a toast that stays until
+/// dismissed): the banner alone is wiped by the next refresh, which a row
+/// action usually triggers within a second.
+pub(super) async fn render_markets_table(state: &WebState, session: &Session, flash: Option<String>) -> Response {
     let rows = build_rows(state).await;
-    render(&MarketsTableTemplate { csrf_token: csrf_token(session).await, rows, flash })
+    let toast = flash.as_deref().map(|msg| format!(r#"{{"pf-error":{}}}"#, ascii_json_string(msg)));
+    let mut resp = render(&MarketsTableTemplate { csrf_token: csrf_token(session).await, rows, flash }).into_response();
+    if let Some(value) = toast.and_then(|t| HeaderValue::from_str(&t).ok()) {
+        resp.headers_mut().insert("HX-Trigger", value);
+    }
+    resp
 }
 
-pub async fn markets_table(State(state): State<WebState>, session: Session) -> Html<String> {
+/// A JSON string literal using only ASCII (anything else as `\uXXXX`), since an
+/// HTTP header can only carry visible ASCII.
+fn ascii_json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            ' '..='~' => out.push(c),
+            _ => {
+                let mut units = [0u16; 2];
+                for u in c.encode_utf16(&mut units) {
+                    out.push_str(&format!("\\u{u:04x}"));
+                }
+            }
+        }
+    }
+    out.push('"');
+    out
+}
+
+pub async fn markets_table(State(state): State<WebState>, session: Session) -> Response {
     render_markets_table(&state, &session, None).await
 }
 
@@ -656,6 +687,15 @@ mod tests {
         apply_two_sided(&mut low);
         assert_eq!(low[0].weight.as_deref(), Some("0%"));
         assert!(low[0].weight_note.contains("earn nothing"));
+    }
+
+    #[test]
+    fn toast_messages_are_ascii_json() {
+        let s = ascii_json_string("Couldn't cancel — \"quoted\" 5¢ \\ \n");
+        assert!(s.is_ascii());
+        let back: String = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, "Couldn't cancel — \"quoted\" 5¢ \\ \n");
+        assert!(HeaderValue::from_str(&format!(r#"{{"pf-error":{s}}}"#)).is_ok());
     }
 
     #[test]
