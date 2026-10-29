@@ -25,6 +25,7 @@ use super::activity::{recent_views, AlertView};
 use super::auth::csrf_token;
 use super::rewards::{
     fetch_today_entries, history_series, load_payouts, rewards_chart_svg, sum_last_days, today_key, total_earned,
+    yesterday_amount, yesterday_payout_swr,
 };
 use super::shell::{balance_swr, engine_status, render, shell, EngineStatus, Shell};
 use super::state::WebState;
@@ -310,6 +311,7 @@ pub async fn overview(State(state): State<WebState>, session: Session) -> Html<S
 struct OverviewRewardsTemplate {
     error: Option<String>,
     chart_svg: String,
+    rewards_yesterday: String,
     rewards_7d: String,
     rewards_30d: String,
 }
@@ -322,6 +324,7 @@ pub async fn overview_rewards(State(state): State<WebState>) -> Html<String> {
             render(&OverviewRewardsTemplate {
                 error: None,
                 chart_svg: rewards_chart_svg(&series),
+                rewards_yesterday: usd(yesterday_amount(&days)),
                 rewards_7d: usd(sum_last_days(&series, 7)),
                 rewards_30d: usd(sum_last_days(&series, 30)),
             })
@@ -329,6 +332,7 @@ pub async fn overview_rewards(State(state): State<WebState>) -> Html<String> {
         Err(e) => render(&OverviewRewardsTemplate {
             error: Some(e),
             chart_svg: String::new(),
+            rewards_yesterday: String::new(),
             rewards_7d: String::new(),
             rewards_30d: String::new(),
         }),
@@ -355,6 +359,7 @@ struct KpisTemplate {
     live_legs: usize,
     portfolio_value: Option<String>,
     rewards_today: Option<String>,
+    rewards_yesterday: Option<String>,
     markets: usize,
     paused_legs: usize,
 }
@@ -403,6 +408,7 @@ pub async fn overview_kpis(State(state): State<WebState>) -> Html<String> {
         live_legs,
         portfolio_value: value.map(usd),
         rewards_today: today.map(|t| format!("${t:.2}")),
+        rewards_yesterday: yesterday_payout_swr(&state).map(|y| format!("${y:.2}")),
         markets: st.markets,
         paused_legs: st.paused_legs,
     })

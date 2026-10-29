@@ -147,6 +147,25 @@ pub(super) async fn load_payouts(state: &WebState) -> Result<Vec<DailyPayout>, S
         .map_err(|e| format!("Couldn't load payouts: {e}"))
 }
 
+/// Yesterday's payout (0 if none has landed yet).
+pub(super) fn yesterday_amount(days: &[DailyPayout]) -> Decimal {
+    let yesterday = Utc::now().date_naive() - chrono::Duration::days(1);
+    days.iter().find(|d| d.earned_day == yesterday).map(|d| d.amount).unwrap_or_default()
+}
+
+/// Yesterday's payout from the cache, refreshed in the background, so a caller
+/// that must not wait (the Overview cards) never does.
+pub(super) fn yesterday_payout_swr(state: &WebState) -> Option<Decimal> {
+    let user = state.wallet_address()?;
+    let fetch_user = user.clone();
+    let raw = state.caches.reward_payouts.get_swr(&user, move || async move {
+        tokio::time::timeout(PAYOUTS_TIMEOUT, portfolio::reward_payouts(&fetch_user))
+            .await
+            .map_err(|_| eyre::eyre!("Polymarket took too long to answer"))?
+    })?;
+    Some(yesterday_amount(&portfolio::daily_payouts(&raw)))
+}
+
 /// "1,234,567".
 fn thousands(n: u64) -> String {
     let digits = n.to_string();

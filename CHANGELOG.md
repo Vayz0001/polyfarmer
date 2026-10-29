@@ -56,6 +56,8 @@ This is everything that will be in the first public beta (0.1.0).
 - A clearer Rewards page. The top row shows today so far, yesterday, the last 7 days, all time and your LP rank.
   "Today, by market" lists only the markets you farm (with their status) plus any market that paid today. The daily
   chart and table are one "Daily payouts" panel. The Overview rewards panel loads in the background.
+- Overview: "Rewards today" moved next to "Resting in orders" and shows yesterday's payout underneath; the rewards
+  panel adds a Yesterday row.
 - Reward history now comes from your actual payouts in Polymarket's activity feed, so it starts from your first
   payout ever, not from the day Polyfarmer was installed, and can't miss or misrecord a day.
 - The demo (`examples/serve`) can run on another port with `DASHBOARD_BIND`, and shows sample reward data.

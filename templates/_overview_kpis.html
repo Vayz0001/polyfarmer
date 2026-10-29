@@ -10,14 +10,14 @@
     <div class="s">{{ live_legs }} live bid{% if live_legs != 1 %}s{% endif %}</div>
   </div>
   <div class="kpi">
+    <div class="k">Rewards today</div>
+    <div class="v pos">{% if let Some(r) = rewards_today %}{{ r }}{% else %}—{% endif %}</div>
+    <div class="s">{% if let Some(y) = rewards_yesterday %}yesterday: {{ y }} · <a href="/rewards">details →</a>{% else %}accruing · paid after midnight UTC{% endif %}</div>
+  </div>
+  <div class="kpi">
     <div class="k">Positions value</div>
     <div class="v">{% if let Some(v) = portfolio_value %}{{ v }}{% else %}—{% endif %}</div>
     <div class="s"><a href="/positions">inventory from fills →</a></div>
-  </div>
-  <div class="kpi">
-    <div class="k">Rewards today</div>
-    <div class="v pos">{% if let Some(r) = rewards_today %}{{ r }}{% else %}—{% endif %}</div>
-    <div class="s">accruing · paid after midnight UTC</div>
   </div>
   <div class="kpi">
     <div class="k">Markets</div>
