@@ -67,8 +67,9 @@ const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https"];
 /// Share links (e.g. `.../event/some-market?tid=123` or `...#fragment`) also
 /// carry query strings and fragments that would leak into the slug, so
 /// everything from the first `?` or `#` onward is cut as well. The scheme is
-/// then validated: only `http`/`https` reach the Gamma client, so a pasted
-/// `javascript:` or `file:` URL never becomes an outbound request.
+/// then validated: only `http`/`https` are accepted, so a pasted `javascript:`
+/// or `file:` URL is rejected before the slug is parsed (the pasted URL is
+/// never fetched; only the extracted slug is sent to the Gamma API).
 ///
 /// Returns the cleaned URL on success, or an error message suitable for the
 /// user-facing error template.
@@ -79,17 +80,25 @@ fn sanitize_market_url(raw: &str) -> Result<String, String> {
         return Err("Paste a Polymarket market or event URL first.".into());
     }
 
-    // If the URL has a scheme, it must be http or https. Scheme-less URLs
-    // (e.g. "polymarket.com/event/x") are accepted and prepended with https://.
-    let normalized = if let Some(scheme_end) = trimmed.find("://") {
-        let scheme = trimmed[..scheme_end].to_ascii_lowercase();
-        if !ALLOWED_URL_SCHEMES.iter().any(|s| *s == scheme) {
-            return Err(format!("URL scheme must be http or https (got \"{scheme}\")."));
+    // If the input starts with a URI scheme (RFC 3986 `scheme:`), the scheme
+    // must be http or https. This is detected even without `//` — e.g.
+    // `javascript:alert(1)` has a scheme and is rejected, not treated as
+    // scheme-less. Host:port inputs (`polymarket.com:443`) are NOT schemes:
+    // a dotted head is a hostname, so they fall through and get `https://`
+    // prepended, same as plain scheme-less URLs (`polymarket.com/event/x`).
+    let normalized = match split_scheme(trimmed) {
+        Some((scheme, rest)) => {
+            if !ALLOWED_URL_SCHEMES.iter().any(|s| *s == scheme) {
+                return Err(format!("URL scheme must be http or https (got \"{scheme}\")."));
+            }
+            if rest.starts_with("//") {
+                trimmed.to_string()
+            } else {
+                // `http:host/path` (no `//`) — normalise to `http://host/path`.
+                format!("{scheme}://{rest}")
+            }
         }
-        trimmed.to_string()
-    } else {
-        // No scheme present — prepend https:// so the URL is valid.
-        format!("https://{}", trimmed)
+        None => format!("https://{}", trimmed),
     };
 
     // Drop query strings and fragments: share links append tracking params
@@ -103,6 +112,26 @@ fn sanitize_market_url(raw: &str) -> Result<String, String> {
         return Err("Paste a Polymarket market or event URL first.".into());
     }
     Ok(path_only.to_string())
+}
+
+/// Splits a leading URI scheme off `input` per RFC 3986
+/// (`^[a-zA-Z][a-zA-Z0-9+.-]*:`), returning `(scheme_lowercased, rest)`.
+/// A dotted head (e.g. `polymarket.com:443`) is a host:port, not a scheme,
+/// so `None` is returned for it — callers treat that as scheme-less.
+fn split_scheme(input: &str) -> Option<(String, &str)> {
+    let idx = input.find(':')?;
+    let head = &input[..idx];
+    let mut chars = head.chars();
+    if !chars.next()?.is_ascii_alphabetic() {
+        return None;
+    }
+    if !head.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.') {
+        return None;
+    }
+    if head.contains('.') {
+        return None; // dotted head = hostname (host:port), not a scheme
+    }
+    Some((head.to_ascii_lowercase(), &input[idx + 1..]))
 }
 
 fn browse_key(q: &str, sort: &str, dir: &str, cursor: &str) -> String {
@@ -1705,7 +1734,13 @@ mod tests {
         assert!(sanitize_market_url("file:///etc/passwd").is_err());
         assert!(sanitize_market_url("data:text/html,<script>").is_err());
 
-        // http (not just https) is allowed — Gamma happily 301s http to https.
+        // http (not just https) is accepted — only the extracted slug, not the
+        // pasted URL, is ever sent to Gamma.
+        assert!(sanitize_market_url("http:polymarket.com/event/x").is_ok());
+
+        // A dotted head is a host:port, not a scheme — accepted and normalised.
+        let host_port = sanitize_market_url("polymarket.com:443").unwrap();
+        assert_eq!(host_port, "https://polymarket.com:443");
         assert!(sanitize_market_url("http://polymarket.com/event/x").is_ok());
         // Scheme matching is case-insensitive.
         assert!(sanitize_market_url("HTTPS://polymarket.com/event/x").is_ok());
