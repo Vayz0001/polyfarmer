@@ -51,6 +51,86 @@ static BROWSE: LazyLock<Arc<TtlCache<Arc<markets_browse::RewardsMultiResponse>>>
     LazyLock::new(|| Arc::new(TtlCache::with_capacity(Duration::from_secs(60), 64)));
 const BROWSE_PAGE_SIZE: u32 = 30;
 
+/// Schemes we will resolve and hand to the Polymarket Gamma API. Anything else
+/// (file://, javascript:, data:, …) is either useless for a market lookup or an
+/// injection surface, so it is rejected before we touch the network.
+const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https"];
+
+/// Sanitize a user-entered market/event URL before resolving it.
+///
+/// Pasted URLs can contain invisible control characters (NUL, BEL, ESC, …)
+/// that slip through copy/paste, OCR, or hand-editing and confuse the slug
+/// extractor (`extract_slug`) into producing garbage. They are stripped here.
+/// Share links (e.g. `.../event/some-market?tid=123` or `...#fragment`) also
+/// carry query strings and fragments that would leak into the slug, so
+/// everything from the first `?` or `#` onward is cut as well. The scheme is
+/// then validated: only `http`/`https` are accepted, so a pasted `javascript:`
+/// or `file:` URL is rejected before the slug is parsed (the pasted URL is
+/// never fetched; only the extracted slug is sent to the Gamma API).
+///
+/// Returns the cleaned URL on success, or an error message suitable for the
+/// user-facing error template.
+fn sanitize_market_url(raw: &str) -> Result<String, String> {
+    let cleaned: String = raw.chars().filter(|&c| !c.is_control()).collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return Err("Paste a Polymarket market or event URL first.".into());
+    }
+
+    // If the input starts with a URI scheme (RFC 3986 `scheme:`), the scheme
+    // must be http or https. This is detected even without `//` — e.g.
+    // `javascript:alert(1)` has a scheme and is rejected, not treated as
+    // scheme-less. Host:port inputs (`polymarket.com:443`) are NOT schemes:
+    // a dotted head is a hostname, so they fall through and get `https://`
+    // prepended, same as plain scheme-less URLs (`polymarket.com/event/x`).
+    let normalized = match split_scheme(trimmed) {
+        Some((scheme, rest)) => {
+            if !ALLOWED_URL_SCHEMES.iter().any(|s| *s == scheme) {
+                return Err(format!("URL scheme must be http or https (got \"{scheme}\")."));
+            }
+            if rest.starts_with("//") {
+                trimmed.to_string()
+            } else {
+                // `http:host/path` (no `//`) — normalise to `http://host/path`.
+                format!("{scheme}://{rest}")
+            }
+        }
+        None => format!("https://{}", trimmed),
+    };
+
+    // Drop query strings and fragments: share links append tracking params
+    // (?tid=...) and anchors (#...) that would otherwise pollute the slug
+    // the extractor derives from the path.
+    let path_only = match normalized.find(['?', '#']) {
+        Some(idx) => &normalized[..idx],
+        None => &normalized,
+    };
+    if path_only.is_empty() {
+        return Err("Paste a Polymarket market or event URL first.".into());
+    }
+    Ok(path_only.to_string())
+}
+
+/// Splits a leading URI scheme off `input` per RFC 3986
+/// (`^[a-zA-Z][a-zA-Z0-9+.-]*:`), returning `(scheme_lowercased, rest)`.
+/// A dotted head (e.g. `polymarket.com:443`) is a host:port, not a scheme,
+/// so `None` is returned for it — callers treat that as scheme-less.
+fn split_scheme(input: &str) -> Option<(String, &str)> {
+    let idx = input.find(':')?;
+    let head = &input[..idx];
+    let mut chars = head.chars();
+    if !chars.next()?.is_ascii_alphabetic() {
+        return None;
+    }
+    if !head.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.') {
+        return None;
+    }
+    if head.contains('.') {
+        return None; // dotted head = hostname (host:port), not a scheme
+    }
+    Some((head.to_ascii_lowercase(), &input[idx + 1..]))
+}
+
 fn browse_key(q: &str, sort: &str, dir: &str, cursor: &str) -> String {
     format!("{q}|{sort}|{dir}|{cursor}")
 }
@@ -1170,11 +1250,11 @@ struct MarketPickerTemplate {
 /// event with one tradeable market) goes straight to the view; an event with
 /// several candidates shows a picker instead of guessing.
 pub async fn resolve_url(session: Session, Query(p): Query<ResolveUrlParams>) -> Response {
-    let url = p.url.trim();
-    if url.is_empty() {
-        return view_error(&session, "Paste a Polymarket market or event URL first.").await;
-    }
-    match tokio::time::timeout(NETWORK_TIMEOUT, gamma_resolve::resolve_url(url)).await {
+    let url = match sanitize_market_url(&p.url) {
+        Ok(u) => u,
+        Err(msg) => return view_error(&session, &msg).await,
+    };
+    match tokio::time::timeout(NETWORK_TIMEOUT, gamma_resolve::resolve_url(&url)).await {
         Ok(Ok(gamma_resolve::Resolved::Single(mr))) => {
             Redirect::to(&format!("/markets/view?slug={}", mr.market_slug)).into_response()
         }
@@ -1650,5 +1730,68 @@ mod tests {
     fn event_urls() {
         assert_eq!(poly_event_url("ev", "mk"), "https://polymarket.com/event/ev/mk");
         assert_eq!(poly_event_url("mk", "mk"), "https://polymarket.com/event/mk");
+    }
+
+    #[test]
+    fn sanitize_market_url_strips_control_chars_and_validates_scheme() {
+        // Happy path: a plain https URL survives unchanged (apart from surrounding whitespace).
+        let clean = sanitize_market_url("  https://polymarket.com/event/2024-elections/donald-trump  ").unwrap();
+        assert_eq!(clean, "https://polymarket.com/event/2024-elections/donald-trump");
+
+        // Control characters (NUL, BEL, ESC, newline) embedded by a paste are removed.
+        let with_ctrl = sanitize_market_url("https://polymarket.com/event/\u{0007}trump\u{001b}").unwrap();
+        assert_eq!(with_ctrl, "https://polymarket.com/event/trump");
+
+        // Tab is a control char and gets stripped too — the slug extractor relies
+        // on `/event/<slug>` splitting on `/`, so a stray tab mid-slug would
+        // otherwise produce a phantom slug.
+        let with_tab = sanitize_market_url("https://polymarket.com/event/tru\tmp").unwrap();
+        assert_eq!(with_tab, "https://polymarket.com/event/trump");
+
+        // `\trump`: the tab precedes "rump", so the cleaned slug is "rump",
+        // not "rtrump" (reviewer case, PR #115).
+        let leading_tab = sanitize_market_url("https://polymarket.com/event/\trump").unwrap();
+        assert_eq!(leading_tab, "https://polymarket.com/event/rump");
+
+        // Share links: query strings and fragments are stripped before the
+        // slug extractor sees them (e.g. Polymarket ?tid= tracking params).
+        let with_query = sanitize_market_url("https://polymarket.com/event/some-market?tid=123").unwrap();
+        assert_eq!(with_query, "https://polymarket.com/event/some-market");
+        let with_frag = sanitize_market_url("https://polymarket.com/event/some-market#top").unwrap();
+        assert_eq!(with_frag, "https://polymarket.com/event/some-market");
+        // Everything from the first '?' or '#' goes, whatever order they appear in.
+        let with_both = sanitize_market_url("https://polymarket.com/event/x?a=1#b").unwrap();
+        assert_eq!(with_both, "https://polymarket.com/event/x");
+        // Control characters and query strings combined.
+        let mixed = sanitize_market_url("https://polymarket.com/event/\trump?src=share\n").unwrap();
+        assert_eq!(mixed, "https://polymarket.com/event/rump");
+
+        // Empty / whitespace-only input is rejected before the network call.
+        assert!(sanitize_market_url("").is_err());
+        assert!(sanitize_market_url("   \n\t  ").is_err());
+
+        // Only http(s) schemes are accepted.
+        assert!(sanitize_market_url("javascript:alert(1)").is_err());
+        assert!(sanitize_market_url("file:///etc/passwd").is_err());
+        assert!(sanitize_market_url("data:text/html,<script>").is_err());
+
+        // http (not just https) is accepted — only the extracted slug, not the
+        // pasted URL, is ever sent to Gamma.
+        assert!(sanitize_market_url("http:polymarket.com/event/x").is_ok());
+
+        // A dotted head is a host:port, not a scheme — accepted and normalised.
+        let host_port = sanitize_market_url("polymarket.com:443").unwrap();
+        assert_eq!(host_port, "https://polymarket.com:443");
+        assert!(sanitize_market_url("http://polymarket.com/event/x").is_ok());
+        // Scheme matching is case-insensitive.
+        assert!(sanitize_market_url("HTTPS://polymarket.com/event/x").is_ok());
+
+        // Scheme-less URLs are accepted and prepended with https://.
+        let schemeless = sanitize_market_url("polymarket.com/event/some-market").unwrap();
+        assert_eq!(schemeless, "https://polymarket.com/event/some-market");
+
+        // Scheme-less with trailing slash is normalised.
+        let with_slash = sanitize_market_url("polymarket.com/event/x/").unwrap();
+        assert_eq!(with_slash, "https://polymarket.com/event/x/");
     }
 }
