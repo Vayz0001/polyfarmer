@@ -313,7 +313,7 @@ pub async fn run() -> Result<()> {
     alerter.info("Bot started");
     info!("All tasks spawned, bot is running");
 
-    // ── Graceful shutdown on SIGINT (Ctrl+C) / SIGTERM (systemd, `kill`, docker) ──
+    // ── Graceful shutdown: Ctrl+C, SIGTERM, or closing the window on Windows ──
     shutdown_signal().await;
     info!("Shutdown signal received — cancelling bot orders...");
     alerter.warn("Bot shutting down — cancelling open orders");
@@ -370,9 +370,15 @@ fn setup_link(bind: &str, code: &str) -> String {
     format!("http://{host}/welcome?code={code}")
 }
 
-/// Resolves on SIGINT (Ctrl+C) or, on Unix, SIGTERM — what `systemctl stop`,
-/// `kill` and `docker stop` send. Handling only Ctrl+C meant a service stop
-/// killed the process without cancelling its resting orders on Polymarket.
+/// Resolves on Ctrl+C or whatever else asks the process to stop, so the
+/// shutdown path can cancel resting orders first:
+/// - Unix: SIGTERM, which `systemctl stop`, `kill` and `docker stop` send.
+/// - Windows: Ctrl+Break, closing the console window, logging off and shutting
+///   down. tokio holds those events open while we clean up; Windows allows a
+///   closing console about 5 seconds, enough to cancel.
+///
+/// Handling only Ctrl+C meant a service stop, or closing the window on
+/// Windows, killed the process with its orders still on Polymarket.
 pub async fn shutdown_signal() {
     #[cfg(unix)]
     {
@@ -390,7 +396,52 @@ pub async fn shutdown_signal() {
             }
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::future::pending;
+        use tokio::signal::windows;
+        // An event that can't be registered just never fires; Ctrl+C still works.
+        let ctrl_break = async {
+            match windows::ctrl_break() {
+                Ok(mut s) => {
+                    s.recv().await;
+                }
+                Err(_) => pending::<()>().await,
+            }
+        };
+        let close = async {
+            match windows::ctrl_close() {
+                Ok(mut s) => {
+                    s.recv().await;
+                }
+                Err(_) => pending::<()>().await,
+            }
+        };
+        let logoff = async {
+            match windows::ctrl_logoff() {
+                Ok(mut s) => {
+                    s.recv().await;
+                }
+                Err(_) => pending::<()>().await,
+            }
+        };
+        let os_shutdown = async {
+            match windows::ctrl_shutdown() {
+                Ok(mut s) => {
+                    s.recv().await;
+                }
+                Err(_) => pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = ctrl_break => {}
+            _ = close => {}
+            _ = logoff => {}
+            _ = os_shutdown => {}
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = tokio::signal::ctrl_c().await;
     }

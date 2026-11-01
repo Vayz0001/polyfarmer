@@ -154,9 +154,10 @@ Pick your system:
 
 **Windows notes**
 
-- Stop Polyfarmer with **Ctrl+C** in its window. That cancels your resting orders before it exits. If you
-  close the window or kill the process instead, orders stay on Polymarket until you start Polyfarmer again
-  (it cancels leftovers on your tracked markets at startup) or cancel them on polymarket.com.
+- Stop Polyfarmer with **Ctrl+C** in its window, or just close the window. Both cancel your resting orders
+  before it exits, and so do logging off and shutting Windows down. Ending it from Task Manager does not: its
+  orders then stay on Polymarket until you start Polyfarmer again (it cancels leftovers on your tracked
+  markets at startup) or cancel them on polymarket.com.
 - Files are stored in the `data` folder next to where you started it. Windows does not get the owner-only
   file permissions that Linux and macOS do, so keep the folder inside your own user profile and don't
   share it.
