@@ -51,9 +51,9 @@ static BROWSE: LazyLock<Arc<TtlCache<Arc<markets_browse::RewardsMultiResponse>>>
     LazyLock::new(|| Arc::new(TtlCache::with_capacity(Duration::from_secs(60), 64)));
 const BROWSE_PAGE_SIZE: u32 = 30;
 
-/// Schemes we will resolve and hand to the Polymarket Gamma API. Anything else
-/// (file://, javascript:, data:, …) is either useless for a market lookup or an
-/// injection surface, so it is rejected before we touch the network.
+/// Schemes a pasted market URL may have. Anything else (file:, javascript:,
+/// data:, …) can't be a Polymarket link, so it is rejected up front. The URL
+/// itself is never fetched; only the slug taken from it is sent to Gamma.
 const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https"];
 
 /// Sanitize a user-entered market/event URL before resolving it.
