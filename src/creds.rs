@@ -92,10 +92,10 @@ fn os_random(buf: &mut [u8]) -> Result<()> {
 
 /// Encrypt `plaintext` with a 32-byte key. Output = nonce(12) || ciphertext.
 pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let cipher = ChaCha20Poly1305::new(<&Key>::from(key));
     let mut nonce = [0u8; NONCE_LEN];
     os_random(&mut nonce)?;
-    let ct = cipher.encrypt(Nonce::from_slice(&nonce), plaintext).map_err(|e| eyre!("encrypt: {e}"))?;
+    let ct = cipher.encrypt(<&Nonce>::from(&nonce), plaintext).map_err(|e| eyre!("encrypt: {e}"))?;
     let mut out = Vec::with_capacity(NONCE_LEN + ct.len());
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&ct);
@@ -108,8 +108,9 @@ pub fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Vec<u8>> {
         return Err(eyre!("ciphertext too short"));
     }
     let (nonce, ct) = blob.split_at(NONCE_LEN);
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-    cipher.decrypt(Nonce::from_slice(nonce), ct).map_err(|_| eyre!("decrypt failed (wrong key or tampered data)"))
+    let cipher = ChaCha20Poly1305::new(<&Key>::from(key));
+    let nonce = <&Nonce>::try_from(nonce).map_err(|_| eyre!("ciphertext too short"))?;
+    cipher.decrypt(nonce, ct).map_err(|_| eyre!("decrypt failed (wrong key or tampered data)"))
 }
 
 // ── Persisted shapes ──────────────────────────────────────────────────────────
@@ -356,6 +357,14 @@ mod tests {
         .unwrap();
         assert_eq!(decrypt(&[7u8; KEY_LEN], &blob).unwrap(), b"0xdeadbeef secret key");
         assert!(decrypt(&[8u8; KEY_LEN], &blob).is_err());
+        // And the other way: today's cipher writes byte-identical output for the
+        // same key and nonce (ChaCha20-Poly1305 is fixed by RFC 8439), so a file
+        // saved now still opens if an earlier Polyfarmer is reinstalled.
+        let (nonce, ct) = blob.split_at(NONCE_LEN);
+        let again = ChaCha20Poly1305::new(<&Key>::from(&[7u8; KEY_LEN]))
+            .encrypt(<&Nonce>::try_from(nonce).unwrap(), b"0xdeadbeef secret key".as_ref())
+            .unwrap();
+        assert_eq!(again, ct);
 
         let hash = "$argon2id$v=19$m=19456,t=2,p=1$BQUFBQUFBQUFBQUFBQUFBQ$HujZK6r6Ev8JSgbzZAdwdVciM9Rl5fuLaYrl6QIWunM";
         assert!(verify_password("correct horse battery staple", hash));
