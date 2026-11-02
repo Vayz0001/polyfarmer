@@ -15,7 +15,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce};
@@ -69,8 +68,10 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 pub fn hash_password(password: &str) -> Result<String> {
     let mut salt_bytes = [0u8; 16];
     os_random(&mut salt_bytes)?;
-    let salt = SaltString::encode_b64(&salt_bytes).map_err(|e| eyre!("salt: {e}"))?;
-    let hash = Argon2::default().hash_password(password.as_bytes(), &salt).map_err(|e| eyre!("hash: {e}"))?.to_string();
+    let hash = Argon2::default()
+        .hash_password_with_salt(password.as_bytes(), &salt_bytes)
+        .map_err(|e| eyre!("hash: {e}"))?
+        .to_string();
     Ok(hash)
 }
 
@@ -369,6 +370,10 @@ mod tests {
         let hash = "$argon2id$v=19$m=19456,t=2,p=1$BQUFBQUFBQUFBQUFBQUFBQ$HujZK6r6Ev8JSgbzZAdwdVciM9Rl5fuLaYrl6QIWunM";
         assert!(verify_password("correct horse battery staple", hash));
         assert!(!verify_password("correct horse battery stapler", hash));
+        // Same password and salt give the identical string today, so a password set
+        // now still works if an earlier Polyfarmer is reinstalled.
+        let again = Argon2::default().hash_password_with_salt(b"correct horse battery staple", &[5u8; 16]).unwrap();
+        assert_eq!(again.to_string(), hash);
     }
 
     #[test]
