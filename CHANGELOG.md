@@ -23,6 +23,8 @@ anything may change between releases.
 
 ### Changed
 
+- Updated `tokio-tungstenite` (the WebSocket client for Polymarket's live feeds) from 0.24 to 0.30: faster message
+  reading, and one fewer duplicate dependency.
 - Removing a market now cancels its order first and only removes it once the cancel is confirmed. If the cancel
   fails, the market stays, paused, so its order is still tracked instead of being left on Polymarket unwatched.
 
