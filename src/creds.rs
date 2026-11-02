@@ -337,6 +337,24 @@ mod tests {
         assert!(!verify_password("hunter2", "not-a-valid-hash"));
     }
 
+    /// Files written by earlier versions must keep opening after a dependency
+    /// upgrade. These were produced with chacha20poly1305 0.10.1 and argon2 0.5.3
+    /// exactly as `encrypt` and `hash_password` write them (fixed key, nonce and
+    /// salt so they are reproducible).
+    #[test]
+    fn data_from_earlier_versions_still_opens() {
+        let blob = hex::decode(
+            "090909090909090909090909cc019fb2856ae7c0b80e2e4ba584d6b40a2e21e841a4760e23822bd502c4e99bb294fc290c",
+        )
+        .unwrap();
+        assert_eq!(decrypt(&[7u8; KEY_LEN], &blob).unwrap(), b"0xdeadbeef secret key");
+        assert!(decrypt(&[8u8; KEY_LEN], &blob).is_err());
+
+        let hash = "$argon2id$v=19$m=19456,t=2,p=1$BQUFBQUFBQUFBQUFBQUFBQ$HujZK6r6Ev8JSgbzZAdwdVciM9Rl5fuLaYrl6QIWunM";
+        assert!(verify_password("correct horse battery staple", hash));
+        assert!(!verify_password("correct horse battery stapler", hash));
+    }
+
     #[test]
     fn encrypt_decrypt_roundtrip() {
         let mut key = [0u8; KEY_LEN];
