@@ -16,6 +16,8 @@ anything may change between releases.
   other kept showing its two-sided score. It now shows what Polymarket scores: the weaker side when both are live,
   a third for one side alone (midpoint 10-90¢), or nothing outside that range. Hover a score for the breakdown.
 - Polymarket's "scoring" check marks could stay stale for up to 15 seconds after an order changed.
+- On Windows, closing the console window (or logging off, or shutting down) killed Polyfarmer without
+  cancelling its resting orders. It now cancels them first, as Ctrl+C does.
 - Error messages on the Markets page vanished within a second, because the table's next refresh redrew it. They now
   also appear as a toast that stays until you close it.
 
