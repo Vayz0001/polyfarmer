@@ -25,6 +25,8 @@ anything may change between releases.
 
 - Updated `tokio-tungstenite` (the WebSocket client for Polymarket's live feeds) from 0.24 to 0.30: faster message
   reading, and one fewer duplicate dependency.
+- Updated `rand` from 0.8 to 0.10. Keys, salts and nonces still come straight from the operating system's random
+  source; if it ever fails, Polyfarmer now reports an error instead of crashing.
 - Removing a market now cancels its order first and only removes it once the cancel is confirmed. If the cancel
   fails, the market stays, paused, so its order is still tracked instead of being left on Polymarket unwatched.
 

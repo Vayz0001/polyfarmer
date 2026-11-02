@@ -3208,7 +3208,7 @@ dependencies = [
  "libc",
  "mime_guess",
  "polymarket_client_sdk_v2",
- "rand 0.8.6",
+ "rand 0.10.3",
  "reqwest 0.12.28",
  "rust-embed",
  "rust_decimal",

@@ -1038,10 +1038,10 @@ fn poly_event_url(event_slug: &str, market_slug: &str) -> String {
 }
 
 fn rand_alpha(n: usize) -> String {
-    use rand::Rng;
+    use rand::RngExt;
     const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    let mut rng = rand::thread_rng();
-    (0..n).map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char).collect()
+    let mut rng = rand::rng();
+    (0..n).map(|_| CHARS[rng.random_range(0..CHARS.len())] as char).collect()
 }
 
 // ── Browse reward-eligible markets ──────────────────────────────────────────
