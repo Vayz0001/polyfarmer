@@ -191,7 +191,7 @@ async fn run(inner: Arc<Inner>, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
         backoff_ms = RECONNECT_BASE_MS;
         let (mut write, mut read) = ws.split();
         let sub = json!({ "assets_ids": wanted, "type": "market", "custom_feature_enabled": true });
-        if write.send(Message::Text(sub.to_string())).await.is_err() {
+        if write.send(Message::Text(sub.to_string().into())).await.is_err() {
             continue;
         }
         info!("book hub: connected ({} tokens)", wanted.len());
@@ -223,14 +223,14 @@ async fn run(inner: Arc<Inner>, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
                     Some(Cmd::Subscribe(t)) => {
                         if subscribed.insert(t.clone()) {
                             let m = json!({ "assets_ids": [t], "operation": "subscribe", "custom_feature_enabled": true });
-                            if write.send(Message::Text(m.to_string())).await.is_err() { break; }
+                            if write.send(Message::Text(m.to_string().into())).await.is_err() { break; }
                         }
                     }
                     Some(Cmd::Unsubscribe(t)) => {
                         forget(&inner, &t);
                         if subscribed.remove(&t) {
                             let m = json!({ "assets_ids": [t], "operation": "unsubscribe" });
-                            if write.send(Message::Text(m.to_string())).await.is_err() { break; }
+                            if write.send(Message::Text(m.to_string().into())).await.is_err() { break; }
                         }
                         if subscribed.is_empty() {
                             let _ = write.send(Message::Close(None)).await;

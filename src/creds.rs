@@ -15,13 +15,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce};
 use eyre::{eyre, Result};
-use rand::rngs::OsRng;
-use rand::{Rng, RngCore};
+use rand::rand_core::UnwrapErr;
+use rand::rngs::SysRng;
+use rand::{RngExt, TryRng};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
@@ -67,9 +67,11 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 /// Hash a password to a PHC string (includes algorithm, params, salt).
 pub fn hash_password(password: &str) -> Result<String> {
     let mut salt_bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut salt_bytes);
-    let salt = SaltString::encode_b64(&salt_bytes).map_err(|e| eyre!("salt: {e}"))?;
-    let hash = Argon2::default().hash_password(password.as_bytes(), &salt).map_err(|e| eyre!("hash: {e}"))?.to_string();
+    os_random(&mut salt_bytes)?;
+    let hash = Argon2::default()
+        .hash_password_with_salt(password.as_bytes(), &salt_bytes)
+        .map_err(|e| eyre!("hash: {e}"))?
+        .to_string();
     Ok(hash)
 }
 
@@ -81,14 +83,20 @@ pub fn verify_password(password: &str, phc_hash: &str) -> bool {
     }
 }
 
+/// Fill `buf` from the operating system's secure random source. Keys, salts
+/// and nonces come straight from it; an OS failure is an error, not a panic.
+fn os_random(buf: &mut [u8]) -> Result<()> {
+    SysRng.try_fill_bytes(buf).map_err(|e| eyre!("the system's random number generator failed: {e}"))
+}
+
 // ── Symmetric encryption (ChaCha20-Poly1305) ──────────────────────────────────
 
 /// Encrypt `plaintext` with a 32-byte key. Output = nonce(12) || ciphertext.
 pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let cipher = ChaCha20Poly1305::new(<&Key>::from(key));
     let mut nonce = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce);
-    let ct = cipher.encrypt(Nonce::from_slice(&nonce), plaintext).map_err(|e| eyre!("encrypt: {e}"))?;
+    os_random(&mut nonce)?;
+    let ct = cipher.encrypt(<&Nonce>::from(&nonce), plaintext).map_err(|e| eyre!("encrypt: {e}"))?;
     let mut out = Vec::with_capacity(NONCE_LEN + ct.len());
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&ct);
@@ -101,8 +109,9 @@ pub fn decrypt(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Vec<u8>> {
         return Err(eyre!("ciphertext too short"));
     }
     let (nonce, ct) = blob.split_at(NONCE_LEN);
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-    cipher.decrypt(Nonce::from_slice(nonce), ct).map_err(|_| eyre!("decrypt failed (wrong key or tampered data)"))
+    let cipher = ChaCha20Poly1305::new(<&Key>::from(key));
+    let nonce = <&Nonce>::try_from(nonce).map_err(|_| eyre!("ciphertext too short"))?;
+    cipher.decrypt(nonce, ct).map_err(|_| eyre!("decrypt failed (wrong key or tampered data)"))
 }
 
 // ── Persisted shapes ──────────────────────────────────────────────────────────
@@ -191,7 +200,7 @@ impl CredentialStore {
     fn ensure_master_key(&self) -> Result<()> {
         if !self.master_path().exists() {
             let mut key = Zeroizing::new([0u8; KEY_LEN]);
-            OsRng.fill_bytes(&mut *key);
+            os_random(&mut *key)?;
             write_private_atomic(&self.master_path(), &*key)?;
         }
         Ok(())
@@ -216,7 +225,7 @@ impl CredentialStore {
             return Ok(());
         }
         let raw: String = (0..SETUP_CODE_LEN)
-            .map(|_| SETUP_CODE_ALPHABET[OsRng.gen_range(0..SETUP_CODE_ALPHABET.len())] as char)
+            .map(|_| SETUP_CODE_ALPHABET[UnwrapErr(SysRng).random_range(0..SETUP_CODE_ALPHABET.len())] as char)
             .collect();
         write_private_atomic(&self.setup_code_path(), format_setup_code(&raw).as_bytes())
     }
@@ -337,15 +346,45 @@ mod tests {
         assert!(!verify_password("hunter2", "not-a-valid-hash"));
     }
 
+    /// Files written by earlier versions must keep opening after a dependency
+    /// upgrade. These were produced with chacha20poly1305 0.10.1 and argon2 0.5.3
+    /// exactly as `encrypt` and `hash_password` write them (fixed key, nonce and
+    /// salt so they are reproducible).
+    #[test]
+    fn data_from_earlier_versions_still_opens() {
+        let blob = hex::decode(
+            "090909090909090909090909cc019fb2856ae7c0b80e2e4ba584d6b40a2e21e841a4760e23822bd502c4e99bb294fc290c",
+        )
+        .unwrap();
+        assert_eq!(decrypt(&[7u8; KEY_LEN], &blob).unwrap(), b"0xdeadbeef secret key");
+        assert!(decrypt(&[8u8; KEY_LEN], &blob).is_err());
+        // And the other way: today's cipher writes byte-identical output for the
+        // same key and nonce (ChaCha20-Poly1305 is fixed by RFC 8439), so a file
+        // saved now still opens if an earlier Polyfarmer is reinstalled.
+        let (nonce, ct) = blob.split_at(NONCE_LEN);
+        let again = ChaCha20Poly1305::new(<&Key>::from(&[7u8; KEY_LEN]))
+            .encrypt(<&Nonce>::try_from(nonce).unwrap(), b"0xdeadbeef secret key".as_ref())
+            .unwrap();
+        assert_eq!(again, ct);
+
+        let hash = "$argon2id$v=19$m=19456,t=2,p=1$BQUFBQUFBQUFBQUFBQUFBQ$HujZK6r6Ev8JSgbzZAdwdVciM9Rl5fuLaYrl6QIWunM";
+        assert!(verify_password("correct horse battery staple", hash));
+        assert!(!verify_password("correct horse battery stapler", hash));
+        // Same password and salt give the identical string today, so a password set
+        // now still works if an earlier Polyfarmer is reinstalled.
+        let again = Argon2::default().hash_password_with_salt(b"correct horse battery staple", &[5u8; 16]).unwrap();
+        assert_eq!(again.to_string(), hash);
+    }
+
     #[test]
     fn encrypt_decrypt_roundtrip() {
         let mut key = [0u8; KEY_LEN];
-        OsRng.fill_bytes(&mut key);
+        os_random(&mut key).unwrap();
         let blob = encrypt(&key, b"0xdeadbeef secret key").unwrap();
         assert_eq!(decrypt(&key, &blob).unwrap(), b"0xdeadbeef secret key");
 
         let mut wrong = [0u8; KEY_LEN];
-        OsRng.fill_bytes(&mut wrong);
+        os_random(&mut wrong).unwrap();
         assert!(decrypt(&wrong, &blob).is_err()); // wrong key
         assert!(decrypt(&key, b"short").is_err()); // truncated
     }

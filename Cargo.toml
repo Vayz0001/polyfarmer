@@ -17,7 +17,7 @@ polymarket_client_sdk_v2 = { version = "0.7.0", features = ["clob", "gamma"] }
 # ── Async runtime + networking ────────────────────────────────────────────────
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json"] }            # pinned by SDK
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 futures-util = "0.3"
 
 # ── Ethereum signing ──────────────────────────────────────────────────────────
@@ -41,9 +41,9 @@ mime_guess = "2"              # content-types for embedded assets
 tower-sessions = "0.15"       # cookie sessions (login state, CSRF token)
 
 # ── Auth + credential encryption ──────────────────────────────────────────────
-argon2 = "0.5"                # password hashing (login) — OWASP standard, RustCrypto
-chacha20poly1305 = "0.10"     # AEAD to encrypt the wallet key at rest, RustCrypto
-rand = "0.8"                  # secure RNG (salts, nonces, master key, tokens)
+argon2 = "0.6"                # password hashing (login) — OWASP standard, RustCrypto
+chacha20poly1305 = "0.11"     # AEAD to encrypt the wallet key at rest, RustCrypto
+rand = "0.10"                 # secure RNG (salts, nonces, master key, tokens)
 
 # ── Config, secrets, errors, logging ──────────────────────────────────────────
 dotenvy = "0.15"

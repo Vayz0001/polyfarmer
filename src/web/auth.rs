@@ -23,8 +23,8 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
     Form,
 };
-use rand::distributions::Alphanumeric;
-use rand::Rng;
+use rand::distr::Alphanumeric;
+use rand::RngExt;
 use serde::Deserialize;
 use tower_sessions::{Expiry, Session};
 
@@ -112,7 +112,7 @@ pub async fn csrf_token(session: &Session) -> String {
     if let Ok(Some(token)) = session.get::<String>(SESSION_CSRF).await {
         return token;
     }
-    let token: String = rand::thread_rng().sample_iter(&Alphanumeric).take(32).map(char::from).collect();
+    let token: String = rand::rng().sample_iter(&Alphanumeric).take(32).map(char::from).collect();
     let _ = session.insert(SESSION_CSRF, token.clone()).await;
     token
 }

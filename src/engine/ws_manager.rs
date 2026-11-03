@@ -147,7 +147,7 @@ pub fn spawn(
                     "custom_feature_enabled": true
                 });
                 info!("WS sending subscribe: {}", sub);
-                if let Err(e) = write.send(Message::Text(sub.to_string())).await {
+                if let Err(e) = write.send(Message::Text(sub.to_string().into())).await {
                     error!("WS initial subscribe failed: {}", e);
                     continue;
                 }
@@ -222,7 +222,7 @@ pub fn spawn(
                                         "operation": "subscribe",
                                         "custom_feature_enabled": true
                                     });
-                                    if write.send(Message::Text(msg.to_string())).await.is_err() {
+                                    if write.send(Message::Text(msg.to_string().into())).await.is_err() {
                                         break "subscribe send failed".to_string();
                                     }
                                     new.iter().for_each(|t| { subscribed.insert(t.clone()); });
@@ -235,7 +235,7 @@ pub fn spawn(
                                     .collect();
                                 if !to_remove.is_empty() {
                                     let msg = json!({ "assets_ids": to_remove, "operation": "unsubscribe" });
-                                    if write.send(Message::Text(msg.to_string())).await.is_err() {
+                                    if write.send(Message::Text(msg.to_string().into())).await.is_err() {
                                         break "unsubscribe send failed".to_string();
                                     }
                                     to_remove.iter().for_each(|t| { subscribed.remove(t); });
