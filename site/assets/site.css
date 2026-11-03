@@ -235,9 +235,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .rows { font: 13px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .r { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; height: 25px; padding: 0 9px; border-radius: 5px; }
 .r span:nth-of-type(2), .r span:nth-of-type(3) { text-align: right; }
-.r .bar { position: absolute; top: 3px; bottom: 3px; right: 0; border-radius: 3px; opacity: .6; transition: width .6s var(--ease); }
-.r.ask { color: var(--ask); } .r.ask .bar { background: var(--ask-bg); }
-.r.bidr { color: var(--bid); } .r.bidr .bar { background: var(--bid-bg); }
+.r .depth { position: absolute; top: 3px; bottom: 3px; right: 0; border-radius: 3px; opacity: .6; transition: width .6s var(--ease); }
+.r.ask { color: var(--ask); } .r.ask .depth { background: var(--ask-bg); }
+.r.bidr { color: var(--bid); } .r.bidr .depth { background: var(--bid-bg); }
 .r span { position: relative; }
 .r span + span { color: var(--fg-2); }
 .r.inzone { background: var(--zone); }
@@ -426,16 +426,26 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .final p { margin: 22px auto 0; max-width: 50ch; color: var(--fg-2); font-size: 18px; }
 .final .ctas { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 36px; padding-bottom: 210px; }
 
-/* footer */
-footer { margin-top: 120px; border-top: 1px solid var(--line); padding-block: 48px 40px; color: var(--muted); font-size: 14.5px; overflow: hidden; }
-footer .cols { display: flex; justify-content: space-between; gap: 32px; flex-wrap: wrap; }
-footer .links { display: flex; gap: 4px 24px; flex-wrap: wrap; }
+/* footer: every block lines up with the content edges */
+footer { margin-top: 88px; border-top: 1px solid var(--line); padding-block: 48px 40px; color: var(--muted); font-size: 14.5px; overflow: hidden; }
+footer .wrap { container-type: inline-size; }
+footer .cols { display: flex; justify-content: space-between; align-items: center; gap: 20px 32px; flex-wrap: wrap; }
+footer .links { display: flex; gap: 4px 28px; flex-wrap: wrap; }
 footer .links a { display: inline-flex; align-items: center; min-height: 32px; color: var(--muted); } footer .links a:hover { color: var(--fg); }
-.disclaimer { margin-top: 30px; max-width: 96ch; color: var(--faint); font-size: 13.5px; line-height: 1.7; }
-.disclaimer b { color: var(--muted); font-weight: 600; }
+.disclaimer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px 56px; margin-top: 32px; padding-top: 28px; border-top: 1px solid var(--line); color: var(--faint); font-size: 13.5px; line-height: 1.7; }
+.disclaimer p { text-wrap: pretty; }
+.disclaimer .lead { color: var(--muted); font-weight: 600; max-width: 30ch; }
+/* Sized so the outline's ink spans the content width exactly. Measured
+   at this weight, stretch and tracking: the ink is 6.313em wide and
+   starts 0.08em right of the text box. */
 .wordmark {
-  margin-top: 56px; font: 800 clamp(44px, 12.9vw, 185px)/.8 var(--display); font-stretch: 125%; letter-spacing: -.045em;
-  color: transparent; -webkit-text-stroke: 1px var(--line-2); white-space: nowrap; user-select: none; text-align: center;
+  margin: 56px 0 0 -.08em; font: 800 15.84cqw/.8 var(--display); font-stretch: 125%; letter-spacing: -.045em;
+  color: transparent; -webkit-text-stroke: 1px var(--line-2); white-space: nowrap; user-select: none;
+}
+@media (max-width: 760px) {
+  .disclaimer { grid-template-columns: minmax(0, 1fr); }
+  footer .links { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; width: 100%; gap: 4px 28px; }
+  .wordmark { margin-top: 40px; }
 }
 
 /* 404 */
