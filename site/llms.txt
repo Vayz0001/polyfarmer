@@ -1,0 +1,9 @@
+# Polyfarmer
+
+> Open-source, self-hosted bot that farms Polymarket liquidity rewards. It keeps resting bids inside each market's reward zone, follows the order book, and cancels orders when the user's protections (minimum depth, volatility limit, expiry) say so. Written in Rust, MIT licensed. Not affiliated with Polymarket.
+
+- [Source code and README](https://github.com/Vayz0001/polyfarmer): install steps for Linux, macOS and Windows, first run, remote access, security
+- [Changelog](https://github.com/Vayz0001/polyfarmer/blob/main/CHANGELOG.md)
+- [Security policy](https://github.com/Vayz0001/polyfarmer/blob/main/SECURITY.md)
+
+It places real orders with real money. Nothing about it is financial advice. Polymarket is not available in every region, and Polyfarmer does not work around regional restrictions.

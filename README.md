@@ -13,7 +13,7 @@
 [![Status: beta](https://img.shields.io/badge/status-beta-yellow.svg)](#project-status)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/DEsbgyxC3z)
 
-[Install](#install) · [First run](#first-run) · [Remote access](#reaching-the-dashboard-remotely) · [Security](#security) · [FAQ](#faq-and-troubleshooting) · [Contributing](CONTRIBUTING.md) · [Discord](https://discord.gg/DEsbgyxC3z)
+[Website](https://polyfarmer.xyz) · [Install](#install) · [First run](#first-run) · [Remote access](#reaching-the-dashboard-remotely) · [Security](#security) · [FAQ](#faq-and-troubleshooting) · [Contributing](CONTRIBUTING.md) · [Discord](https://discord.gg/DEsbgyxC3z)
 
 <img src="docs/screenshots/markets.png" alt="The Polyfarmer dashboard: your markets with live status, distance from the midpoint and reward score" width="860">
 

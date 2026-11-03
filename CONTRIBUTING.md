@@ -78,6 +78,7 @@ committed; commit it with any dependency change.
 | `src/wallet_detect.rs` | On-chain detection of your Polymarket wallet and its balance |
 | `tests/web.rs` | Integration tests that drive the whole router in memory |
 | `deploy/` | The systemd unit |
+| `site/` | The website, [polyfarmer.xyz](https://polyfarmer.xyz): plain HTML, CSS and JavaScript, no build step |
 
 ## Writing a change
 
@@ -127,6 +128,14 @@ docs: add Hacktoberfest contribution guidelines
 2. Open the pull request against `main` and describe what and why, how you tested it, and anything a reviewer should look at closely (especially security or trading behaviour).
 3. **Tag Maintainers on Discord:** After submitting your PR, post the link in our **[Discord Server (https://discord.gg/DEsbgyxC3z)](https://discord.gg/DEsbgyxC3z)** in the `#pr-reviews` / `#dev` channel and tag the maintainers so it is queued for review.
 4. Be ready for review feedback. Small, clear pull requests are merged faster.
+
+## The website
+
+`site/` is the project website. It is plain files with no build step and no dependencies: preview it with
+any static file server (for example `python3 -m http.server -d site 8000`). Vercel deploys it from `main`
+whenever something under `site/` changes, using `site/vercel.json` for the security headers. Keep it free of
+third-party scripts, fonts and trackers, keep the strict Content-Security-Policy, and make every animation
+respect `prefers-reduced-motion`. The demo on the page is simulated and must stay clearly labelled as such.
 
 ## Releasing (maintainers)
 
