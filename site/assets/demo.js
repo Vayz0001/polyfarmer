@@ -46,7 +46,7 @@
     function rows(box, n, side) {
       var list = [];
       for (var k = 0; k < n; k++) {
-        var r = el("div", "r " + side), bar = el("i", "bar"), p = el("span"), s = el("span"), u = el("span");
+        var r = el("div", "r " + side), bar = el("i", "depth"), p = el("span"), s = el("span"), u = el("span");
         r.appendChild(bar); r.appendChild(p); r.appendChild(s); r.appendChild(u); box.appendChild(r);
         list.push({ r: r, bar: bar, p: p, s: s, u: u });
       }

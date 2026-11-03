@@ -235,9 +235,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .rows { font: 13px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .r { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; height: 25px; padding: 0 9px; border-radius: 5px; }
 .r span:nth-of-type(2), .r span:nth-of-type(3) { text-align: right; }
-.r .bar { position: absolute; top: 3px; bottom: 3px; right: 0; border-radius: 3px; opacity: .6; transition: width .6s var(--ease); }
-.r.ask { color: var(--ask); } .r.ask .bar { background: var(--ask-bg); }
-.r.bidr { color: var(--bid); } .r.bidr .bar { background: var(--bid-bg); }
+.r .depth { position: absolute; top: 3px; bottom: 3px; right: 0; border-radius: 3px; opacity: .6; transition: width .6s var(--ease); }
+.r.ask { color: var(--ask); } .r.ask .depth { background: var(--ask-bg); }
+.r.bidr { color: var(--bid); } .r.bidr .depth { background: var(--bid-bg); }
 .r span { position: relative; }
 .r span + span { color: var(--fg-2); }
 .r.inzone { background: var(--zone); }
