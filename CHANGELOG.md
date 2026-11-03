@@ -7,6 +7,12 @@ anything may change between releases.
 
 ## [Unreleased]
 
+### Added
+
+- A project website at [polyfarmer.xyz](https://polyfarmer.xyz), in `site/`: what Polyfarmer does, a simulated
+  live dashboard, an interactive look at Polymarket's reward scoring, install steps and an FAQ. Static files only,
+  no third-party scripts or tracking, and every animation turns off for people who prefer reduced motion.
+
 ### Fixed
 
 - Removing a market often needed several clicks: the Markets table refreshes every few seconds, and a refresh while

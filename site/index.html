@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Polyfarmer</title>
+<meta name="description" content="Open-source, self-hosted bot that farms Polymarket liquidity rewards from your own machine. Your keys never leave it.">
+<meta name="theme-color" content="#07090c">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Polyfarmer: farm Polymarket liquidity rewards from your own machine">
+<meta property="og:description" content="Open-source and self-hosted. It keeps your bids inside the reward zone, pulls them when the book turns, and never sends your keys anywhere.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preload" href="assets/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js" defer></script>
+<script src="assets/field.js" defer></script>
+<script src="assets/demo.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Polyfarmer home"><img src="assets/img/mark.svg" alt="" width="28" height="28">Polyfarmer</a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#scoring">Scoring</a>
+      <a href="#features">Features</a>
+      <a href="#security">Security</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="actions">
+      <a class="btn sm discord" href="https://discord.gg/DEsbgyxC3z" rel="noopener">Discord</a>
+      <a class="btn sm" href="https://github.com/Vayz0001/polyfarmer" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.7.3 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero">
+  <canvas class="field" data-field="hero" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <a class="badge rise d0" href="https://github.com/Vayz0001/polyfarmer/releases/tag/v0.1.0" rel="noopener"><span class="tag">v0.1.0</span>First public beta is out</a>
+    <h1 aria-label="Farm Polymarket rewards on your own machine.">
+      <span class="line" aria-hidden="true"><span>Farm Polymarket</span></span>
+      <span class="line" aria-hidden="true"><span>rewards on your</span></span>
+      <span class="line" aria-hidden="true"><span class="leaf">own machine.</span></span>
+    </h1>
+    <div class="below">
+      <div class="rise d1">
+        <p class="lede">An open-source bot for Polymarket's liquidity rewards. It keeps your bids inside each market's reward zone, follows the book as it moves, and pulls them the moment your limits say so. <b>Your keys never leave your machine.</b></p>
+        <div class="meta"><span>Rust</span><span>MIT licensed</span><span>Linux, macOS, Windows</span></div>
+      </div>
+      <div class="ctas rise d2">
+        <a class="btn primary" href="#install">Install Polyfarmer <span class="arrow" aria-hidden="true">→</span></a>
+        <a class="btn" href="https://github.com/Vayz0001/polyfarmer" rel="noopener">View the source</a>
+      </div>
+    </div>
+
+    <div class="stage rise d3" aria-label="Simulated Polyfarmer dashboard: your bid re-pegging inside the reward zone of a live order book">
+      <div class="window" data-book="hero">
+        <div class="bar">
+          <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="status"><span><i class="ok"></i>Engine <b>Running</b></span><span class="hide-sm"><i class="ok"></i>Feed <b>Live</b></span><span class="hide-sm">Live orders <b>3</b></span></span>
+          <span class="sim-tag">Simulated</span>
+        </div>
+        <div class="body">
+          <div class="kpis">
+            <div class="kpi"><div class="lbl">Rewards today</div><div class="v pos" data-out="today">$4.18</div><div class="s">since 00:00 UTC</div></div>
+            <div class="kpi"><div class="lbl">Resting in orders</div><div class="v">$350</div><div class="s">3 live bids</div></div>
+            <div class="kpi"><div class="lbl">Your share</div><div class="v" data-out="share">3.9%</div><div class="s">of this market's pool</div></div>
+            <div class="kpi"><div class="lbl">Distance</div><div class="v" data-out="dist">1.0¢</div><div class="s">below the best bid</div></div>
+            <div class="meter">
+              <div class="row"><span class="lbl">Reward weight</span><span class="v" data-out="weight">34%</span></div>
+              <div class="track"><i data-out="weight-bar"></i></div>
+              <p class="s" data-out="weight-note">Inside the zone. Closer to the midpoint scores more.</p>
+            </div>
+            <div class="guards">
+              <div class="lbl">Protections</div>
+              <ul>
+                <li data-out="depth-row"><span>Depth ahead</span><b data-out="depth">$3,051</b><em>min $500</em></li>
+                <li><span>Price move</span><b data-out="move">0.0¢</b><em>limit ±5¢</em></li>
+                <li><span>Expires</span><b>6d 4h</b><em>then cancelled</em></li>
+              </ul>
+            </div>
+          </div>
+          <div class="book">
+            <div class="head"><span class="title">Will the Fed cut rates in December?</span><span class="zone-label" data-out="zone">zone 45.5–51.5¢</span></div>
+            <div class="rows" data-out="asks"></div>
+            <div class="mid"><span>midpoint</span><b data-out="mid">48.5¢</b><span data-out="spread">spread 1.0¢</span></div>
+            <div class="rows" data-out="bids"></div>
+            <div class="legend"><span><i class="sw z"></i>reward zone</span><span><i class="sw y"></i>your bid</span><span>price · shares · USD</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="facts settle">
+  <div class="wrap">
+    <ul>
+      <li><b>Self-hosted</b><span>One program on your machine</span></li>
+      <li><b>Encrypted</b><span>Your key never leaves it</span></li>
+      <li><b>Rust</b><span>Fast, small, memory-safe</span></li>
+      <li><b>3 platforms</b><span>Linux, macOS and Windows</span></li>
+      <li><b>MIT</b><span>Free and open source</span></li>
+    </ul>
+  </div>
+</div>
+
+<section class="block" id="how">
+  <div class="wrap">
+    <div class="sec-head settle">
+      <span class="eyebrow">How it works</span>
+      <h2>Polymarket pays for liquidity. Polyfarmer keeps yours where it counts.</h2>
+      <p>Every day Polymarket shares a reward pool among the orders resting near each market's midpoint. Closer earns more, and closer also gets filled more. Polyfarmer manages that trade-off for you, every second the book moves.</p>
+    </div>
+    <div class="story">
+      <div class="pin">
+        <div class="window" data-book="story">
+          <div class="bar">
+            <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="status"><span><i class="ok"></i>Market view</span></span>
+            <span class="sim-tag">Simulated</span>
+          </div>
+          <div class="body">
+            <div class="book">
+              <div class="head"><span class="title">Will it snow in London on Christmas Day?</span><span class="zone-label" data-out="zone">zone 18.5–25.5¢</span></div>
+              <div class="rows" data-out="asks"></div>
+              <div class="mid"><span>midpoint</span><b data-out="mid">22.0¢</b><span data-out="spread">spread 1.0¢</span></div>
+              <div class="rows" data-out="bids"></div>
+            </div>
+          </div>
+          <div class="story-note" data-out="note"><i class="dot"></i><span data-out="note-text">Choose a market and a distance below the best bid.</span></div>
+        </div>
+      </div>
+      <ol class="steps">
+        <li class="step on" data-step="place">
+          <span class="num">01</span>
+          <h3>Pick a market and a distance</h3>
+          <p>Choose from the markets that pay rewards and decide how far below the best bid your order rests. The market view previews your score before you place anything.</p>
+          <span class="chip">distance 1.0¢ · size $150 · min depth $500</span>
+        </li>
+        <li class="step" data-step="follow">
+          <span class="num">02</span>
+          <h3>It follows the book</h3>
+          <p>When the best bid moves, Polyfarmer cancels and re-places your order at the same distance, so it stays inside the reward zone.</p>
+          <span class="chip">re-pegged within a second of each move</span>
+        </li>
+        <li class="step" data-step="guard">
+          <span class="num">03</span>
+          <h3>It steps back in time</h3>
+          <p>If the orders in front of yours thin out, or the price jumps past your limit, the order is pulled before it can be filled. It comes back when the book is healthy again.</p>
+          <span class="chip">depth ahead under $500 → pulled</span>
+        </li>
+        <li class="step" data-step="earn">
+          <span class="num">04</span>
+          <h3>Rewards land daily</h3>
+          <p>Polymarket pays each UTC day's rewards shortly after midnight UTC. The dashboard shows today's share as it accrues, and every payout after.</p>
+          <span class="chip">paid at 00:00 UTC</span>
+        </li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="scoring">
+  <div class="wrap">
+    <div class="sec-head settle">
+      <span class="eyebrow">Scoring</span>
+      <h2>Closer pays more. Too close gets filled.</h2>
+      <p>Polymarket scores each order by how close it rests to the midpoint, squared. Drag the distance and see what an order earns, and how exposed it is.</p>
+    </div>
+    <div class="score settle">
+      <div class="plot">
+        <svg viewBox="0 0 560 250" role="img" aria-labelledby="sc-title">
+          <title id="sc-title">Reward score against distance from the midpoint in a plus or minus 3 cent zone.</title>
+          <rect class="dg-zone" x="70" y="22" width="420" height="188" rx="4"/>
+          <line class="dg-grid" x1="0" y1="40" x2="560" y2="40"/>
+          <line class="dg-grid" x1="0" y1="125" x2="560" y2="125"/>
+          <line class="dg-axis" x1="0" y1="210" x2="560" y2="210"/>
+          <line class="dg-mid" x1="280" y1="22" x2="280" y2="210"/>
+          <path class="dg-curve dim" d="M0 210.0 L70 210.0 L77 209.9 L84 209.7 L91 209.4 L98 209.0 L105 208.4 L112 207.7 L119 206.9 L126 206.0 L133 204.9 L140 203.7 L147 202.4 L154 200.9 L161 199.4 L168 197.7 L175 195.8 L182 193.9 L189 191.8 L196 189.6 L203 187.3 L210 184.8 L217 182.2 L224 179.5 L231 176.7 L238 173.7 L245 170.6 L252 167.4 L259 164.1 L266 160.6 L273 157.0 L280 153.3 L287 157.0 L294 160.6 L301 164.1 L308 167.4 L315 170.6 L322 173.7 L329 176.7 L336 179.5 L343 182.2 L350 184.8 L357 187.3 L364 189.6 L371 191.8 L378 193.9 L385 195.8 L392 197.7 L399 199.4 L406 200.9 L413 202.4 L420 203.7 L427 204.9 L434 206.0 L441 206.9 L448 207.7 L455 208.4 L462 209.0 L469 209.4 L476 209.7 L483 209.9 L553 210.0 L560 210.0 L560 210.0"/>
+          <path class="dg-curve" d="M0 210.0 L70 210.0 L77 209.8 L84 209.2 L91 208.3 L98 207.0 L105 205.3 L112 203.2 L119 200.7 L126 197.9 L133 194.7 L140 191.1 L147 187.1 L154 182.8 L161 178.1 L168 173.0 L175 167.5 L182 161.6 L189 155.4 L196 148.8 L203 141.8 L210 134.4 L217 126.7 L224 118.6 L231 110.1 L238 101.2 L245 91.9 L252 82.3 L259 72.3 L266 61.9 L273 51.1 L280 40.0 L287 51.1 L294 61.9 L301 72.3 L308 82.3 L315 91.9 L322 101.2 L329 110.1 L336 118.6 L343 126.7 L350 134.4 L357 141.8 L364 148.8 L371 155.4 L378 161.6 L385 167.5 L392 173.0 L399 178.1 L406 182.8 L413 187.1 L420 191.1 L427 194.7 L434 197.9 L441 200.7 L448 203.2 L455 205.3 L462 207.0 L469 208.3 L476 209.2 L483 209.8 L553 210.0 L560 210.0 L560 210.0"/>
+          <text class="dg-txt accent" x="74" y="14">reward zone ±3¢</text>
+          <text class="dg-txt strong" x="280" y="236" text-anchor="middle">midpoint</text>
+          <text class="dg-txt" x="70" y="236" text-anchor="middle">−3¢</text>
+          <text class="dg-txt" x="490" y="236" text-anchor="middle">+3¢</text>
+          <g class="dg-move" id="sc-bid" transform="translate(210 162.8)">
+            <line class="dg-drop" id="sc-drop" x1="0" y1="0" x2="0" y2="47.2"/>
+            <circle class="dg-ring" r="8"/>
+            <circle class="dg-bid" r="6"/>
+            <text class="dg-txt strong" x="-14" y="-8" text-anchor="end">Yes</text>
+          </g>
+          <g class="dg-move dg-other" id="sc-bid2" transform="translate(350 162.8)">
+            <line class="dg-drop" id="sc-drop2" x1="0" y1="0" x2="0" y2="47.2"/>
+            <circle class="dg-ring" r="8"/>
+            <circle class="dg-bid" r="6"/>
+            <text class="dg-txt strong" x="14" y="-8">No</text>
+          </g>
+        </svg>
+      </div>
+      <div class="controls">
+        <div class="readout">
+          <div><div class="lbl">Score</div><div class="v accent" id="sc-score">44%</div><div class="s" id="sc-score-note">of the best possible weight</div></div>
+          <div><div class="lbl">Fill risk</div><div class="v risk-mid" id="sc-risk">Medium</div><div class="s" id="sc-risk-note">orders ahead usually fill first</div></div>
+        </div>
+        <div class="slider">
+          <label for="sc-dist">Distance from the midpoint <output id="sc-dist-out" for="sc-dist">1.0¢</output></label>
+          <input type="range" id="sc-dist" min="0.2" max="4" step="0.1" value="1">
+          <div class="ticks" aria-hidden="true"><span>0.2¢</span><span>1¢</span><span>2¢</span><span>3¢ edge</span><span>4¢</span></div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="sc-one"> One side only (scores a third)</label>
+        <p class="fine" id="sc-sides">Both sides: a bid on Yes and one on No, each the same distance from the midpoint. The weaker side sets the score.</p>
+        <p class="fine">Polymarket's formula: <code>((zone − distance) / zone)²</code>. Outside the zone an order earns nothing. Orders also need the market's minimum size to count.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="features">
+  <div class="wrap">
+    <div class="sec-head settle">
+      <span class="eyebrow">The dashboard</span>
+      <h2>Everything in one local dashboard.</h2>
+      <p>Find markets, start farming and see exactly what each order earns. It runs in your browser and only talks to your own machine.</p>
+    </div>
+    <div class="bento settle">
+      <article class="tile t-markets">
+        <div class="txt"><h3>Every leg at a glance</h3><p>Status, distance from the midpoint and an honest score for each order, with pause, edit and remove right there.</p></div>
+        <div class="pic"><img src="assets/img/markets.png" alt="Markets page listing every leg with status, distance, score, size and expiry" width="1680" height="960" loading="lazy" decoding="async"></div>
+      </article>
+      <article class="tile t-rewards">
+        <div class="txt"><h3>Know what you earn</h3><p>Today's share as it accrues, yesterday's payout and 30 days of history from Polymarket's own records.</p></div>
+        <div class="stat">
+          <div class="big" data-out="bento-today">$4.18</div>
+          <div class="s">earned today · simulated</div>
+          <div class="bars" data-out="payouts" role="img" aria-label="Daily payouts over 30 days, simulated"></div>
+          <dl class="mini">
+            <div><dt>Yesterday</dt><dd>$7.25</dd></div>
+            <div><dt>7 days</dt><dd>$41.41</dd></div>
+            <div><dt>LP rank</dt><dd>#1,482 <span>Top 1%</span></dd></div>
+          </dl>
+        </div>
+      </article>
+      <article class="tile t-view">
+        <div class="txt"><h3>See the book first</h3><p>A live book with depth and the reward zone marked, and a weight meter that previews your score.</p></div>
+        <div class="pic"><img src="assets/img/market-view.png" alt="Market view with a live order book and the new-order form" width="1680" height="960" loading="lazy" decoding="async"></div>
+      </article>
+      <article class="tile t-guard">
+        <div class="txt"><h3>A safety net on every order</h3><p>Each market gets its own limits, and anything unexpected cancels your orders.</p></div>
+        <ul class="glist">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"/></svg><div><b>Distance</b><span>Re-pegged below the best bid on every move.</span></div></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><div><b>Minimum depth</b><span>Pulled when too little sits in front of you.</span></div></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><div><b>Auto-pause</b><span>Stops when the price moves past your limit.</span></div></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><div><b>Expiry</b><span>Cancelled for good at the time you set.</span></div></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12a10 10 0 0 1 17-7l3 3M22 4v4h-4M22 12a10 10 0 0 1-17 7l-3-3M2 20v-4h4"/></svg><div><b>Cancel on anything odd</b><span>Shutdown, lost connection or failed heartbeat.</span></div></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v18M5 8h14M5 16h14"/></svg><div><b>Honest scores</b><span>Two-sided rule applied, as Polymarket pays.</span></div></li>
+        </ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="security">
+  <div class="wrap">
+    <div class="sec-head settle">
+      <span class="eyebrow">Security</span>
+      <h2>Your keys stay on your machine.</h2>
+      <p>Polyfarmer is a single program you run yourself. No hosted service, no account and nothing that phones home.</p>
+    </div>
+    <div class="split">
+      <ul class="checks settle">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><div><b>Encrypted at rest.</b> Your wallet key is encrypted on disk and only used to sign orders for Polymarket.</div></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/></svg><div><b>Locked-down dashboard.</b> A password, short sessions, CSRF protection and a strict content security policy.</div></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><div><b>Private remote access.</b> Reach it from your phone through Tailscale or an SSH tunnel, never the open internet.</div></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg><div><b>Open and checked.</b> Every change runs tests, lints and a dependency audit on Linux, macOS and Windows. <a href="https://github.com/Vayz0001/polyfarmer/blob/main/SECURITY.md" rel="noopener">Security policy</a></div></li>
+      </ul>
+      <div class="terminal settle" aria-label="What Polyfarmer prints on its first run">
+        <div class="tbar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>first run</div>
+<pre><span class="c">$</span> cargo run --release
+<span class="g">INFO</span>    Polyfarmer starting
+<span class="g">INFO</span> │ First run — create your admin password:
+<span class="g">INFO</span> │   setup code:  <span class="b">kqcm-7xhn</span>
+<span class="g">INFO</span> │   open:        <span class="b">http://127.0.0.1:8080/welcome?code=kqcm-7xhn</span>
+<span class="g">INFO</span> Loaded 0 market configs
+<span class="g">INFO</span> Dashboard on http://127.0.0.1:8080
+<span class="cursor" aria-hidden="true"></span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="install">
+  <div class="wrap">
+    <div class="sec-head settle">
+      <span class="eyebrow">Install</span>
+      <h2>Up and running in minutes.</h2>
+      <p>Polyfarmer builds from source with Rust. Pick your system, run the commands, then open the setup link it prints.</p>
+    </div>
+    <div class="install settle">
+      <div class="tabs" role="tablist" aria-label="Operating system">
+        <button class="tab" role="tab" id="tab-linux" aria-controls="pane-linux" aria-selected="true">Linux</button>
+        <button class="tab" role="tab" id="tab-macos" aria-controls="pane-macos" aria-selected="false" tabindex="-1">macOS</button>
+        <button class="tab" role="tab" id="tab-windows" aria-controls="pane-windows" aria-selected="false" tabindex="-1">Windows</button>
+      </div>
+      <div role="tabpanel" id="pane-linux" aria-labelledby="tab-linux" class="code">
+        <div class="label"><span>Debian or Ubuntu, in a terminal</span><button class="copy" type="button" data-copy="pre-linux">Copy</button></div>
+<pre id="pre-linux">sudo apt install build-essential cmake pkg-config libssl-dev git curl
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
+cd polyfarmer
+cargo run --release</pre>
+      </div>
+      <div role="tabpanel" id="pane-macos" aria-labelledby="tab-macos" class="code" hidden>
+        <div class="label"><span>In Terminal (skip the first two lines if Rust is installed)</span><button class="copy" type="button" data-copy="pre-macos">Copy</button></div>
+<pre id="pre-macos">xcode-select --install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
+cd polyfarmer
+cargo run --release</pre>
+      </div>
+      <div role="tabpanel" id="pane-windows" aria-labelledby="tab-windows" class="code" hidden>
+        <div class="label"><span>In PowerShell, then reopen it before the last three lines</span><button class="copy" type="button" data-copy="pre-windows">Copy</button></div>
+<pre id="pre-windows">winget install --id Git.Git -e
+winget install --id Rustlang.Rustup -e
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
+git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
+cd polyfarmer
+cargo run --release</pre>
+      </div>
+      <p class="after">Try it without a wallet first: <code>DEMO=1 cargo run --example serve</code>. Other distributions, first-run steps and remote access are in the <a href="https://github.com/Vayz0001/polyfarmer#install" rel="noopener">README</a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="faq">
+  <div class="wrap">
+    <div class="sec-head settle">
+      <span class="eyebrow">FAQ</span>
+      <h2>Questions people ask.</h2>
+    </div>
+    <div class="faq settle">
+      <details><summary>Is it free?</summary><div class="a"><p>Yes. Polyfarmer is open source under the MIT license. There is no paid version and no fee on your rewards.</p></div></details>
+      <details><summary>Does it trade with my money?</summary><div class="a"><p>Yes. It places real limit orders from your Polymarket wallet, and a resting order can be filled when the market moves. Use a dedicated wallet holding only what you can afford to lose, start with one small market and watch it.</p></div></details>
+      <details><summary>Is it made by Polymarket?</summary><div class="a"><p>No. Polyfarmer is an independent open-source project. It is not affiliated with, endorsed by or supported by Polymarket.</p></div></details>
+      <details><summary>Where can I use it?</summary><div class="a"><p>Wherever Polymarket itself is available to you. Polymarket restricts some countries and regions, and Polyfarmer does nothing to get around that. You are responsible for following Polymarket's terms where you live.</p></div></details>
+      <details><summary>What do I need to run it?</summary><div class="a"><p>A computer or small server running Linux, macOS or Windows, a Polymarket wallet with some funds, and a few minutes to build it. A small cloud server keeps it running around the clock.</p></div></details>
+      <details><summary>How much can I earn?</summary><div class="a"><p>It depends on the markets, how much you post and how close to the midpoint you rest. Rewards are shared with every other liquidity provider, and fills can cost more than you earn. There are no guarantees.</p></div></details>
+    </div>
+
+    <div class="final settle">
+      <canvas class="field" data-field="final" aria-hidden="true"></canvas>
+      <h2>Start with one small market.</h2>
+      <p>Install Polyfarmer, try the built-in demo, then point it at one market and watch it work.</p>
+      <div class="ctas">
+        <a class="btn primary" href="#install">Install Polyfarmer <span class="arrow" aria-hidden="true">→</span></a>
+        <a class="btn" href="https://discord.gg/DEsbgyxC3z" rel="noopener">Join the Discord</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <a class="brand" href="#top"><img src="assets/img/mark.svg" alt="" width="28" height="28">Polyfarmer</a>
+      <nav class="links" aria-label="Project">
+        <a href="https://github.com/Vayz0001/polyfarmer" rel="noopener">GitHub</a>
+        <a href="https://github.com/Vayz0001/polyfarmer/blob/main/CHANGELOG.md" rel="noopener">Changelog</a>
+        <a href="https://github.com/Vayz0001/polyfarmer/blob/main/SECURITY.md" rel="noopener">Security</a>
+        <a href="https://github.com/Vayz0001/polyfarmer/blob/main/LICENSE" rel="noopener">MIT License</a>
+        <a href="https://discord.gg/DEsbgyxC3z" rel="noopener">Discord</a>
+      </nav>
+    </div>
+    <p class="disclaimer"><b>Polyfarmer is open-source software provided as is, without warranty of any kind.</b> It places real orders with real money: orders can be filled, markets can move and software has bugs. Nothing on this site is financial advice. Polyfarmer is not affiliated with Polymarket. Polymarket is not available everywhere; you are responsible for complying with its terms and the law where you live.</p>
+    <div class="wordmark" aria-hidden="true">Polyfarmer</div>
+  </div>
+</footer>
+</body>
+</html>
