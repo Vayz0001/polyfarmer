@@ -72,8 +72,8 @@
       drop2.setAttribute("y2", (210 - y).toFixed(1));
       dot2.classList.toggle("off", one.checked);
       sides.textContent = one.checked
-        ? "One side: only the Yes bid. Polymarket pays a third of the score, and nothing when the midpoint is below 10¢ or above 90¢."
-        : "Both sides: a bid on Yes and one on No, each the same distance from the midpoint. The weaker side sets the score.";
+        ? "Yes bid only: a third of the score, and nothing below 10¢ or above 90¢."
+        : "Yes and No bids, same distance. The weaker side sets the score.";
       outDist.textContent = d.toFixed(1) + "¢";
       outScore.textContent = w > 0 && w < 0.005 ? "<1%" : Math.round(w * 100) + "%";
       outScoreNote.textContent = d >= ZONE ? "outside the zone: earns nothing" : one.checked ? "one side only: a third of the two-sided score" : "of the best possible weight";
@@ -130,11 +130,13 @@
     btn.addEventListener("click", function () {
       var pre = document.getElementById(btn.getAttribute("data-copy"));
       if (!pre) return;
+      // Icon button: the state shows as a tick and in the accessible name.
       function done(ok) {
-        btn.textContent = ok ? "Copied" : "Select and copy";
+        var name = ok ? "Copied" : "Selected: press Ctrl+C or Cmd+C to copy";
+        btn.setAttribute("aria-label", name); btn.title = name;
         btn.classList.toggle("done", ok);
         clearTimeout(timer);
-        timer = setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1800);
+        timer = setTimeout(function () { btn.setAttribute("aria-label", "Copy commands"); btn.title = "Copy"; btn.classList.remove("done"); }, 1800);
       }
       function selectText() {
         var r = document.createRange(); r.selectNodeContents(pre);

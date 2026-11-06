@@ -107,7 +107,7 @@
     for (var m = 0; m < this.bid.length; m++) this.bid[m] = Math.max(this.o.floor || 150, this.bid[m] * (0.9 + this.rnd() * 0.2));
     // "guard": the orders in front of yours thin out for a few ticks, then recover
     if (this.mode === "guard") this.thin = (this.ticks % 9) < 5 ? Math.min(1, this.thin + 0.5) : Math.max(0, this.thin - 0.5);
-    if (this.o.main) shared.today += 0.0024 * this.lastW / 0.34 * (0.7 + this.rnd() * 0.6);
+    if (this.o.main) shared.today += 0.0024 * this.lastW / 0.2 * (0.7 + this.rnd() * 0.6);
     this.render();
   };
 
@@ -156,7 +156,7 @@
     if (o.main) {
       this.set("weight", Math.round(w * 100) + "%");
       var bar = this.out("weight-bar"); if (bar) bar.style.width = (w * 100).toFixed(1) + "%";
-      this.set("share", (3.9 * w / 0.34).toFixed(1) + "%");
+      this.set("share", (3.9 * w / 0.2).toFixed(1) + "%");
       this.set("today", usd(shared.today));
       var bt = document.querySelector('[data-out="bento-today"]'); if (bt && bt.textContent !== usd(shared.today)) bt.textContent = usd(shared.today);
       this.set("depth", "$" + int(ahead));
@@ -228,8 +228,8 @@
 
   var heroRoot = document.querySelector('[data-book="hero"]');
   var storyRoot = document.querySelector('[data-book="story"]');
-  if (heroRoot) new BookWidget(heroRoot, { seed: 0x5eed1e5, bestBid: 48, asks: 6, bids: 8, step: 1, dist: 1, zone: 3.5, mine: 309, min: 44, max: 53, minDepth: 500, floor: 1200, interval: 1400, main: true });
-  var story = storyRoot ? new BookWidget(storyRoot, { seed: 0xbadcafe, bestBid: 21, asks: 5, bids: 7, step: 1, dist: 1, zone: 3.5, mine: 735, min: 18, max: 24, floor: 2600, minDepth: 500, interval: 1300, mode: "place", main: false }) : null;
+  if (heroRoot) new BookWidget(heroRoot, { seed: 0x5eed1e5, bestBid: 48, asks: 6, bids: 8, step: 1, dist: 2, zone: 4.5, mine: 309, min: 44, max: 53, minDepth: 500, floor: 1200, interval: 1400, main: true });
+  var story = storyRoot ? new BookWidget(storyRoot, { seed: 0xbadcafe, bestBid: 21, asks: 5, bids: 7, step: 1, dist: 2, zone: 4.5, mine: 735, min: 18, max: 24, floor: 2600, minDepth: 500, interval: 1300, mode: "place", main: false }) : null;
 
   // The story steps tell the pinned window which scene to play.
   document.addEventListener("pf:step", function (e) { if (story) story.setMode(e.detail); });
