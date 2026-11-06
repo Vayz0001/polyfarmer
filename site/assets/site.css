@@ -241,21 +241,21 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .r span { position: relative; }
 .r span + span { color: var(--fg-2); }
 .r.inzone { background: var(--zone); }
-/* Your order: its own piece of the depth bar, an outline that follows the
-   best bid, and the bracket showing the distance it keeps. demo.js moves
-   them with transforms; heights match the 25px row. */
+/* Your order: an outline that follows the best bid, the crossed-out copy
+   left when it is cancelled, and the bracket showing the distance it keeps.
+   demo.js moves them with transforms; heights match the 25px row. */
 .rows[data-out="bids"] { position: relative; }
-.mine { position: absolute; top: 3px; bottom: 3px; right: 0; width: 0; border-radius: 3px; background: var(--accent); opacity: .5; transform-origin: right; }
 .peg { position: absolute; top: 0; left: 0; right: 0; height: 25px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--accent-line); background: var(--accent-bg); pointer-events: none; }
 .peg::after { content: "you"; position: absolute; left: -16px; top: 50%; translate: -100% -50%; font: 600 10px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; color: var(--accent-2); }
 .peg.off { opacity: 0; }
+.peg .glow { position: absolute; inset: -3px; border-radius: 7px; box-shadow: 0 0 0 2px var(--accent-line), 0 0 14px var(--accent-bg); opacity: 0; }
 .peg.pulled { box-shadow: inset 0 0 0 1px var(--warn); background: transparent; }
 .peg.pulled::after { content: "pulled"; color: var(--warn); }
 .peg.ghost { opacity: 0; background: transparent; box-shadow: none; outline: 1px dashed var(--ask); outline-offset: -1px; }
 .peg.ghost::after { content: none; }
 .peg .strike { position: absolute; left: 6px; right: 6px; top: 50%; height: 1.5px; margin-top: -1px; background: var(--ask); transform-origin: left; }
 .gap { position: absolute; left: -10px; width: 5px; border: 1px solid var(--accent-line); border-right: 0; border-radius: 3px 0 0 3px; pointer-events: none; }
-.gap span { position: absolute; right: calc(100% + 4px); top: 50%; translate: 0 -50%; font: 600 10px/1 var(--mono); color: var(--accent-2); white-space: nowrap; }
+.gap span { position: absolute; right: calc(100% + 4px); top: 0; translate: 0 -50%; font: 600 10px/1 var(--mono); color: var(--accent-2); white-space: nowrap; }
 .gap.off { opacity: 0; }
 .gap.stretched { border-color: var(--warn); } .gap.stretched span { color: var(--warn); }
 .mid { display: flex; justify-content: space-between; align-items: center; height: 32px; margin: 5px 0; padding: 0 9px; border-block: 1px dashed var(--line-2); color: var(--muted); font: 12.5px/1 var(--mono); }
@@ -307,6 +307,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .story-note .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
 .story-note.warn .dot { background: var(--warn); }
 .story-note.good .dot { background: var(--bid); }
+/* The notes change every tick: reserve their longest wrap so nothing below jumps. */
+@media (max-width: 640px) { .meter .s { min-height: 2lh; } .story-note { min-height: calc(2lh + 20px); } }
+@media (max-width: 400px) { .story-note { min-height: calc(3lh + 20px); } }
 @media (max-width: 960px) {
   .story { grid-template-columns: minmax(0, 1fr); gap: 32px; }
   .story .pin { position: relative; top: 0; }
@@ -500,7 +503,6 @@ footer .links a { display: inline-flex; align-items: center; min-height: 32px; c
   @keyframes flash-down-b { from { background-color: var(--ask-bg); } to { background-color: transparent; } }
   .peg { transition: opacity .3s, box-shadow .3s, background-color .3s; }
   .gap { transition: opacity .3s, border-color .25s; }
-  .r .mine { transition: width .6s var(--ease), right .6s var(--ease); }
 
   .dg-ring { animation: ring 2.4s ease-out infinite; transform-box: fill-box; transform-origin: center; }
   @keyframes ring { from { scale: .6; opacity: .7; } to { scale: 2.4; opacity: 0; } }
