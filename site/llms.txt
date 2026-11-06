@@ -5,5 +5,6 @@
 - [Source code and README](https://github.com/Vayz0001/polyfarmer): install steps for Linux, macOS and Windows, first run, remote access, security
 - [Changelog](https://github.com/Vayz0001/polyfarmer/blob/main/CHANGELOG.md)
 - [Security policy](https://github.com/Vayz0001/polyfarmer/blob/main/SECURITY.md)
+- [Privacy](https://polyfarmer.xyz/privacy): no cookies, no analytics, no telemetry
 
 It places real orders with real money. Nothing about it is financial advice. Polymarket is not available in every region, and Polyfarmer does not work around regional restrictions.
