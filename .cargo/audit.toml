@@ -12,6 +12,9 @@ ignore = [
     # variability, blocked on alloy 1.x via the Polymarket SDK. Reasons in deny.toml.
     "RUSTSEC-2026-0374",
     "RUSTSEC-2026-0387",
+    # pin-utils: unmaintained, not vulnerable. wasm32-only (alloy -> wasmtimer), never
+    # compiled for our targets. Reason in deny.toml.
+    "RUSTSEC-2026-0441",
     # lru unsoundness needs a key type whose Drop panics. alloy-provider only keys
     # its caches by u64 block numbers and B256 hashes, which cannot panic on drop,
     # so it is not reachable. Fixed in lru >= 0.18.2, which needs a newer alloy.
