@@ -1,6 +1,9 @@
 /* Simulated dashboard for the site. Made-up markets and numbers: a seeded
    random walk, no network, nothing traded. Rows are built once and only
-   their text changes; each window's clock runs only while it is on screen. */
+   their text changes; each window's clock runs only while it is on screen.
+   When the best bid moves, your order is cancelled and placed again at the
+   same distance: the old one is crossed out and the outline slides to the
+   new price (one cheap transform animation, nothing is added to the page). */
 (function () {
   "use strict";
 
@@ -47,13 +50,26 @@
       var list = [];
       for (var k = 0; k < n; k++) {
         var r = el("div", "r " + side), bar = el("i", "depth"), p = el("span"), s = el("span"), u = el("span");
-        r.appendChild(bar); r.appendChild(p); r.appendChild(s); r.appendChild(u); box.appendChild(r);
-        list.push({ r: r, bar: bar, p: p, s: s, u: u });
+        r.appendChild(bar);
+        var mine = null;
+        if (side === "bidr") { mine = el("i", "mine"); r.appendChild(mine); }
+        r.appendChild(p); r.appendChild(s); r.appendChild(u); box.appendChild(r);
+        list.push({ r: r, bar: bar, mine: mine, p: p, s: s, u: u });
       }
       return list;
     }
     this.askRows = rows(this.out("asks"), opts.asks, "ask");
-    this.bidRows = rows(this.out("bids"), opts.bids, "bidr");
+    var bids = this.out("bids");
+    this.bidRows = rows(bids, opts.bids, "bidr");
+    // Overlays on the bid ladder: your order's outline, the crossed-out copy
+    // left behind when it is cancelled, and the bracket from the best bid.
+    this.ghost = el("div", "peg ghost"); this.ghostMine = el("i", "mine"); this.strike = el("i", "strike");
+    this.ghost.appendChild(this.ghostMine); this.ghost.appendChild(this.strike);
+    this.peg = el("div", "peg off");
+    this.gap = el("div", "gap off"); this.gapLabel = el("span", null, c1(opts.dist)); this.gap.appendChild(this.gapLabel);
+    [this.ghost, this.peg, this.gap].forEach(function (n) { n.setAttribute("aria-hidden", "true"); bids.appendChild(n); });
+    this.pitch = this.bidRows[0].r.offsetHeight || 25;
+    this.wasLive = false; this.later = null;
     this.timer = null;
     this.onScreen = false;
     this.render();
@@ -70,6 +86,7 @@
     var want = this.onScreen && !document.hidden, self = this;
     if (want && this.timer === null) this.timer = setInterval(function () { self.step(); }, this.o.interval);
     if (!want && this.timer !== null) { clearInterval(this.timer); this.timer = null; }
+    if (!want && this.later !== null) { clearTimeout(this.later); this.later = null; this.gapLabel.textContent = c1(this.o.dist); this.gap.classList.remove("stretched"); }
   };
 
   BookWidget.prototype.setMode = function (mode) {
@@ -115,15 +132,18 @@
       a.bar.style.width = (as / max * 100).toFixed(1) + "%";
       a.r.classList.toggle("inzone", Math.abs(ap - mid) < o.zone);
     }
+    var live = placed && !pulled, mineW = (o.mine / max * 100).toFixed(1) + "%";
     for (k = 0; k < this.bidRows.length; k++) {
-      var bp = this.bestBid - k * STEP, mine = placed && Math.abs(bp - you) < 1e-9;
-      var bs = this.view[k] + (mine && !pulled ? o.mine : 0), b = this.bidRows[k];
+      var bp = this.bestBid - k * STEP, mine = live && k === aheadRows;
+      var bs = this.view[k] + (mine ? o.mine : 0), b = this.bidRows[k];
       b.p.textContent = c1(bp); b.s.textContent = int(bs); b.u.textContent = "$" + int(bs * bp / 100);
-      b.bar.style.width = (bs / max * 100).toFixed(1) + "%";
+      // Other traders' size, with your own order drawn as its own piece.
+      b.bar.style.width = (this.view[k] / max * 100).toFixed(1) + "%";
+      b.mine.style.right = (this.view[k] / max * 100).toFixed(1) + "%";
+      b.mine.style.width = mine ? mineW : "0%";
       b.r.classList.toggle("inzone", Math.abs(mid - bp) < o.zone);
-      b.r.classList.toggle("you", mine);
-      b.r.classList.toggle("pulled", mine && pulled);
     }
+    this.repeg(placed, pulled, live, aheadRows, max);
     if (this.bestBid !== this.lastBest && !reduce) {
       // Alternate between two identical animations: changing the animation
       // name restarts it without forcing a layout (no offsetWidth trick).
@@ -144,13 +164,56 @@
       var bt = document.querySelector('[data-out="bento-today"]'); if (bt && bt.textContent !== usd(shared.today)) bt.textContent = usd(shared.today);
       this.set("depth", "$" + int(ahead));
       this.set("move", c1(Math.abs(this.bestBid - this.start)));
-      this.set("weight-note", this.bestBid !== this.lastBest
-        ? "Best bid moved to " + c1(this.bestBid) + ". Re-pegged to " + c1(you) + "."
+      this.set("weight-note", this.bestBid !== this.lastBest && live
+        ? "Best bid moved to " + c1(this.bestBid) + ": cancelled " + c1(this.lastBest - DIST) + ", placed " + c1(you) + "."
         : "Inside the zone, " + cm(s) + " from the midpoint.");
     } else {
       this.note(placed, pulled, ahead, you, w);
     }
     this.lastBest = this.bestBid; this.lastW = w;
+  };
+
+  // Your order: the outline sits on its row, the bracket shows the distance
+  // to the best bid. When the best bid moves the ladder re-centres at once,
+  // so the old order is now one row away: cross it out there, slide the
+  // outline back to the same distance, then grow the new order in.
+  BookWidget.prototype.repeg = function (placed, pulled, live, at, max) {
+    var P = this.pitch, peg = this.peg, gap = this.gap, to = "translateY(" + at * P + "px)";
+    peg.classList.toggle("off", !placed);
+    peg.classList.toggle("pulled", placed && pulled);
+    gap.classList.toggle("off", !live);
+    peg.style.transform = to;
+    gap.style.top = P / 2 + "px";
+    gap.style.height = at * P + "px";
+    var moved = live && this.wasLive && this.bestBid !== this.lastBest;
+    var appeared = live && !this.wasLive;
+    this.wasLive = live;
+    if (reduce || typeof peg.animate !== "function") return;
+    if (this.later !== null) { clearTimeout(this.later); this.later = null; }
+    var ease = "cubic-bezier(.16, 1, .3, 1)", newMine = this.bidRows[at].mine;
+    if (appeared) {
+      newMine.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], { duration: 320, easing: ease, fill: "backwards" });
+      return;
+    }
+    if (!moved) return;
+    var from = at + Math.round((this.bestBid - this.lastBest) / this.o.step);
+    if (from < 0 || from >= this.bidRows.length) return;
+    var self = this, old = "translateY(" + from * P + "px)";
+    // 1. cancel: the old order is crossed out where it now sits
+    this.ghost.style.transform = old;
+    this.ghostMine.style.right = (this.view[from] / max * 100).toFixed(1) + "%";
+    this.ghostMine.style.width = (this.o.mine / max * 100).toFixed(1) + "%";
+    this.ghost.animate([{ opacity: 0 }, { opacity: 1, offset: 0.12 }, { opacity: 1, offset: 0.55 }, { opacity: 0 }], { duration: 1000, delay: 120 });
+    this.strike.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], { duration: 260, delay: 160, easing: ease, fill: "backwards" });
+    this.ghostMine.animate([{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }], { duration: 240, delay: 240, easing: "ease-in", fill: "both" });
+    // 2. move: the outline and the bracket follow to the same distance
+    peg.animate([{ transform: old }, { transform: to }], { duration: 480, delay: 300, easing: ease, fill: "backwards" });
+    gap.animate([{ height: from * P + "px" }, { height: at * P + "px" }], { duration: 480, delay: 300, easing: ease, fill: "backwards" });
+    this.gapLabel.textContent = c1(Math.abs(this.bestBid - (this.lastBest - this.o.dist)));
+    gap.classList.add("stretched");
+    this.later = setTimeout(function () { self.later = null; self.gapLabel.textContent = c1(self.o.dist); gap.classList.remove("stretched"); }, 520);
+    // 3. place: the new order grows in on its row
+    newMine.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], { duration: 300, delay: 700, easing: ease, fill: "backwards" });
   };
 
   BookWidget.prototype.note = function (placed, pulled, ahead, you, w) {
@@ -159,8 +222,8 @@
       txt = placed ? "Placed $150 at " + c1(you) + ", 1.0¢ below the best bid. Score " + Math.round(w * 100) + "%."
                    : "Previewing 1.0¢ below the best bid: about " + Math.round(weight(this.spread / 2 + 1, this.o.zone) * 100) + "% weight.";
     } else if (this.mode === "follow") {
-      txt = this.bestBid !== this.lastBest ? "Best bid moved to " + c1(this.bestBid) + ". Re-pegged to " + c1(you) + "."
-                                           : "Resting at " + c1(you) + ", inside the reward zone.";
+      txt = this.bestBid !== this.lastBest ? "Best bid " + c1(this.bestBid) + ": cancelled " + c1(this.lastBest - this.o.dist) + ", placed " + c1(you) + "."
+                                           : "Resting at " + c1(you) + ", " + c1(this.o.dist) + " below the best bid.";
     } else if (this.mode === "guard") {
       txt = pulled ? "Only $" + int(ahead) + " ahead, under your $500 minimum. Order pulled." : "$" + int(ahead) + " ahead of you. Order resting.";
       cls = pulled ? "warn" : "";
