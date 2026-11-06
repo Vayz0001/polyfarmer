@@ -15,6 +15,15 @@ anything may change between releases.
 
 ### Fixed
 
+- When Polymarket changed a market's tick size while Polyfarmer was running (for example from 1¢ to 0.1¢), orders
+  failed with "Price … has 3 decimal places" and the market was auto-removed within milliseconds. Polyfarmer now
+  follows tick-size changes live, re-reads the tick from Polymarket when its order library disagrees with the
+  market, and never counts a tick change as a failure.
+- After a failed order, Polyfarmer waits before trying again (2 s, then 4 s, up to a minute) instead of retrying on
+  the next book update, so the three failures that auto-remove a market can no longer happen in a single burst.
+  Resuming a market clears the wait. Orders that fail only because collateral is still settling are retried as before.
+- Saving `markets.json` from two places at once could leave a broken file that stopped Polyfarmer from starting.
+  Each save now writes its own temporary file.
 - Removing a market often needed several clicks: the Markets table refreshes every few seconds, and a refresh while
   the confirm dialog was open replaced the button, so Confirm silently did nothing. Refreshes now wait while the
   dialog is open.

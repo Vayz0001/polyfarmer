@@ -1527,7 +1527,7 @@ pub async fn remove_market(
                 Some(order_id.clone())
             }
             // An order still being placed is cancelled by the placing task when
-            // it sees the status has moved on (see the quote loop in app.rs).
+            // it sees the status has moved on (see run_place in engine/placer.rs).
             Some(OrderStatus::Placing { .. }) => {
                 s.order_status.insert(id.clone(), OrderStatus::Idle);
                 None
@@ -1564,6 +1564,8 @@ pub async fn remove_market(
         s.configs.retain(|c| c.id != id);
         s.order_status.remove(&id);
         s.place_failures.remove(&id);
+        s.place_retry_at.remove(&id);
+        s.place_attempt.remove(&id);
         let tokens_to_unsubscribe: Vec<String> = removed
             .iter()
             .map(|c| c.token_id.clone())
@@ -1616,6 +1618,11 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool) -> Result<(), Str
         }
         for c in s.configs.iter_mut().filter(|c| c.id == id) {
             c.paused = pausing;
+        }
+        if !pausing {
+            // Resuming is a fresh start: no leftover retry delay or failure count.
+            s.place_retry_at.remove(id);
+            s.place_failures.remove(id);
         }
         let order_to_cancel = if pausing {
             match s.order_status.get(id) {

@@ -21,6 +21,11 @@ const TERMINAL_CURSOR: &str = "LTE="; // base64("-1") — signals end of paginat
 const RETRY_ATTEMPTS: u32 = 3;
 const RETRY_BASE_MS: u64 = 200;
 
+/// Our token ids are decimal strings; the SDK takes a typed U256.
+fn parse_token(token_id: &str) -> Result<U256> {
+    U256::from_str(token_id).map_err(|e| eyre::eyre!("invalid token_id {token_id}: {e}"))
+}
+
 type AuthClient = Client<Authenticated<Normal>>;
 
 pub struct Executor {
@@ -83,13 +88,43 @@ impl Executor {
         Ok((order_size_usd / price).round_dp(2))
     }
 
+    /// Tick size the order library validates prices against. The SDK caches it
+    /// per token for the life of the process, so it can be stale.
+    pub async fn sdk_tick(&self, token_id: &str) -> Result<Decimal> {
+        let token = parse_token(token_id)?;
+        Ok(self.client.tick_size(token).await?.minimum_tick_size.as_decimal())
+    }
+
+    /// Read the current tick size from Polymarket, replacing the SDK's cached
+    /// value. The SDK only offers clearing its caches together: tick sizes and
+    /// neg-risk flags (and legacy fee rates) are refetched on each market's next
+    /// order. Market fee info is kept.
+    pub async fn refresh_tick(&self, token_id: &str) -> Result<Decimal> {
+        let token = parse_token(token_id)?;
+        self.client.invalidate_internal_caches();
+        Ok(self.client.tick_size(token).await?.minimum_tick_size.as_decimal())
+    }
+
+    /// Tell the order library about a tick size we learned elsewhere (the
+    /// market WebSocket). Only Polymarket's known tick sizes are accepted.
+    pub fn set_tick(&self, token_id: &str, tick: Decimal) -> Result<()> {
+        use polymarket_client_sdk_v2::clob::types::TickSize;
+        let token = parse_token(token_id)?;
+        let tick = TickSize::try_from(tick).map_err(|e| eyre::eyre!("unknown tick size {tick}: {e}"))?;
+        self.client.set_tick_size(token, tick);
+        Ok(())
+    }
+
     /// Place a resting GTC BUY order. Returns the order ID.
     /// Price must already be snapped to tick size before calling.
     pub async fn place_buy_order(&self, token_id: &str, price: Decimal, size: Decimal) -> Result<String> {
         use polymarket_client_sdk_v2::clob::types::Side;
 
         // SDK V2 builders take a typed U256 token id; our token_id is a decimal string.
-        let token_id_u256 = U256::from_str(token_id).map_err(|e| eyre::eyre!("invalid token_id {token_id}: {e}"))?;
+        let token_id_u256 = parse_token(token_id)?;
+        // The SDK compares decimal places, not value: 0.210 fails on a 0.01
+        // tick although it is 0.21. Drop trailing zeros first.
+        let price = price.normalize();
 
         let order =
             self.client.limit_order().token_id(token_id_u256).price(price).size(size).side(Side::Buy).build().await?;
