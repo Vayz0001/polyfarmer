@@ -234,6 +234,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .book .title { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .book .zone-label { color: var(--accent-2); font: 500 12px/1 var(--mono); white-space: nowrap; }
 .rows { font: 13px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.book .colhead { display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 0 9px 7px; color: var(--faint); font: 600 10.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.book .colhead span + span { text-align: right; }
 .r { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; height: 25px; padding: 0 9px; border-radius: 5px; }
 .r span:nth-of-type(2), .r span:nth-of-type(3) { text-align: right; }
 .r .depth { position: absolute; top: 3px; bottom: 3px; right: 0; border-radius: 3px; opacity: .6; transition: width .6s var(--ease); }

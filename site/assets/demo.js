@@ -122,22 +122,27 @@
       if (k < aheadRows) ahead += this.view[k] * (this.bestBid - k * STEP) / 100;
     }
     var pulled = placed && ahead < o.minDepth;
-    var max = 0;
-    for (k = 0; k < this.ask.length; k++) max = Math.max(max, this.ask[k]);
-    for (k = 0; k < this.view.length; k++) max = Math.max(max, this.view[k] + o.mine);
+    var live = placed && !pulled;
+    // Like a real book: shares per level, and a running total in dollars
+    // that adds up each level moving away from the spread. The depth bars
+    // follow the running total, scaled to the deeper side.
+    var askCum = [], bidCum = [], sum = 0;
+    for (k = 0; k < this.ask.length; k++) { sum += this.ask[k] * (this.bestBid + this.spread + k * STEP) / 100; askCum.push(sum); }
+    sum = 0;
+    for (k = 0; k < this.view.length; k++) { sum += (this.view[k] + (live && k === aheadRows ? o.mine : 0)) * (this.bestBid - k * STEP) / 100; bidCum.push(sum); }
+    var max = Math.max(askCum[askCum.length - 1], bidCum[bidCum.length - 1]);
 
     for (k = 0; k < this.askRows.length; k++) {
       var ai = this.askRows.length - 1 - k, ap = this.bestBid + this.spread + ai * STEP, as = this.ask[ai], a = this.askRows[k];
-      a.p.textContent = c1(ap); a.s.textContent = int(as); a.u.textContent = "$" + int(as * ap / 100);
-      a.bar.style.width = (as / max * 100).toFixed(1) + "%";
+      a.p.textContent = c1(ap); a.s.textContent = int(as); a.u.textContent = "$" + int(askCum[ai]);
+      a.bar.style.width = (askCum[ai] / max * 100).toFixed(1) + "%";
       a.r.classList.toggle("inzone", Math.abs(ap - mid) < o.zone);
     }
-    var live = placed && !pulled;
     for (k = 0; k < this.bidRows.length; k++) {
       var bp = this.bestBid - k * STEP, mine = live && k === aheadRows;
       var bs = this.view[k] + (mine ? o.mine : 0), b = this.bidRows[k];
-      b.p.textContent = c1(bp); b.s.textContent = int(bs); b.u.textContent = "$" + int(bs * bp / 100);
-      b.bar.style.width = (bs / max * 100).toFixed(1) + "%";
+      b.p.textContent = c1(bp); b.s.textContent = int(bs); b.u.textContent = "$" + int(bidCum[k]);
+      b.bar.style.width = (bidCum[k] / max * 100).toFixed(1) + "%";
       b.r.classList.toggle("inzone", Math.abs(mid - bp) < o.zone);
     }
     this.repeg(placed, pulled, live, aheadRows);
