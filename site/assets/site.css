@@ -467,6 +467,20 @@ footer .links a.ico svg { width: 18px; height: 18px; }
   .wordmark { margin-top: 40px; }
 }
 
+/* privacy */
+.top .wrap > .btn:last-child { margin-left: auto; }
+.legal { padding-block: 72px 96px; }
+.legal .wrap, .legal-foot .wrap { max-width: 760px; }
+.legal h1 { margin-top: 18px; font: 800 clamp(40px, 6vw, 64px)/.95 var(--display); font-stretch: 120%; letter-spacing: -.04em; }
+.legal .updated { margin-top: 14px; color: var(--muted); font: 13px/1.4 var(--mono); }
+.legal .intro { margin-top: 32px; color: var(--fg); font-size: 19px; line-height: 1.55; }
+.legal h2 { margin-top: 44px; font: 700 22px/1.2 var(--display); font-stretch: 110%; letter-spacing: -.02em; }
+.legal p, .legal li { color: var(--fg-2); line-height: 1.7; }
+.legal p { margin-top: 12px; }
+.legal ul { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+.legal a, .legal-foot a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.legal-foot { border-top: 1px solid var(--line); padding-block: 28px; color: var(--muted); font-size: 14px; }
+
 /* 404 */
 .lost { min-height: 72vh; display: grid; place-items: center; text-align: center; padding-block: 64px; }
 .lost img { margin: 0 auto 24px; }
