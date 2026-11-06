@@ -1,6 +1,7 @@
 use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
 use crate::engine::orderbook::TokenBook;
+use crate::engine::placer;
 use crate::engine::quoter::{self, DeactivateReason, QuoteAction};
 use crate::storage::save_markets;
 use crate::types::{MarketConfig, OrderStatus, WsBookSnapshot, WsCommand, WsPriceChangeEvent};
@@ -34,6 +35,15 @@ pub struct AppState {
     pub configs: Vec<MarketConfig>,
     /// Consecutive placement failure count per config — reset on success or reconnect
     pub place_failures: HashMap<String, u32>,
+    /// Earliest next placement attempt per config after a failure (backoff).
+    /// Cleared on success and when the leg is removed.
+    pub place_retry_at: HashMap<String, tokio::time::Instant>,
+    /// Which placement attempt owns a leg's `Placing` status. A task that
+    /// finishes late (after a reconnect or pause reset the leg and a newer
+    /// attempt claimed it) must not touch the newer attempt's state.
+    pub place_attempt: HashMap<String, u64>,
+    /// Source of attempt ids.
+    pub next_attempt: u64,
     /// Path to markets.json — needed to save after auto-removing a broken market
     pub markets_file: PathBuf,
     /// Set by heartbeat after 3 consecutive failures + order cancel.
@@ -59,6 +69,9 @@ impl AppState {
             order_status: HashMap::new(),
             configs: Vec::new(),
             place_failures: HashMap::new(),
+            place_retry_at: HashMap::new(),
+            place_attempt: HashMap::new(),
+            next_attempt: 0,
             markets_file,
             heartbeat_paused: false,
             engine_phase: crate::types::EnginePhase::AwaitingWallet,
@@ -450,12 +463,44 @@ async fn handle_message(text: &str, state: &Arc<RwLock<AppState>>, executor: &Ar
             info!("Trade: asset={}... price={} size={}", asset_id.get(..8).unwrap_or(asset_id), price, size);
         }
 
+        "tick_size_change" => {
+            // Polymarket changed this market's tick size (e.g. 1¢ → 0.1¢).
+            // Update the order library first, then the saved legs, so the next
+            // quote uses the new tick and the order library accepts it.
+            let Some((asset_id, new_tick)) = parse_tick_size_change(&value) else {
+                warn!("tick_size_change with missing or invalid fields ignored");
+                return;
+            };
+            let ours = state.read().await.configs.iter().any(|c| c.token_id == asset_id);
+            if !ours {
+                return;
+            }
+            if let Err(e) = executor.set_tick(&asset_id, new_tick) {
+                warn!("tick_size_change ignored: {e}");
+                return;
+            }
+            placer::apply_tick_change(state, alerter, &asset_id, new_tick).await;
+        }
+
         "market_resolved" => {
             info!("Market resolved: {}", value.get("market").and_then(|v| v.as_str()).unwrap_or("?"));
         }
 
         _ => {}
     }
+}
+
+/// `(asset_id, new_tick_size)` from a `tick_size_change` market event. The
+/// tick must be a positive decimal below 1; the order library additionally
+/// only accepts Polymarket's known tick sizes.
+fn parse_tick_size_change(value: &serde_json::Value) -> Option<(String, rust_decimal::Decimal)> {
+    use std::str::FromStr;
+    let asset = value.get("asset_id")?.as_str()?;
+    if asset.is_empty() || asset.len() > 100 || !asset.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let tick = rust_decimal::Decimal::from_str(value.get("new_tick_size")?.as_str()?).ok()?;
+    (tick > rust_decimal::Decimal::ZERO && tick < rust_decimal::Decimal::ONE).then(|| (asset.to_string(), tick))
 }
 
 /// Execute a batch of quote actions. Sets order status optimistically before
@@ -466,146 +511,31 @@ async fn execute_actions(
     executor: &Arc<Executor>,
     alerter: &Arc<Alerter>,
 ) {
-    for (config_id, action, token_id, order_size, _tick_size) in actions {
+    for (config_id, action, token_id, order_size, tick_size) in actions {
         match action {
             QuoteAction::Hold => {}
 
             QuoteAction::Place { price } => {
-                // Optimistic status — prevents double-placement while HTTP call is in-flight
-                {
+                // Claim the slot first (Idle, heartbeat healthy, no retry delay)
+                // so concurrent events never place twice.
+                let attempt = {
                     let mut s = state.write().await;
-                    if s.heartbeat_paused {
-                        continue; // CLOB unreachable — don't attempt placement
+                    match placer::begin_place(&mut s, &config_id, price, tokio::time::Instant::now()) {
+                        Some(a) => a,
+                        None => continue,
                     }
-                    let status = s.order_status.entry(config_id.clone()).or_default();
-                    if *status != OrderStatus::Idle {
-                        continue; // race guard
-                    }
-                    *status = OrderStatus::Placing { price };
-                }
-
-                let exec = Arc::clone(executor);
-                let state2 = Arc::clone(state);
-                let alerter2 = Arc::clone(alerter);
-                tokio::spawn(async move {
-                    let shares = match Executor::shares_from_usd(order_size, price) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Place: invalid price {}: {}", price, e);
-                            let mut s = state2.write().await;
-                            if matches!(s.order_status.get(&config_id), Some(OrderStatus::Placing { .. })) {
-                                s.order_status.insert(config_id, OrderStatus::Idle);
-                            }
-                            return;
-                        }
-                    };
-                    match exec.place_buy_order(&token_id, price, shares).await {
-                        Ok(order_id) => {
-                            let mut s = state2.write().await;
-                            // Commit only if still Placing at this exact price.
-                            // A reconnect or deactivate may have reset state while the call was in-flight.
-                            let still_placing = matches!(
-                                s.order_status.get(&config_id),
-                                Some(OrderStatus::Placing { price: p }) if *p == price
-                            );
-                            if still_placing {
-                                s.order_status
-                                    .insert(config_id.clone(), OrderStatus::Live { order_id: order_id.clone(), price });
-                                s.place_failures.remove(&config_id); // reset on success
-                                let (label, token_label) = s
-                                    .configs
-                                    .iter()
-                                    .find(|c| c.id == config_id)
-                                    .map(|c| (c.label.clone(), c.token_label.clone()))
-                                    .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
-                                drop(s);
-                                alerter2.info(format!(
-                                    "Order placed · {}\nBUY {} {} shares @ {}¢ (${})",
-                                    label,
-                                    shares,
-                                    token_label,
-                                    price * rust_decimal_macros::dec!(100),
-                                    order_size
-                                ));
-                            } else {
-                                drop(s);
-                                // State was externally changed while placing — orphan cancel.
-                                warn!("State changed during placement — cancelling orphan {}", order_id);
-                                let _ = exec.cancel_order(&order_id).await;
-                            }
-                        }
-                        Err(e) => {
-                            let err_str = e.to_string();
-
-                            // "Not enough balance" = collateral locked by a matching/settling order.
-                            // Not a config failure — just wait for next price_change to re-evaluate.
-                            if err_str.contains("not enough balance") {
-                                warn!(
-                                    "Place skipped: insufficient balance (order settling?) — will retry on next tick"
-                                );
-                                let mut s = state2.write().await;
-                                if matches!(s.order_status.get(&config_id), Some(OrderStatus::Placing { .. })) {
-                                    s.order_status.insert(config_id, OrderStatus::Idle);
-                                }
-                                return;
-                            }
-
-                            error!("Place order failed: {}", e);
-                            alerter2.error(format!("Order placement failed: {}", e));
-
-                            // Collect auto-remove data under the lock, but don't mutate
-                            // configs until after save succeeds — prevents state/disk divergence.
-                            let auto_remove = {
-                                let mut s = state2.write().await;
-                                if !matches!(s.order_status.get(&config_id), Some(OrderStatus::Placing { .. })) {
-                                    None // state changed while in-flight
-                                } else {
-                                    s.order_status.insert(config_id.clone(), OrderStatus::Idle);
-                                    let failures = s.place_failures.entry(config_id.clone()).or_insert(0);
-                                    *failures += 1;
-                                    if *failures < MAX_PLACE_FAILURES {
-                                        None
-                                    } else {
-                                        let label = s
-                                            .configs
-                                            .iter()
-                                            .find(|c| c.id == config_id)
-                                            .map(|c| c.label.clone())
-                                            .unwrap_or_else(|| config_id.to_string());
-                                        let remaining: Vec<_> =
-                                            s.configs.iter().filter(|c| c.id != config_id).cloned().collect();
-                                        let markets_file = s.markets_file.clone();
-                                        Some((label, remaining, markets_file))
-                                    }
-                                }
-                            };
-
-                            if let Some((label, remaining, markets_file)) = auto_remove {
-                                match save_markets(&markets_file, &remaining) {
-                                    Ok(_) => {
-                                        let mut s = state2.write().await;
-                                        s.configs.retain(|c| c.id != config_id);
-                                        s.order_status.remove(&config_id);
-                                        s.place_failures.remove(&config_id);
-                                        drop(s);
-                                        alerter2.error(format!(
-                                            "Market '{}' auto-removed after {} consecutive placement failures",
-                                            label, MAX_PLACE_FAILURES
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to save markets after auto-remove of '{}': {}", label, e);
-                                        alerter2.error(format!(
-                                            "Market '{}' hit {} failures but save failed — will retry on next failure: {}",
-                                            label, MAX_PLACE_FAILURES, e
-                                        ));
-                                        // State unchanged — failures stays at MAX, next failure retries save.
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
+                };
+                tokio::spawn(placer::run_place(
+                    Arc::clone(executor),
+                    Arc::clone(state),
+                    Arc::clone(alerter),
+                    config_id,
+                    attempt,
+                    token_id,
+                    order_size,
+                    price,
+                    tick_size,
+                ));
             }
 
             QuoteAction::Cancel { order_id, reason } => {
@@ -666,21 +596,45 @@ async fn execute_actions(
             }
 
             QuoteAction::Replace { order_id, new_price } => {
-                {
+                let prev_status = {
                     let mut s = state.write().await;
                     if s.heartbeat_paused {
                         continue; // CLOB unreachable — don't cancel+replace
                     }
+                    let prev_status = s.order_status.get(&config_id).cloned();
                     s.order_status.insert(
                         config_id.clone(),
                         OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
                     );
-                }
+                    prev_status
+                };
 
                 let exec = Arc::clone(executor);
                 let state2 = Arc::clone(state);
                 let alerter2 = Arc::clone(alerter);
                 tokio::spawn(async move {
+                    // The live order stays until the new price is known to be valid:
+                    // with a stale tick, cancelling first would leave the leg with no order.
+                    let tick_ok = placer::check_tick(&*exec, &state2, &alerter2, &token_id, tick_size, new_price).await;
+                    if tick_ok != placer::TickCheck::Ok {
+                        if let placer::TickCheck::Error(e) = &tick_ok {
+                            warn!("Replace skipped: {e}");
+                        }
+                        let mut s = state2.write().await;
+                        if matches!(s.order_status.get(&config_id),
+                            Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id)
+                        {
+                            match prev_status {
+                                Some(prev @ OrderStatus::Live { .. }) => {
+                                    s.order_status.insert(config_id, prev);
+                                }
+                                _ => {
+                                    s.order_status.insert(config_id, OrderStatus::Idle);
+                                }
+                            }
+                        }
+                        return;
+                    }
                     // Cancel first, with CLOB verification on ambiguous responses.
                     // Ok(true)  = confirmed off CLOB — safe to place.
                     // Ok(false) = verified still active — leave Cancelling; 30s timeout recovers.
@@ -868,6 +822,38 @@ async fn execute_actions(
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tick_event_tests {
+    use super::parse_tick_size_change;
+    use rust_decimal_macros::dec;
+    use serde_json::json;
+
+    #[test]
+    fn parses_the_documented_message() {
+        let v = json!({"event_type":"tick_size_change","market":"0x74","asset_id":"10750588","old_tick_size":"0.01","new_tick_size":"0.001","timestamp":"1782753357257"});
+        assert_eq!(parse_tick_size_change(&v), Some(("10750588".to_string(), dec!(0.001))));
+    }
+
+    #[test]
+    fn rejects_bad_fields() {
+        for v in [
+            json!({"asset_id":"1"}),
+            json!({"new_tick_size":"0.01"}),
+            json!({"asset_id":"","new_tick_size":"0.01"}),
+            json!({"asset_id":"12a","new_tick_size":"0.01"}),
+            json!({"asset_id":"1".repeat(101),"new_tick_size":"0.01"}),
+            json!({"asset_id":"1","new_tick_size":"0"}),
+            json!({"asset_id":"1","new_tick_size":"-0.01"}),
+            json!({"asset_id":"1","new_tick_size":"1"}),
+            json!({"asset_id":"1","new_tick_size":"abc"}),
+            json!({"asset_id":"1","new_tick_size":0.01}),
+            json!({"asset_id":1,"new_tick_size":"0.01"}),
+        ] {
+            assert_eq!(parse_tick_size_change(&v), None, "{v}");
         }
     }
 }

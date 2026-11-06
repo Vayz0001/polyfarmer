@@ -8,5 +8,6 @@ pub mod alerts;
 pub mod executor;
 pub mod heartbeat;
 pub mod orderbook;
+pub mod placer;
 pub mod quoter;
 pub mod ws_manager;

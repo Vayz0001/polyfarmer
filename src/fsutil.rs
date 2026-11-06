@@ -67,10 +67,12 @@ fn new_private_file(path: &Path) -> std::io::Result<fs::File> {
     opts.open(path)
 }
 
-/// Sibling temp path: `markets.json` -> `markets.json.tmp`.
+/// Sibling temp path, unique per write: `markets.json` -> `markets.json.<uuid>.tmp`.
+/// Unique so two saves of the same file at once never share (and clobber)
+/// one temp file: each writes its own, and the last rename wins whole.
 fn tmp_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
-    name.push(".tmp");
+    name.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
     path.with_file_name(name)
 }
 
@@ -80,9 +82,6 @@ fn tmp_path(path: &Path) -> PathBuf {
 /// directory. A crash leaves either the old file or the new one.
 pub fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = tmp_path(path);
-    // A leftover temp from a crash would make O_EXCL fail; it holds no state we need.
-    let _ = fs::remove_file(&tmp);
-
     let result = (|| -> Result<()> {
         let mut file = new_private_file(&tmp).wrap_err_with(|| format!("creating {}", tmp.display()))?;
         file.write_all(bytes)?;
@@ -151,6 +150,33 @@ mod tests {
         assert_eq!(mode(&shared), 0o755);
         let _ = fs::remove_dir_all(&base);
         let _ = fs::remove_dir_all(&shared);
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_never_corrupt_the_file() {
+        let dir = tmp();
+        create_private_dir(&dir).unwrap();
+        let path = dir.join("markets.json");
+        let writers: Vec<_> = (0..8)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let body = format!("[{}]", vec![i.to_string(); 2000].join(","));
+                    for _ in 0..40 {
+                        write_private_atomic(&path, body.as_bytes()).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        let v: Vec<u32> = serde_json::from_str(&fs::read_to_string(&path).unwrap()).expect("whole JSON");
+        assert_eq!(v.len(), 2000);
+        assert!(v.iter().all(|x| *x == v[0]), "one writer's content, not a mix");
+        let left: Vec<_> = fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
+        assert_eq!(left, vec![std::ffi::OsString::from("markets.json")], "no temp files left behind");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

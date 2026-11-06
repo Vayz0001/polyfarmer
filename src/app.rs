@@ -5,8 +5,8 @@ use crate::config::Config;
 use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
 use crate::engine::quoter::QuoteAction;
-use crate::engine::ws_manager::{AppState, MAX_PLACE_FAILURES};
-use crate::engine::{heartbeat, quoter, ws_manager};
+use crate::engine::ws_manager::AppState;
+use crate::engine::{heartbeat, placer, quoter, ws_manager};
 use crate::storage::{load_markets, save_markets};
 use crate::types::{EnginePhase, OrderStatus, WsCommand};
 
@@ -483,7 +483,7 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
         }
     }
 
-    let actions: Vec<(String, QuoteAction, String, rust_decimal::Decimal)> = {
+    let actions: Vec<(String, QuoteAction, String, rust_decimal::Decimal, rust_decimal::Decimal)> = {
         let s = state.read().await;
         s.configs
             .iter()
@@ -491,140 +491,34 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                 let book = s.books.get(&c.token_id)?;
                 let status = s.order_status.get(&c.id).cloned().unwrap_or_default();
                 let action = quoter::evaluate(c, book, &status);
-                Some((c.id.clone(), action, c.token_id.clone(), c.order_size))
+                Some((c.id.clone(), action, c.token_id.clone(), c.order_size, c.tick_size))
             })
             .collect()
     };
 
-    for (config_id, action, token_id, order_size) in actions {
+    for (config_id, action, token_id, order_size, tick_size) in actions {
         match action {
             QuoteAction::Hold => {}
 
             QuoteAction::Place { price } => {
-                {
+                let attempt = {
                     let mut s = state.write().await;
-                    if s.heartbeat_paused {
-                        continue;
+                    match placer::begin_place(&mut s, &config_id, price, tokio::time::Instant::now()) {
+                        Some(a) => a,
+                        None => continue,
                     }
-                    let status = s.order_status.entry(config_id.clone()).or_default();
-                    if *status != OrderStatus::Idle {
-                        continue;
-                    }
-                    *status = OrderStatus::Placing { price };
-                }
-                let exec2 = Arc::clone(executor);
-                let state2 = Arc::clone(state);
-                let alert2 = Arc::clone(alerter);
-                tokio::spawn(async move {
-                    let shares = match Executor::shares_from_usd(order_size, price) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Timer place: invalid price {}: {}", price, e);
-                            let mut s = state2.write().await;
-                            if matches!(s.order_status.get(&config_id), Some(OrderStatus::Placing { .. })) {
-                                s.order_status.insert(config_id, OrderStatus::Idle);
-                            }
-                            return;
-                        }
-                    };
-                    match exec2.place_buy_order(&token_id, price, shares).await {
-                        Ok(oid) => {
-                            let mut s = state2.write().await;
-                            let still_placing = matches!(
-                                s.order_status.get(&config_id),
-                                Some(OrderStatus::Placing { price: p }) if *p == price
-                            );
-                            if still_placing {
-                                let (label, token_label) = s
-                                    .configs
-                                    .iter()
-                                    .find(|c| c.id == config_id)
-                                    .map(|c| (c.label.clone(), c.token_label.clone()))
-                                    .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
-                                s.order_status.insert(config_id.clone(), OrderStatus::Live { order_id: oid, price });
-                                s.place_failures.remove(&config_id); // reset on success
-                                drop(s);
-                                alert2.info(format!(
-                                    "Order placed · {}\nBUY {} {} shares @ {}¢ (${})",
-                                    label,
-                                    shares,
-                                    token_label,
-                                    price * rust_decimal_macros::dec!(100),
-                                    order_size
-                                ));
-                            } else {
-                                drop(s);
-                                warn!("Timer: state changed during placement — cancelling orphan {}", oid);
-                                let _ = exec2.cancel_order(&oid).await;
-                            }
-                        }
-                        Err(e) => {
-                            let err_str = e.to_string();
-
-                            // "Not enough balance" = collateral locked by a matching/settling order.
-                            // Not a config failure — just wait for next evaluation cycle.
-                            if err_str.contains("not enough balance") {
-                                warn!("Timer place skipped: insufficient balance (order settling?) — will retry on next tick");
-                                let mut s = state2.write().await;
-                                if matches!(s.order_status.get(&config_id), Some(OrderStatus::Placing { .. })) {
-                                    s.order_status.insert(config_id, OrderStatus::Idle);
-                                }
-                                return;
-                            }
-
-                            error!("Timer place failed: {}", e);
-                            alert2.error(format!("Order placement failed: {}", e));
-
-                            let auto_remove = {
-                                let mut s = state2.write().await;
-                                if !matches!(s.order_status.get(&config_id), Some(OrderStatus::Placing { .. })) {
-                                    None
-                                } else {
-                                    s.order_status.insert(config_id.clone(), OrderStatus::Idle);
-                                    let failures = s.place_failures.entry(config_id.clone()).or_insert(0);
-                                    *failures += 1;
-                                    if *failures < MAX_PLACE_FAILURES {
-                                        None
-                                    } else {
-                                        let label = s
-                                            .configs
-                                            .iter()
-                                            .find(|c| c.id == config_id)
-                                            .map(|c| c.label.clone())
-                                            .unwrap_or_else(|| config_id.to_string());
-                                        let remaining: Vec<_> =
-                                            s.configs.iter().filter(|c| c.id != config_id).cloned().collect();
-                                        let markets_file = s.markets_file.clone();
-                                        Some((label, remaining, markets_file))
-                                    }
-                                }
-                            };
-
-                            if let Some((label, remaining, markets_file)) = auto_remove {
-                                match save_markets(&markets_file, &remaining) {
-                                    Ok(_) => {
-                                        let mut s = state2.write().await;
-                                        s.configs.retain(|c| c.id != config_id);
-                                        s.order_status.remove(&config_id);
-                                        s.place_failures.remove(&config_id);
-                                        drop(s);
-                                        alert2.error(format!(
-                                            "Market '{}' auto-removed after {} consecutive placement failures",
-                                            label, MAX_PLACE_FAILURES
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to save markets after auto-remove of '{}': {}", label, e);
-                                        alert2.error(format!(
-                                            "Market '{}' hit {} failures but save failed — will retry on next failure: {}",
-                                            label, MAX_PLACE_FAILURES, e
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
+                };
+                tokio::spawn(placer::run_place(
+                    Arc::clone(executor),
+                    Arc::clone(state),
+                    Arc::clone(alerter),
+                    config_id,
+                    attempt,
+                    token_id,
+                    order_size,
+                    price,
+                    tick_size,
+                ));
             }
 
             QuoteAction::Cancel { order_id, .. } => {
@@ -661,20 +555,44 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
             }
 
             QuoteAction::Replace { order_id, new_price } => {
-                {
+                let prev_status = {
                     let mut s = state.write().await;
                     if s.heartbeat_paused {
                         continue;
                     }
+                    let prev_status = s.order_status.get(&config_id).cloned();
                     s.order_status.insert(
                         config_id.clone(),
                         OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
                     );
-                }
+                    prev_status
+                };
                 let exec2 = Arc::clone(executor);
                 let state2 = Arc::clone(state);
                 let alert2 = Arc::clone(alerter);
                 tokio::spawn(async move {
+                    // The live order stays until the new price is known to be valid:
+                    // with a stale tick, cancelling first would leave the leg with no order.
+                    let tick_ok = placer::check_tick(&*exec2, &state2, &alert2, &token_id, tick_size, new_price).await;
+                    if tick_ok != placer::TickCheck::Ok {
+                        if let placer::TickCheck::Error(e) = &tick_ok {
+                            warn!("Replace skipped: {e}");
+                        }
+                        let mut s = state2.write().await;
+                        if matches!(s.order_status.get(&config_id),
+                            Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id)
+                        {
+                            match prev_status {
+                                Some(prev @ OrderStatus::Live { .. }) => {
+                                    s.order_status.insert(config_id, prev);
+                                }
+                                _ => {
+                                    s.order_status.insert(config_id, OrderStatus::Idle);
+                                }
+                            }
+                        }
+                        return;
+                    }
                     // Ok(true)  = confirmed off CLOB — safe to place.
                     // Ok(false) = verified still active — leave Cancelling; 30s timeout recovers.
                     // Err(_)    = network failure — leave Cancelling; 30s timeout recovers.

@@ -63,3 +63,5 @@ libc = "0.2"
 [dev-dependencies]
 # router testing via oneshot (no network bind needed)
 tower = { version = "0.5", features = ["util"] }
+# paused clock for backoff tests (same tokio, test builds only)
+tokio = { version = "1", features = ["test-util"] }
