@@ -104,8 +104,11 @@ responses, including redirects and errors:
 | `Cross-Origin-Opener-Policy` | `same-origin` | Isolates the page's browsing context from cross-origin openers. |
 | `Cross-Origin-Resource-Policy` | `same-origin` | Prevents other origins from loading protected resources. |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), interest-cohort=()` | Disables these browser capabilities for the dashboard. |
-| `Strict-Transport-Security` | `max-age=31536000` **only** when `DASHBOARD_SECURE_COOKIES=true` | Instructs browsers to use HTTPS on subsequent visits. It has no effect over plain HTTP; enable secure cookies only when HTTPS is actually provided. No `includeSubDomains` or `preload` directive is set. |
+| `Strict-Transport-Security` | `max-age=31536000` **only** when `DASHBOARD_SECURE_COOKIES` is enabled | Instructs browsers to use HTTPS on subsequent visits. It has no effect over plain HTTP; enable secure cookies only when HTTPS is actually provided. No `includeSubDomains` or `preload` directive is set. |
 | `Cache-Control` | `no-store` on non-`/assets/` responses unless a handler already set a cache policy | Prevents caching of account data in pages and fragments. Assets use their own cache validators; handler-specific policies (such as SSE) are preserved. |
+
+`DASHBOARD_SECURE_COOKIES` is enabled by `true`, `1`, `yes`, or `on` (case-insensitive;
+surrounding whitespace is ignored). Other values leave it disabled.
 
 The exact `Content-Security-Policy` is:
 
@@ -119,7 +122,7 @@ default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src
 - `frame-ancestors 'none'` prevents framing; `base-uri 'none'` blocks injected base URLs; `form-action 'self'` confines form submissions to this origin; `object-src 'none'` blocks embedded plugins.
 
 Session cookies are configured in `src/web/router.rs` with `HttpOnly`, `SameSite=Lax`, and `Path=/`.
-When `DASHBOARD_SECURE_COOKIES=true`, they also use `Secure` and the `__Host-polyfarmer`
+When `DASHBOARD_SECURE_COOKIES` is enabled, they also use `Secure` and the `__Host-polyfarmer`
 name (which forbids a `Domain` attribute). For local HTTP use, `Secure` is off and the cookie
 name is `polyfarmer_session`. These browser controls supplement, rather than replace, the
 per-session CSRF token and the server's cross-site write filter.
