@@ -528,6 +528,26 @@
     document.body.addEventListener("htmx:beforeSwap", hide);
   }
 
+  // ── "Stop quoting after → Custom…" ──────────────────────────────────────
+  // The custom hours/days inputs are only enabled (and so only validated and
+  // sent) while Custom is chosen; a stale value can't block a preset submit.
+  function syncExpiry(root) {
+    $$(".exp-field", root).forEach(function (f) {
+      var sel = $('select[name="expires_in"]', f); if (!sel) return;
+      var on = sel.value === "custom";
+      f.classList.toggle("is-custom", on);
+      $$(".exp-custom .input", f).forEach(function (i) { i.disabled = !on; });
+      var n = $(".exp-custom input", f); if (n) n.required = on;
+    });
+  }
+  document.addEventListener("change", function (e) {
+    var sel = e.target;
+    if (!(sel.matches && sel.matches('.exp-field select[name="expires_in"]'))) return;
+    var f = sel.closest(".exp-field");
+    syncExpiry(f.parentNode);
+    if (sel.value === "custom") { var n = $(".exp-custom input", f); if (n) n.focus(); }
+  });
+
   // ── boot ────────────────────────────────────────────────────────────────
   function boot() {
     syncPrefSegs();
@@ -537,10 +557,11 @@
     initWindow();
     connectEvents();
     mvInit();
+    syncExpiry();
     PF.relTime();
     PF.localTimes();
     setInterval(function () { PF.relTime(); }, 30000);
-    document.body.addEventListener("htmx:afterSwap", function (e) { PF.relTime(e.target); PF.localTimes(e.target); applyActivityFilter(); });
+    document.body.addEventListener("htmx:afterSwap", function (e) { PF.relTime(e.target); PF.localTimes(e.target); applyActivityFilter(); syncExpiry(e.target); });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
 })();

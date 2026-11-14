@@ -120,7 +120,7 @@
               <div class="affix"><input class="input mono" type="number" step="any" min="0.1" name="max_volatility_cents" id="max_volatility_cents" value="5" placeholder="e.g. 5" /><span class="suf">¢</span></div>
               <p class="help">If the market jumps this far from where it started, the leg pauses itself and cancels its order.</p>
             </div>
-            <div class="field">
+            <div class="field exp-field">
               <label class="label" for="expires_in">Stop quoting after</label>
               <select class="input" name="expires_in" id="expires_in">
                 <option value="1d">1 day</option>
@@ -128,7 +128,16 @@
                 <option value="7d" selected>7 days</option>
                 <option value="30d">30 days</option>
                 <option value="never">Never</option>
+                <option value="custom">Custom…</option>
               </select>
+              <div class="exp-custom">
+                <input class="input mono" type="number" name="expires_custom" id="expires_custom" min="1" max="8784" step="1" inputmode="numeric" placeholder="e.g. 12" aria-label="Custom duration" />
+                <select class="input" name="expires_custom_unit" id="expires_custom_unit" aria-label="Custom duration unit">
+                  <option value="h" selected>hours</option>
+                  <option value="d">days</option>
+                </select>
+              </div>
+              <p class="help exp-custom-help">Whole hours or days, from 1 hour to 1 year.</p>
             </div>
           </div>
         </details>

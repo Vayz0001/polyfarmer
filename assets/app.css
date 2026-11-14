@@ -158,6 +158,13 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .affix .pre + .input { padding-left: 22px; }
 .affix .suf { position: absolute; right: 10px; color: var(--faint); font-size: 11.5px; pointer-events: none; }
 .affix .act { position: absolute; right: 4px; }
+/* "Stop quoting after → Custom…": the hours/days inputs show only for Custom
+   (:has works without JS; app.js also sets .is-custom and disables the hidden inputs). */
+.exp-custom, .exp-custom-help { display: none; }
+.exp-field.is-custom .exp-custom, .exp-field:has(> select option[value="custom"]:checked) .exp-custom { display: flex; gap: 8px; }
+.exp-field.is-custom .exp-custom-help, .exp-field:has(> select option[value="custom"]:checked) .exp-custom-help { display: block; }
+.exp-custom .input[type="number"] { flex: 1; min-width: 0; }
+.exp-custom select.input { flex: 0 0 104px; }
 .help { font-size: 11.5px; color: var(--faint); line-height: 1.45; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
