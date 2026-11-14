@@ -38,19 +38,19 @@
     <div class="field exp-field">
       <label class="label" for="e-exp">Stop quoting <span class="hint">now: {{ expires }}</span></label>
       <select class="input" id="e-exp" name="expires_in">
-        <option value="keep" selected>Keep current</option>
-        <option value="1d">1 day from now</option>
-        <option value="3d">3 days from now</option>
-        <option value="7d">7 days from now</option>
-        <option value="30d">30 days from now</option>
-        <option value="never">Never</option>
-        <option value="custom">Custom… from now</option>
+        <option value="keep"{% if expires_choice == "keep" %} selected{% endif %}>Keep current</option>
+        <option value="1d"{% if expires_choice == "1d" %} selected{% endif %}>1 day from now</option>
+        <option value="3d"{% if expires_choice == "3d" %} selected{% endif %}>3 days from now</option>
+        <option value="7d"{% if expires_choice == "7d" %} selected{% endif %}>7 days from now</option>
+        <option value="30d"{% if expires_choice == "30d" %} selected{% endif %}>30 days from now</option>
+        <option value="never"{% if expires_choice == "never" %} selected{% endif %}>Never</option>
+        <option value="custom"{% if expires_choice == "custom" %} selected{% endif %}>Custom… from now</option>
       </select>
       <div class="exp-custom">
-        <input class="input mono" type="number" name="expires_custom" id="e-exp-n" min="1" max="8784" step="1" inputmode="numeric" placeholder="e.g. 12" aria-label="Custom duration" />
+        <input class="input mono" type="number" name="expires_custom" id="e-exp-n" min="1" max="8784" step="1" inputmode="numeric" placeholder="e.g. 12" aria-label="Custom duration" value="{{ expires_custom }}" />
         <select class="input" name="expires_custom_unit" id="e-exp-unit" aria-label="Custom duration unit">
-          <option value="h" selected>hours</option>
-          <option value="d">days</option>
+          <option value="h"{% if expires_custom_unit != "d" %} selected{% endif %}>hours</option>
+          <option value="d"{% if expires_custom_unit == "d" %} selected{% endif %}>days</option>
         </select>
       </div>
       <p class="help exp-custom-help">Whole hours or days, from 1 hour to 1 year.</p>

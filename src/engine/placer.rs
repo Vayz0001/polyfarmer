@@ -13,6 +13,10 @@
 //!   events cannot use up the failure budget in milliseconds.
 //! * **Auto-remove.** After `MAX_PLACE_FAILURES` consecutive real failures the
 //!   leg is removed, as before.
+//!
+//! It also holds the cancel and auto-pause steps both callers share: a leg is
+//! freed (back to Idle, so it may quote again) only once Polymarket confirms
+//! its old order is gone, and an auto-pause is saved under the state lock.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -45,6 +49,10 @@ pub trait OrderApi: Send + Sync + 'static {
     fn place_buy(&self, token_id: &str, price: Decimal, shares: Decimal)
         -> impl Future<Output = Result<String>> + Send;
     fn cancel(&self, order_id: &str) -> impl Future<Output = Result<bool>> + Send;
+    /// Cancel and, when the reply is ambiguous, check Polymarket: `Ok(true)`
+    /// once the order is confirmed off the book (cancelled, filled or never
+    /// existed), `Err` when that could not be established.
+    fn cancel_verified(&self, order_id: &str) -> impl Future<Output = Result<bool>> + Send;
 }
 
 impl OrderApi for Executor {
@@ -65,6 +73,163 @@ impl OrderApi for Executor {
     fn cancel(&self, order_id: &str) -> impl Future<Output = Result<bool>> + Send {
         self.cancel_order(order_id)
     }
+    fn cancel_verified(&self, order_id: &str) -> impl Future<Output = Result<bool>> + Send {
+        self.cancel_order_verified(order_id)
+    }
+}
+
+/// A cancel still unconfirmed after this long is retried by the 30 s timer.
+/// Below the timer's period so each tick picks it up, above
+/// `CANCEL_CONFIRM_TIMEOUT` so attempts never overlap.
+pub const CANCEL_RETRY_AFTER: Duration = Duration::from_secs(25);
+/// Upper bound on one confirmation attempt, shorter than the retry period so
+/// retries never overlap.
+const CANCEL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(20);
+/// Unconfirmed retries in a row before the user is alerted (once per order).
+pub const CANCEL_ALERT_AFTER: u32 = 3;
+
+/// Cancel `order_id` and wait (bounded) for Polymarket to confirm it is gone.
+async fn confirmed_gone<A: OrderApi>(api: &A, order_id: &str) -> bool {
+    matches!(tokio::time::timeout(CANCEL_CONFIRM_TIMEOUT, api.cancel_verified(order_id)).await, Ok(Ok(true)))
+}
+
+/// Free the leg (Idle) if it is still cancelling exactly `order_id`.
+pub fn free_if_cancelling(s: &mut AppState, config_id: &str, order_id: &str) -> bool {
+    let still = matches!(s.order_status.get(config_id),
+        Some(OrderStatus::Cancelling { order_id: o, .. }) if o == order_id);
+    if still {
+        s.order_status.insert(config_id.to_string(), OrderStatus::Idle);
+    }
+    still
+}
+
+/// Cancel the order of a leg that was just paused, expired or auto-paused.
+/// The leg goes back to Idle only once the cancel is confirmed. If it can't be
+/// confirmed the leg stays Cancelling and the timer retries it
+/// ([`confirm_stuck_cancel`]); freeing it anyway would let the quoter forget an
+/// order that may still be resting while the leg shows as paused.
+pub async fn cancel_deactivated<A: OrderApi>(api: &A, state: &RwLock<AppState>, config_id: &str, order_id: &str) {
+    if confirmed_gone(api, order_id).await {
+        free_if_cancelling(&mut *state.write().await, config_id, order_id);
+    } else {
+        warn!("Cancel of order {order_id} not confirmed — the timer will retry it");
+    }
+}
+
+/// Legs whose cancel has been unconfirmed for longer than
+/// [`CANCEL_RETRY_AFTER`]. Each one's clock is restarted, which claims the
+/// retry so the next timer tick doesn't start a second one while it runs.
+pub fn claim_stuck_cancels(s: &mut AppState) -> Vec<(String, String)> {
+    let mut stuck = Vec::new();
+    for (config_id, status) in s.order_status.iter_mut() {
+        if let OrderStatus::Cancelling { order_id, since } = status {
+            if since.elapsed() > CANCEL_RETRY_AFTER {
+                *since = std::time::Instant::now();
+                stuck.push((config_id.clone(), order_id.clone()));
+            }
+        }
+    }
+    stuck
+}
+
+/// Retry a stuck cancel. Only a confirmed cancel frees the leg; otherwise it
+/// stays Cancelling (no new order is placed for it) and, after
+/// [`CANCEL_ALERT_AFTER`] tries, the user is told once. Resetting it without
+/// confirmation could leave the old order resting beside a new one.
+/// Returns whether the order is confirmed gone.
+pub async fn confirm_stuck_cancel<A: OrderApi>(
+    api: &A,
+    state: &RwLock<AppState>,
+    alerter: &Alerter,
+    config_id: &str,
+    order_id: &str,
+) -> bool {
+    let gone = confirmed_gone(api, order_id).await;
+    let mut s = state.write().await;
+    let label = s.configs.iter().find(|c| c.id == config_id).map(|c| c.label.clone());
+    let alerted_before = matches!(s.cancel_failures.get(config_id),
+        Some((o, n)) if o == order_id && *n >= CANCEL_ALERT_AFTER);
+    if gone {
+        s.cancel_failures.remove(config_id);
+        // A Replace whose pre-check failed may have put the leg back to Live
+        // with this same (now cancelled) order while the retry ran: free that too,
+        // or the leg would show a live order that no longer exists.
+        let restored_live = matches!(s.order_status.get(config_id),
+            Some(OrderStatus::Live { order_id: o, .. }) if o == order_id);
+        if restored_live {
+            s.order_status.insert(config_id.to_string(), OrderStatus::Idle);
+        }
+        let freed = free_if_cancelling(&mut s, config_id, order_id) || restored_live;
+        drop(s);
+        info!("Cancel of order {order_id} confirmed on retry");
+        if freed && alerted_before {
+            alerter.info(format!(
+                "Cancel confirmed · {}
+The leg can quote again.",
+                label.unwrap_or_default()
+            ));
+        }
+        return true;
+    }
+    let still = matches!(s.order_status.get(config_id),
+        Some(OrderStatus::Cancelling { order_id: o, .. }) if o == order_id);
+    if !still {
+        return false; // resolved elsewhere (reconnect, removal) meanwhile
+    }
+    if s.heartbeat_paused {
+        // Polymarket is unreachable and the user already has the heartbeat
+        // alert: keep retrying, but don't count tries or add an alert per leg.
+        return false;
+    }
+    let tries = match s.cancel_failures.get_mut(config_id) {
+        Some((o, n)) if o == order_id => {
+            *n += 1;
+            *n
+        }
+        _ => {
+            s.cancel_failures.insert(config_id.to_string(), (order_id.to_string(), 1));
+            1
+        }
+    };
+    drop(s);
+    warn!("Cancel of order {order_id} still unconfirmed (try {tries}) — leg held until it is");
+    if tries == CANCEL_ALERT_AFTER {
+        alerter.error(format!(
+            "Can't confirm a cancel · {}\nOrder {order_id} may still be resting on Polymarket. Polyfarmer keeps \
+             retrying and won't place a new order for this leg until the old one is confirmed gone — check it on \
+             Polymarket.",
+            label.unwrap_or_default()
+        ));
+    }
+    false
+}
+
+/// Cancel an order placed after its leg moved on (the "orphan" of a Replace or
+/// placement that lost a race), and alert if Polymarket doesn't confirm it.
+pub async fn cancel_orphan<A: OrderApi>(api: &A, alerter: &Alerter, order_id: &str) {
+    warn!("Cancelling orphan order {order_id}");
+    if !confirmed_gone(api, order_id).await {
+        error!("Could not confirm cancel of orphan order {order_id}");
+        alerter.error(format!(
+            "An order placed while the market was being changed ({order_id}) could not be confirmed cancelled. \
+             Check your open orders on Polymarket."
+        ));
+    }
+}
+
+/// Pause a leg after a volatility trigger and save `markets.json` while still
+/// holding the write lock, so the saved list always includes the pause and a
+/// leg removed meanwhile is never brought back by this save. Returns the leg's
+/// label and the save result, or `None` if the leg no longer exists.
+/// (The dashboard's own saves still copy the list under the lock and write it
+/// after; making those save under the lock too is a separate change.)
+pub async fn auto_pause(state: &RwLock<AppState>, config_id: &str) -> Option<(String, Result<()>)> {
+    let mut s = state.write().await;
+    let cfg = s.configs.iter_mut().find(|c| c.id == config_id)?;
+    cfg.paused = true;
+    let label = cfg.label.clone();
+    let saved = save_markets(&s.markets_file, &s.configs);
+    Some((label, saved))
 }
 
 /// Delay before the next attempt after `failures` consecutive failures.
@@ -350,6 +515,7 @@ async fn fail(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &str,
             s.place_failures.remove(config_id);
             s.place_retry_at.remove(config_id);
             s.place_attempt.remove(config_id);
+            s.cancel_failures.remove(config_id);
             drop(s);
             alerter.error(format!(
                 "Market '{label}' auto-removed after {MAX_PLACE_FAILURES} consecutive placement failures"
@@ -390,6 +556,10 @@ mod tests {
         scripted: Mutex<VecDeque<std::result::Result<(), String>>>,
         refresh_fails: Mutex<bool>,
         cancelled: Mutex<Vec<String>>,
+        /// Scripted `cancel_verified` replies (default: confirmed gone).
+        verify: Mutex<VecDeque<std::result::Result<bool, String>>>,
+        /// Makes `cancel_verified` hang (to exercise the timeout).
+        verify_hangs: Mutex<bool>,
     }
 
     impl Fake {
@@ -402,6 +572,8 @@ mod tests {
                 scripted: Mutex::new(VecDeque::new()),
                 refresh_fails: Mutex::new(false),
                 cancelled: Mutex::new(Vec::new()),
+                verify: Mutex::new(VecDeque::new()),
+                verify_hangs: Mutex::new(false),
             })
         }
         fn script(&self, r: std::result::Result<(), &str>) {
@@ -447,6 +619,17 @@ mod tests {
         async fn cancel(&self, o: &str) -> Result<bool> {
             self.cancelled.lock().unwrap().push(o.to_string());
             Ok(true)
+        }
+        async fn cancel_verified(&self, o: &str) -> Result<bool> {
+            self.cancelled.lock().unwrap().push(o.to_string());
+            if *self.verify_hangs.lock().unwrap() {
+                std::future::pending::<()>().await;
+            }
+            match self.verify.lock().unwrap().pop_front() {
+                Some(Ok(b)) => Ok(b),
+                Some(Err(e)) => Err(eyre::eyre!(e)),
+                None => Ok(true),
+            }
         }
     }
 
@@ -758,6 +941,199 @@ mod tests {
         e.state.write().await.configs.retain(|c| c.id != "b");
         apply_tick_change(&e.state, &e.alerter, TOKEN, dec!(0.001)).await;
         assert_eq!(saved_ticks(&e), vec![dec!(0.001)], "only the remaining leg is saved");
+    }
+
+    // ── cancels are confirmed before a leg is freed ──────────────────────────
+
+    fn cancelling(e_state: &mut AppState, id: &str, order: &str, age_secs: u64) {
+        let since = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(age_secs))
+            .unwrap_or_else(std::time::Instant::now);
+        e_state.order_status.insert(id.into(), OrderStatus::Cancelling { order_id: order.into(), since });
+    }
+    fn alerts(e: &Env) -> String {
+        std::fs::read_to_string(e.dir.join("alerts.json")).unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn a_deactivated_leg_is_freed_only_once_its_cancel_is_confirmed() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        // Network failure: the order may still rest, so the leg stays Cancelling.
+        cancelling(&mut *e.state.write().await, "a", "ord1", 0);
+        api.verify.lock().unwrap().push_back(Err("connection reset".into()));
+        cancel_deactivated(&*api, &e.state, "a", "ord1").await;
+        assert!(matches!(e.state.read().await.order_status.get("a"), Some(OrderStatus::Cancelling { .. })));
+        // Confirmed: freed.
+        cancel_deactivated(&*api, &e.state, "a", "ord1").await;
+        assert_eq!(e.state.read().await.order_status.get("a"), Some(&OrderStatus::Idle));
+        // A confirmation for an order the leg no longer tracks changes nothing.
+        cancelling(&mut *e.state.write().await, "a", "ord2", 0);
+        cancel_deactivated(&*api, &e.state, "a", "ord1").await;
+        assert!(matches!(e.state.read().await.order_status.get("a"),
+            Some(OrderStatus::Cancelling { order_id, .. }) if order_id == "ord2"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_cancel_times_out_and_keeps_the_leg_held() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        *api.verify_hangs.lock().unwrap() = true;
+        cancelling(&mut *e.state.write().await, "a", "ord1", 0);
+        cancel_deactivated(&*api, &e.state, "a", "ord1").await; // returns after the 20 s bound
+        assert!(matches!(e.state.read().await.order_status.get("a"), Some(OrderStatus::Cancelling { .. })));
+        assert!(!confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord1").await);
+        assert!(matches!(e.state.read().await.order_status.get("a"), Some(OrderStatus::Cancelling { .. })));
+    }
+
+    #[tokio::test]
+    async fn only_cancels_older_than_the_retry_period_are_claimed_and_only_once() {
+        let e = env(vec![leg("a", dec!(0.01)), leg("b", dec!(0.01))]);
+        {
+            let mut s = e.state.write().await;
+            cancelling(&mut s, "a", "old", 31);
+            cancelling(&mut s, "b", "fresh", 5);
+            s.order_status.insert("c".into(), OrderStatus::Live { order_id: "live".into(), price: dec!(0.2) });
+        }
+        let first = claim_stuck_cancels(&mut *e.state.write().await);
+        assert_eq!(first, vec![("a".to_string(), "old".to_string())]);
+        assert!(claim_stuck_cancels(&mut *e.state.write().await).is_empty(), "claiming restarts the clock");
+        assert!(matches!(e.state.read().await.order_status.get("a"), Some(OrderStatus::Cancelling { .. })));
+    }
+
+    #[tokio::test]
+    async fn a_stuck_cancel_is_retried_alerted_once_after_three_tries_and_freed_when_confirmed() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        cancelling(&mut *e.state.write().await, "a", "ord1", 31);
+        for _ in 0..4 {
+            api.verify.lock().unwrap().push_back(Err("timeout".into()));
+        }
+        for try_no in 1..=4u32 {
+            assert!(!confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord1").await);
+            assert!(matches!(e.state.read().await.order_status.get("a"), Some(OrderStatus::Cancelling { .. })));
+            assert_eq!(e.state.read().await.cancel_failures.get("a"), Some(&("ord1".to_string(), try_no)));
+            let expected = usize::from(try_no >= CANCEL_ALERT_AFTER);
+            assert_eq!(alerts(&e).matches("Can't confirm a cancel").count(), expected, "after try {try_no}");
+            // A different alert in between, so the Alerter's repeat filter (which
+            // only drops a message identical to the last one) can't hide a second one.
+            e.alerter.info(format!("unrelated {try_no}"));
+        }
+        assert!(alerts(&e).contains("ord1"));
+        // Confirmed on the fifth try: freed, count cleared, user told it's resolved.
+        assert!(confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord1").await);
+        let s = e.state.read().await;
+        assert_eq!(s.order_status.get("a"), Some(&OrderStatus::Idle));
+        assert!(s.cancel_failures.is_empty());
+        drop(s);
+        assert!(alerts(&e).contains("Cancel confirmed · leg a"));
+    }
+
+    #[tokio::test]
+    async fn a_cancel_resolved_elsewhere_or_for_a_new_order_restarts_the_count() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        cancelling(&mut *e.state.write().await, "a", "ord1", 31);
+        api.verify.lock().unwrap().push_back(Err("timeout".into()));
+        api.verify.lock().unwrap().push_back(Err("timeout".into()));
+        confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord1").await;
+        confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord1").await;
+        assert_eq!(e.state.read().await.cancel_failures.get("a").map(|f| f.1), Some(2));
+        // Now cancelling a different order: its count starts again at 1.
+        cancelling(&mut *e.state.write().await, "a", "ord2", 31);
+        api.verify.lock().unwrap().push_back(Err("timeout".into()));
+        confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord2").await;
+        assert_eq!(e.state.read().await.cancel_failures.get("a"), Some(&("ord2".to_string(), 1)));
+        // Resolved elsewhere (e.g. a reconnect freed it): a late failure changes nothing.
+        e.state.write().await.order_status.insert("a".into(), OrderStatus::Idle);
+        api.verify.lock().unwrap().push_back(Err("timeout".into()));
+        assert!(!confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord2").await);
+        assert_eq!(e.state.read().await.order_status.get("a"), Some(&OrderStatus::Idle));
+        assert_eq!(e.state.read().await.cancel_failures.get("a").map(|f| f.1), Some(1), "not counted");
+        assert!(!alerts(&e).contains("Can't confirm"));
+    }
+
+    #[tokio::test]
+    async fn a_confirmed_retry_also_frees_a_leg_put_back_to_live_with_the_same_order() {
+        // A Replace's pre-check can restore Live{ord1} while the timer's retry is
+        // cancelling ord1; once the retry confirms, the leg must not keep showing
+        // an order that no longer exists.
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        e.state
+            .write()
+            .await
+            .order_status
+            .insert("a".into(), OrderStatus::Live { order_id: "ord1".into(), price: dec!(0.2) });
+        assert!(confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord1").await);
+        assert_eq!(e.state.read().await.order_status.get("a"), Some(&OrderStatus::Idle));
+        // A Live leg with a different order is left alone.
+        e.state
+            .write()
+            .await
+            .order_status
+            .insert("a".into(), OrderStatus::Live { order_id: "ord2".into(), price: dec!(0.2) });
+        assert!(confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord1").await);
+        assert!(matches!(e.state.read().await.order_status.get("a"),
+            Some(OrderStatus::Live { order_id, .. }) if order_id == "ord2"));
+    }
+
+    #[tokio::test]
+    async fn during_an_outage_retries_go_on_without_counting_or_alerting() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        {
+            let mut s = e.state.write().await;
+            cancelling(&mut s, "a", "ord1", 31);
+            s.heartbeat_paused = true;
+        }
+        for _ in 0..5 {
+            api.verify.lock().unwrap().push_back(Err("unreachable".into()));
+            assert!(!confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord1").await);
+        }
+        assert!(e.state.read().await.cancel_failures.is_empty());
+        assert!(!alerts(&e).contains("Can't confirm"));
+        assert_eq!(api.cancelled.lock().unwrap().len(), 5, "still retried every time");
+        // Back online: the next confirmation frees it.
+        e.state.write().await.heartbeat_paused = false;
+        assert!(confirm_stuck_cancel(&*api, &e.state, &e.alerter, "a", "ord1").await);
+        assert_eq!(e.state.read().await.order_status.get("a"), Some(&OrderStatus::Idle));
+    }
+
+    #[tokio::test]
+    async fn an_orphan_is_cancelled_and_an_unconfirmed_one_is_reported() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        cancel_orphan(&*api, &e.alerter, "orph1").await;
+        assert_eq!(*api.cancelled.lock().unwrap(), vec!["orph1".to_string()]);
+        assert!(!alerts(&e).contains("could not be confirmed"));
+        api.verify.lock().unwrap().push_back(Ok(false));
+        cancel_orphan(&*api, &e.alerter, "orph2").await;
+        assert!(alerts(&e).contains("(orph2) could not be confirmed cancelled"));
+    }
+
+    #[tokio::test]
+    async fn auto_pause_saves_under_the_lock_and_never_brings_back_a_removed_leg() {
+        let e = env(vec![leg("a", dec!(0.01)), leg("b", dec!(0.01))]);
+        let (label, saved) = auto_pause(&e.state, "a").await.unwrap();
+        assert_eq!(label, "leg a");
+        assert!(saved.is_ok());
+        assert!(e.state.read().await.configs.iter().find(|c| c.id == "a").unwrap().paused);
+        let on_disk = crate::storage::load_markets(&e.state.read().await.markets_file).unwrap();
+        assert!(on_disk.iter().find(|c| c.id == "a").unwrap().paused, "the pause is saved");
+        // "b" is removed (and saved) while "a" is being auto-paused: the auto-pause
+        // save always writes the current list, so "b" stays gone.
+        {
+            let mut s = e.state.write().await;
+            s.configs.retain(|c| c.id != "b");
+            save_markets(&s.markets_file, &s.configs).unwrap();
+        }
+        auto_pause(&e.state, "a").await.unwrap().1.unwrap();
+        let on_disk = crate::storage::load_markets(&e.state.read().await.markets_file).unwrap();
+        assert_eq!(on_disk.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["a"]);
+        assert!(auto_pause(&e.state, "b").await.is_none(), "a removed leg is not recreated");
+        let on_disk = crate::storage::load_markets(&e.state.read().await.markets_file).unwrap();
+        assert_eq!(on_disk.len(), 1);
     }
 
     #[test]

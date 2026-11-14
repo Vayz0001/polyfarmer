@@ -17,6 +17,25 @@ anything may change between releases.
 
 ### Fixed
 
+- A cancel that failed (for example a network error) could still free the leg: pausing, expiry and auto-pause
+  marked it "waiting" whatever the cancel's result, and any cancel left unconfirmed for 30 seconds was reset the same
+  way. The old order could then keep resting on Polymarket while the leg showed as paused, or next to a new one.
+  A leg is now freed only once Polymarket confirms its old order is gone. Until then the bot retries about every
+  30 seconds, places nothing new for that leg, and alerts you after three failed tries (not during an outage the
+  heartbeat already reported). "Gone" now means a real "not found" or a cancelled or matched order: a timeout or
+  server error while checking no longer counts, and neither do two unclear cancel replies in a row.
+- A replace that was in progress when its market was paused, expired or auto-paused could still place the new order.
+  It now stops and places nothing. An order a replace had to discard is now cancelled with confirmation, with an
+  alert if Polymarket doesn't confirm it.
+- While a leg was cancelling, a paused, expired or volatile market re-sent its "Paused" alert and another cancel on
+  every book update. It now waits for the cancel in progress (a volatility trip still pauses the leg, once).
+- On a market priced at or below your distance (for example a 1¢ best bid with a 2¢ distance), the bot sent a cancel
+  for an order that didn't exist on every book update, with a false "Order cancelled" alert. It now just waits.
+- The volatility auto-pause saved `markets.json` outside the state lock, so a save racing with it (such as removing
+  a market) could bring a removed market back after a restart. It now saves under the lock, and a failed save is
+  reported as an alert.
+- When the edit drawer rejected a value, it reopened with the saved settings and you had to retype everything. It now
+  keeps what you typed.
 - Pasting a sports or esports link (for example `polymarket.com/esports/league-of-legends/worlds/<match>` or
   `polymarket.com/sports/nba/<game>`) failed with "Not a Polymarket market URL". Every polymarket.com link now
   works: game and event pages, `/event/<event>/<market>`, `/market/<market>`, language prefixes such as `/es/`, and a

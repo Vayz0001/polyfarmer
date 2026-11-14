@@ -1340,24 +1340,82 @@ struct EditTemplate {
     min_depth_usd: String,
     max_volatility_cents: String,
     expires: String,
+    /// Selected "Stop quoting" option and the custom amount/unit shown with it.
+    expires_choice: String,
+    expires_custom: String,
+    expires_custom_unit: String,
     live: bool,
     error: Option<String>,
 }
 
-async fn edit_template(state: &WebState, session: &Session, id: &str, error: Option<String>) -> Option<EditTemplate> {
+/// Longest typed value echoed back into the drawer after a rejected save.
+const MAX_ECHO_LEN: usize = 64;
+
+/// What the user typed, shown again when a save is rejected so nothing has
+/// to be re-entered. Values are only echoed (escaped by the template), never
+/// parsed here; the select options are limited to the known ones.
+struct TypedEdit {
+    order_size: String,
+    distance_cents: String,
+    min_depth_usd: String,
+    max_volatility_cents: String,
+    expires_choice: String,
+    expires_custom: String,
+    expires_custom_unit: String,
+}
+
+impl TypedEdit {
+    fn from_form(f: &EditForm) -> Self {
+        let echo = |v: &str| v.trim().chars().take(MAX_ECHO_LEN).collect::<String>();
+        let choice = f.expires_in.trim();
+        Self {
+            order_size: echo(&f.order_size),
+            distance_cents: echo(&f.distance_cents),
+            min_depth_usd: echo(&f.min_depth_usd),
+            max_volatility_cents: echo(&f.max_volatility_cents),
+            expires_choice: if EXPIRY_CHOICES.contains(&choice) { choice.to_string() } else { "keep".to_string() },
+            expires_custom: echo(&f.expires_custom),
+            expires_custom_unit: if f.expires_custom_unit.trim() == "d" { "d" } else { "h" }.to_string(),
+        }
+    }
+}
+
+/// The edit drawer's "Stop quoting" options.
+const EXPIRY_CHOICES: [&str; 7] = ["keep", "1d", "3d", "7d", "30d", "never", "custom"];
+
+async fn edit_template(
+    state: &WebState,
+    session: &Session,
+    id: &str,
+    error: Option<String>,
+    typed: Option<&TypedEdit>,
+) -> Option<EditTemplate> {
     let s = state.engine.read().await;
     let c = s.configs.iter().find(|c| c.id == id)?;
+    let saved = TypedEdit {
+        order_size: c.order_size.normalize().to_string(),
+        distance_cents: (c.distance * dec!(100)).normalize().to_string(),
+        min_depth_usd: c.min_depth_between.normalize().to_string(),
+        max_volatility_cents: c.max_volatility.map(|v| (v * dec!(100)).normalize().to_string()).unwrap_or_default(),
+        expires_choice: "keep".to_string(),
+        expires_custom: String::new(),
+        expires_custom_unit: "h".to_string(),
+    };
+    let v = typed.unwrap_or(&saved);
     Some(EditTemplate {
         csrf_token: csrf_token(session).await,
         id: c.id.clone(),
         label: c.label.clone(),
         side_label: c.token_label.clone(),
         slug: super::dashboard::slug_of(&c.url),
-        order_size: c.order_size.normalize().to_string(),
-        distance_cents: (c.distance * dec!(100)).normalize().to_string(),
-        min_depth_usd: c.min_depth_between.normalize().to_string(),
-        max_volatility_cents: c.max_volatility.map(|v| (v * dec!(100)).normalize().to_string()).unwrap_or_default(),
+        order_size: v.order_size.clone(),
+        distance_cents: v.distance_cents.clone(),
+        min_depth_usd: v.min_depth_usd.clone(),
+        max_volatility_cents: v.max_volatility_cents.clone(),
         expires: until(c.expires_at),
+        expires_choice: v.expires_choice.clone(),
+        expires_custom: v.expires_custom.clone(),
+        expires_custom_unit: v.expires_custom_unit.clone(),
         live: matches!(s.order_status.get(&c.id), Some(OrderStatus::Live { .. })),
         error,
     })
@@ -1365,7 +1423,7 @@ async fn edit_template(state: &WebState, session: &Session, id: &str, error: Opt
 
 /// GET /markets/{id}/edit — the edit drawer for one leg.
 pub async fn edit_form(State(state): State<WebState>, session: Session, Path(id): Path<String>) -> Html<String> {
-    match edit_template(&state, &session, &id, None).await {
+    match edit_template(&state, &session, &id, None, None).await {
         Some(t) => render(&t),
         None => Html(
             "<div class=\"drawer-body\"><div class=\"alert err\">This market leg no longer exists.</div></div>"
@@ -1400,12 +1458,14 @@ pub async fn edit_submit(
     Path(id): Path<String>,
     Form(form): Form<EditForm>,
 ) -> Response {
+    let typed = TypedEdit::from_form(&form);
     let fail = |msg: String| {
         let state = state.clone();
         let session = session.clone();
         let id = id.clone();
+        let typed = &typed;
         async move {
-            match edit_template(&state, &session, &id, Some(msg)).await {
+            match edit_template(&state, &session, &id, Some(msg), Some(typed)).await {
                 Some(t) => render(&t).into_response(),
                 None => Html("This market leg no longer exists.").into_response(),
             }
@@ -1520,8 +1580,8 @@ pub struct MarketActionForm {
 }
 
 /// Cancel one leg's live order and return it to Idle once confirmed off the
-/// book. Unconfirmed cancels stay `Cancelling`; the engine's existing 30s
-/// timeout recovery in `evaluate_all_markets` handles them.
+/// book. Unconfirmed cancels stay `Cancelling`; the engine's 30s timer retries
+/// them until Polymarket confirms (`placer::confirm_stuck_cancel`).
 async fn cancel_leg_order(state: &WebState, id: &str, order_id: &str) {
     {
         let mut s = state.engine.write().await;
@@ -1615,6 +1675,7 @@ pub async fn remove_market(
         s.place_failures.remove(&id);
         s.place_retry_at.remove(&id);
         s.place_attempt.remove(&id);
+        s.cancel_failures.remove(&id);
         let tokens_to_unsubscribe: Vec<String> = removed
             .iter()
             .map(|c| c.token_id.clone())

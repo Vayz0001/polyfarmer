@@ -3,7 +3,6 @@ use crate::engine::executor::Executor;
 use crate::engine::orderbook::TokenBook;
 use crate::engine::placer;
 use crate::engine::quoter::{self, DeactivateReason, QuoteAction};
-use crate::storage::save_markets;
 use crate::types::{MarketConfig, OrderStatus, WsBookSnapshot, WsCommand, WsPriceChangeEvent};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -44,6 +43,9 @@ pub struct AppState {
     pub place_attempt: HashMap<String, u64>,
     /// Source of attempt ids.
     pub next_attempt: u64,
+    /// Unconfirmed cancel retries per leg: (order id, failed tries). The count
+    /// restarts whenever the leg is cancelling a different order.
+    pub cancel_failures: HashMap<String, (String, u32)>,
     /// Path to markets.json — needed to save after auto-removing a broken market
     pub markets_file: PathBuf,
     /// Set by heartbeat after 3 consecutive failures + order cancel.
@@ -72,6 +74,7 @@ impl AppState {
             place_retry_at: HashMap::new(),
             place_attempt: HashMap::new(),
             next_attempt: 0,
+            cancel_failures: HashMap::new(),
             markets_file,
             heartbeat_paused: false,
             engine_phase: crate::types::EnginePhase::AwaitingWallet,
@@ -334,9 +337,20 @@ pub fn spawn(
                 for id in &live_config_ids {
                     s.place_failures.remove(id);
                 }
+                // Stuck cancels were just confirmed by this bulk cancel. Tell the user
+                // about any that had already raised a "can't confirm" alert.
+                let resolved: Vec<String> = std::mem::take(&mut s.cancel_failures)
+                    .into_iter()
+                    .filter(|(_, (_, tries))| *tries >= placer::CANCEL_ALERT_AFTER)
+                    .map(|(id, _)| s.configs.iter().find(|c| c.id == id).map(|c| c.label.clone()).unwrap_or(id))
+                    .collect();
                 // Books will be rebuilt from snapshots on reconnect
                 s.snapshotted.clear();
                 s.books.clear();
+                drop(s);
+                for label in resolved {
+                    alerter.info(format!("Cancel confirmed · {label}\nConfirmed by the reconnect's cancel."));
+                }
             } else {
                 // Could not confirm cancellation — keep statuses dirty so the quoter
                 // won't place new orders (it only places from Idle). Alert for manual check.
@@ -569,8 +583,8 @@ async fn execute_actions(
                         }
                         Ok(false) => {
                             // Verified: order still active on CLOB — leave Cancelling.
-                            // 30s timeout in evaluate_all_markets will reset to Idle.
-                            warn!("Order {} still on CLOB after verified cancel — leaving Cancelling for timeout recovery", order_id);
+                            // The 30s timer retries the cancel (placer::confirm_stuck_cancel).
+                            warn!("Order {} still on CLOB after verified cancel — leaving Cancelling for the timer to retry", order_id);
                             alerter2.warn(format!(
                                 "Order {} cancel unconfirmed (still live) — will retry via 30s timer",
                                 order_id
@@ -578,7 +592,7 @@ async fn execute_actions(
                             false
                         }
                         Err(e) => {
-                            // HTTP/network error — leave in Cancelling, let the 30s timeout recover
+                            // HTTP/network error — leave Cancelling; the 30s timer retries it
                             error!("Cancel order {} failed: {}", order_id, e);
                             false
                         }
@@ -637,22 +651,36 @@ async fn execute_actions(
                     }
                     // Cancel first, with CLOB verification on ambiguous responses.
                     // Ok(true)  = confirmed off CLOB — safe to place.
-                    // Ok(false) = verified still active — leave Cancelling; 30s timeout recovers.
-                    // Err(_)    = network failure — leave Cancelling; 30s timeout recovers.
+                    // Ok(false) = verified still active — leave Cancelling; the timer retries until confirmed.
+                    // Err(_)    = network failure — leave Cancelling; the timer retries until confirmed.
                     match exec.cancel_order_verified(&order_id).await {
                         Ok(true) => {}
                         Ok(false) => {
                             warn!(
-                                "Replace: cancel of {} verified still live — leaving Cancelling for timeout recovery",
+                                "Replace: cancel of {} verified still live — leaving Cancelling for the timer to retry",
                                 order_id
                             );
-                            return; // leave state as Cancelling; 30s timeout will reset to Idle
+                            return; // leave Cancelling; the timer retries until confirmed
                         }
                         Err(e) => {
                             error!("Replace: cancel {} failed — aborting replace: {}", order_id, e);
-                            // Leave state as Cancelling; 30s timeout will reset to Idle.
+                            // Leave Cancelling; the 30s timer retries until confirmed.
                             return;
                         }
+                    }
+
+                    // Paused or expired while the old order was being cancelled (e.g. a
+                    // volatility trip auto-paused it): place nothing, just free the leg.
+                    let stop = state2
+                        .read()
+                        .await
+                        .configs
+                        .iter()
+                        .find(|c| c.id == config_id)
+                        .is_some_and(|c| c.paused || chrono::Utc::now() >= c.expires_at);
+                    if stop {
+                        placer::free_if_cancelling(&mut *state2.write().await, &config_id, &order_id);
+                        return;
                     }
 
                     // Cancel confirmed. Re-read the book now — the market may have moved
@@ -737,7 +765,7 @@ async fn execute_actions(
                                     "Replace: state changed during cancel+place — cancelling orphan {}",
                                     new_order_id
                                 );
-                                let _ = exec.cancel_order(&new_order_id).await;
+                                placer::cancel_orphan(&*exec, &alerter2, &new_order_id).await;
                             }
                         }
                         Err(e) => {
@@ -766,16 +794,11 @@ async fn execute_actions(
 
                 if matches!(reason, DeactivateReason::Volatility) {
                     // Auto-pause so the bot doesn't re-place while the market is swinging
-                    let markets_file = {
-                        let mut s = state.write().await;
-                        if let Some(cfg) = s.configs.iter_mut().find(|c| c.id == config_id) {
-                            cfg.paused = true;
-                        }
-                        s.markets_file.clone()
-                    };
-                    let configs = state.read().await.configs.clone();
-                    if let Err(e) = save_markets(&markets_file, &configs) {
+                    if let Some((_, Err(e))) = placer::auto_pause(state, &config_id).await {
                         error!("Failed to save markets after volatility pause of '{}': {}", label, e);
+                        alerter.error(format!(
+                            "Auto-pause of '{label}' could not be saved: {e}\nIt is paused now but would resume after a restart."
+                        ));
                     }
                     alerter.warn(format!(
                         "Auto-paused · {}\nBest bid moved past your volatility limit — resume from Markets when stable",
@@ -804,13 +827,7 @@ async fn execute_actions(
                         let exec = Arc::clone(executor);
                         let state2 = Arc::clone(state);
                         tokio::spawn(async move {
-                            let _ = exec.cancel_order_verified(&oid).await;
-                            let mut s = state2.write().await;
-                            if matches!(s.order_status.get(&config_id),
-                                Some(OrderStatus::Cancelling { order_id: existing, .. }) if existing == &oid)
-                            {
-                                s.order_status.insert(config_id, OrderStatus::Idle);
-                            }
+                            placer::cancel_deactivated(&*exec, &state2, &config_id, &oid).await;
                         });
                     }
                     None => {

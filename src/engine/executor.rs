@@ -7,7 +7,7 @@ use polymarket_client_sdk_v2::auth::state::Authenticated;
 use polymarket_client_sdk_v2::auth::Normal;
 use polymarket_client_sdk_v2::clob::types::request::UserRewardsEarningRequest;
 use polymarket_client_sdk_v2::clob::types::response::UserRewardsEarningResponse;
-use polymarket_client_sdk_v2::clob::types::SignatureType;
+use polymarket_client_sdk_v2::clob::types::{OrderStatusType, SignatureType};
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
@@ -194,38 +194,43 @@ impl Executor {
     /// response is ambiguous (i.e. cancel_order returned Ok(false)).
     ///
     /// Returns:
-    ///   Ok(true)  — order confirmed off the CLOB (cancelled, filled, or never existed)
-    ///   Ok(false) — order verified still active on the CLOB (cancel did not take effect)
-    ///   Err(_)    — network/API failure; caller should leave state as Cancelling
+    ///   Ok(true)  — order confirmed off the CLOB: cancelled, or GET /order says
+    ///               it doesn't exist (404) or is MATCHED / CANCELED
+    ///   Ok(false) — GET /order shows it still resting and a second cancel didn't
+    ///               confirm either
+    ///   Err(_)    — couldn't tell (network / API failure, including a failed
+    ///               GET /order)
+    ///
+    /// Only Ok(true) frees a leg: anything else leaves it Cancelling and the
+    /// engine's 30s timer retries, so an order that may still rest is never
+    /// forgotten (which could leave two orders up, or one up on a paused leg).
     pub async fn cancel_order_verified(&self, order_id: &str) -> Result<bool> {
-        match self.cancel_order(order_id).await? {
-            true => Ok(true),
-            false => {
-                // Cancel response was ambiguous — verify actual CLOB state.
-                // order() returns Err if the order doesn't exist (404/not found).
-                info!("cancel_order ambiguous for {} — verifying via GET /order", order_id);
-                match self.client.order(order_id).await {
-                    Err(_) => {
-                        // Order not found on CLOB = genuinely gone (filled or cancelled)
-                        info!("Order {} confirmed gone via GET /order", order_id);
-                        Ok(true)
+        if self.cancel_order(order_id).await? {
+            return Ok(true);
+        }
+        info!("cancel_order ambiguous for {} — verifying via GET /order", order_id);
+        match self.client.order(order_id).await {
+            Err(e) if is_not_found(&e) => {
+                info!("Order {} confirmed gone via GET /order", order_id);
+                Ok(true)
+            }
+            Err(e) => Err(eyre::eyre!("could not check order {order_id} after an unclear cancel: {e}")),
+            Ok(o) if is_off_book(&o.status) => {
+                info!("Order {} already off the book ({:?})", order_id, o.status);
+                Ok(true)
+            }
+            Ok(o) => {
+                warn!("Order {} still {:?} per GET /order — retrying cancel", order_id, o.status);
+                match self.cancel_order(order_id).await {
+                    Ok(true) => Ok(true),
+                    Ok(false) => {
+                        // Possibly mid-match (Polymarket can answer "can't be found" while the
+                        // record still says live). Not treated as gone: the timer retries, and
+                        // a later GET shows it MATCHED or not found.
+                        warn!("Order {} still resting after two cancel attempts — will retry", order_id);
+                        Ok(false)
                     }
-                    Ok(_) => {
-                        // Order exists per GET but cancel says "can't be found" — retry once.
-                        warn!("Order {} still in GET /order — retrying cancel", order_id);
-                        match self.cancel_order(order_id).await {
-                            Ok(true) => Ok(true),
-                            Ok(false) => {
-                                // Both cancel attempts say "can't be found" while order record exists.
-                                // This is the Polymarket matching-state race: the matching engine has
-                                // consumed the order (hence "can't be found" to cancel) but the order
-                                // record hasn't been cleaned up yet. Treat as gone — it is being filled.
-                                warn!("Order {} both cancel attempts ambiguous — order is matching/settling, treating as gone", order_id);
-                                Ok(true)
-                            }
-                            Err(e) => Err(e),
-                        }
-                    }
+                    Err(e) => Err(e),
                 }
             }
         }
@@ -426,6 +431,55 @@ fn merge_reward_markets(
         }
     }
     merged
+}
+
+/// GET /order failed because the order doesn't exist: a 404, or the empty
+/// reply the SDK also reports as a 404. A timeout or server error is not this.
+fn is_not_found(e: &polymarket_client_sdk_v2::error::Error) -> bool {
+    use polymarket_client_sdk_v2::error::{Kind, Status, StatusCode};
+    e.kind() == Kind::Status && e.downcast_ref::<Status>().is_some_and(|s| s.status_code == StatusCode::NOT_FOUND)
+}
+
+/// Statuses that mean the order no longer rests on the book. Anything else
+/// (LIVE, DELAYED, UNMATCHED, or a status we don't know) counts as resting.
+fn is_off_book(status: &OrderStatusType) -> bool {
+    matches!(status, OrderStatusType::Matched | OrderStatusType::Canceled)
+}
+
+#[cfg(test)]
+mod verify_tests {
+    use super::*;
+    use polymarket_client_sdk_v2::error::{Error, Kind, StatusCode};
+
+    #[test]
+    fn only_a_404_counts_as_not_found() {
+        let status = |code| Error::status(code, reqwest::Method::GET, "/data/order/x".into(), "msg");
+        assert!(is_not_found(&status(StatusCode::NOT_FOUND)));
+        for code in [
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_GATEWAY,
+            StatusCode::UNAUTHORIZED,
+        ] {
+            assert!(!is_not_found(&status(code)), "{code}");
+        }
+        let timeout =
+            Error::with_source(Kind::Internal, std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"));
+        assert!(!is_not_found(&timeout), "a timeout is not proof the order is gone");
+    }
+
+    #[test]
+    fn only_matched_or_canceled_is_off_the_book() {
+        assert!(is_off_book(&OrderStatusType::Matched) && is_off_book(&OrderStatusType::Canceled));
+        for s in [
+            OrderStatusType::Live,
+            OrderStatusType::Delayed,
+            OrderStatusType::Unmatched,
+            OrderStatusType::Unknown("SOMETHING_NEW".into()),
+        ] {
+            assert!(!is_off_book(&s), "{s:?}");
+        }
+    }
 }
 
 #[cfg(test)]
