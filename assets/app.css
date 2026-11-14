@@ -200,6 +200,8 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .tbl td { height: 36px; padding: 6px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: 12.5px; }
 .tbl tr:last-child td { border-bottom: 0; }
 .tbl tbody tr:hover td { background: color-mix(in srgb, var(--hover) 55%, transparent); }
+.tbl tr.dim td { opacity: .55; }
+.tbl tr.dim:hover td { opacity: 1; }
 .tbl .num { text-align: right; }
 .tbl th.num { text-align: right; }
 .tbl td.mkt { max-width: 300px; }

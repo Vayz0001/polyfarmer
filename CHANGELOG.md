@@ -15,6 +15,16 @@ anything may change between releases.
 
 ### Fixed
 
+- Pasting a sports or esports link (for example `polymarket.com/esports/league-of-legends/worlds/<match>` or
+  `polymarket.com/sports/nba/<game>`) failed with "Not a Polymarket market URL". Every polymarket.com link now
+  works: game and event pages, `/event/<event>/<market>`, `/market/<market>`, language prefixes such as `/es/`, and a
+  bare slug. Links to other sites, and slugs with anything other than letters, digits, `-` and `_`, are refused.
+- A page with several markets (a game's winner, handicaps, totals, props…) now opens the picker instead of jumping
+  to the market that shares the page's slug. Markets that pay rewards come first, the main market on top, with
+  each market's daily pool; markets without rewards are dimmed at the bottom.
+- "Rewards on" was shown for markets with no reward pool: Polymarket gives most markets a min size and zone
+  (often 50 shares and 4.5¢) whether or not anything is paid. A market now counts as rewarded only while a reward
+  program is paying, and its daily pool is shown on the market page.
 - When Polymarket changed a market's tick size while Polyfarmer was running (for example from 1¢ to 0.1¢), orders
   failed with "Price … has 3 decimal places" and the market was auto-removed within milliseconds. Polyfarmer now
   follows tick-size changes live, re-reads the tick from Polymarket when its order library disagrees with the

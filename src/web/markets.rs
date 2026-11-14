@@ -59,8 +59,8 @@ const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https"];
 /// Sanitize a user-entered market/event URL before resolving it.
 ///
 /// Pasted URLs can contain invisible control characters (NUL, BEL, ESC, …)
-/// that slip through copy/paste, OCR, or hand-editing and confuse the slug
-/// extractor (`extract_slug`) into producing garbage. They are stripped here.
+/// that slip through copy/paste, OCR, or hand-editing and confuse the link
+/// reader (`gamma_resolve::resolve_url`) into producing garbage. They are stripped here.
 /// Share links (e.g. `.../event/some-market?tid=123` or `...#fragment`) also
 /// carry query strings and fragments that would leak into the slug, so
 /// everything from the first `?` or `#` onward is cut as well. The scheme is
@@ -75,6 +75,10 @@ fn sanitize_market_url(raw: &str) -> Result<String, String> {
     let trimmed = cleaned.trim();
     if trimmed.is_empty() {
         return Err("Paste a Polymarket market or event URL first.".into());
+    }
+    // A bare slug ("lol-blg-gen-2026-11-14") is read as an event page link.
+    if gamma_resolve::valid_slug(trimmed) {
+        return Ok(format!("https://polymarket.com/event/{trimmed}"));
     }
 
     // If the input starts with a URI scheme (RFC 3986 `scheme:`), the scheme
@@ -273,6 +277,8 @@ struct MarketViewTemplate {
     image: Option<String>,
     group_item_title: Option<String>,
     has_rewards: bool,
+    /// Daily reward pool, e.g. "$1905/day".
+    reward_pool: String,
     reward_min: String,
     reward_max_spread: String,
     volume_24hr: Option<String>,
@@ -373,6 +379,7 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
         image: mr.image.clone().filter(|s| !s.is_empty()),
         group_item_title: mr.group_item_title.clone().filter(|g| !g.is_empty()),
         has_rewards: mr.has_rewards(),
+        reward_pool: pool_label(mr.reward_pool),
         reward_min: mr.rewards_min_size.map(|s| format!("{} shares", s.normalize())).unwrap_or_else(|| "—".to_string()),
         reward_max_spread: mr
             .rewards_max_spread
@@ -1237,6 +1244,7 @@ pub struct PickerCandidate {
     pub outcomes: Vec<String>,
     pub prices_cents: Vec<String>,
     pub has_rewards: bool,
+    pub reward_pool: String,
 }
 
 #[derive(Template)]
@@ -1244,6 +1252,8 @@ pub struct PickerCandidate {
 struct MarketPickerTemplate {
     shell: Shell,
     candidates: Vec<PickerCandidate>,
+    /// How many candidates pay rewards (they are listed first).
+    rewarded: usize,
 }
 
 /// GET /markets/resolve?url= — paste-a-URL entry point. A market URL (or an
@@ -1259,24 +1269,54 @@ pub async fn resolve_url(session: Session, Query(p): Query<ResolveUrlParams>) ->
             Redirect::to(&format!("/markets/view?slug={}", mr.market_slug)).into_response()
         }
         Ok(Ok(gamma_resolve::Resolved::Multiple(refs))) => {
-            let candidates = refs.into_iter().map(to_picker_candidate).collect();
-            render(&MarketPickerTemplate { shell: shell(&session, "markets").await, candidates }).into_response()
+            // A short group title ("Duration O/U 32:30") can repeat across a
+            // game's markets; those rows show the full question instead.
+            let mut titles: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            for t in refs.iter().filter_map(|m| m.group_item_title.as_deref()).filter(|t| !t.is_empty()) {
+                *titles.entry(t.to_string()).or_default() += 1;
+            }
+            let candidates: Vec<PickerCandidate> = refs
+                .into_iter()
+                .map(|mr| {
+                    let unique = mr.group_item_title.as_deref().is_some_and(|t| titles.get(t) == Some(&1));
+                    to_picker_candidate(mr, unique)
+                })
+                .collect();
+            let rewarded = candidates.iter().filter(|c| c.has_rewards).count();
+            render(&MarketPickerTemplate { shell: shell(&session, "markets").await, candidates, rewarded })
+                .into_response()
         }
         Ok(Err(e)) => view_error(&session, &format!("Could not resolve this URL: {e}")).await,
         Err(_) => view_error(&session, "Request to Polymarket timed out — try again.").await,
     }
 }
 
-fn to_picker_candidate(mr: MarketRef) -> PickerCandidate {
+fn to_picker_candidate(mr: MarketRef, use_group_title: bool) -> PickerCandidate {
     let has_rewards = mr.has_rewards();
     let prices_cents = mr.outcome_prices.iter().map(|p| cents(*p)).collect();
+    let label = match mr.group_item_title {
+        Some(t) if use_group_title => t,
+        _ => mr.question,
+    };
     PickerCandidate {
         market_slug: mr.market_slug,
-        label: mr.group_item_title.unwrap_or(mr.question),
+        label,
         image: mr.image.filter(|s| !s.is_empty()),
         outcomes: mr.outcomes,
         prices_cents,
         has_rewards,
+        reward_pool: pool_label(mr.reward_pool),
+    }
+}
+
+/// A daily reward pool for display: "$1905/day", "<$1/day", or "" for none.
+fn pool_label(pool: Decimal) -> String {
+    if pool <= dec!(0) {
+        String::new()
+    } else if pool < dec!(1) {
+        "<$1/day".to_string()
+    } else {
+        format!("${}/day", pool.round_dp(0))
     }
 }
 
@@ -1772,6 +1812,20 @@ mod tests {
         // Control characters and query strings combined.
         let mixed = sanitize_market_url("https://polymarket.com/event/\trump?src=share\n").unwrap();
         assert_eq!(mixed, "https://polymarket.com/event/rump");
+
+        // A bare slug is read as an event page link.
+        assert_eq!(
+            sanitize_market_url(" lol-blg-gen-2026-11-14 ").unwrap(),
+            "https://polymarket.com/event/lol-blg-gen-2026-11-14"
+        );
+        // The link from the bug report: query and fragment dropped, path kept.
+        assert_eq!(
+            sanitize_market_url(
+                "https://polymarket.com/esports/league-of-legends/worlds/lol-blg-gen-2026-11-14?r=earnfees#L97Nndk"
+            )
+            .unwrap(),
+            "https://polymarket.com/esports/league-of-legends/worlds/lol-blg-gen-2026-11-14"
+        );
 
         // Empty / whitespace-only input is rejected before the network call.
         assert!(sanitize_market_url("").is_err());
