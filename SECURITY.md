@@ -90,6 +90,43 @@ CSRF protection, a strict Content-Security-Policy, input validation, panic conta
 systemd unit. [`deny.toml`](deny.toml) holds the dependency policy, and every accepted advisory in it
 has a written reason and a review date.
 
+### Dashboard HTTP security headers
+
+The dashboard's hardening middleware (`src/web/security.rs`) applies the following headers to
+responses, including redirects and errors:
+
+| Header | Value or condition | Purpose |
+| --- | --- | --- |
+| `Content-Security-Policy` | Directives listed below | Restricts executable scripts, resource origins, forms, and framing. |
+| `X-Content-Type-Options` | `nosniff` | Prevents browsers from guessing a different MIME type. |
+| `X-Frame-Options` | `DENY` | Prevents framing in older browsers; complements CSP `frame-ancestors`. |
+| `Referrer-Policy` | `no-referrer` | Prevents the browser from sending the dashboard URL as a referrer. |
+| `Cross-Origin-Opener-Policy` | `same-origin` | Isolates the page's browsing context from cross-origin openers. |
+| `Cross-Origin-Resource-Policy` | `same-origin` | Prevents other origins from loading protected resources. |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), interest-cohort=()` | Disables these browser capabilities for the dashboard. |
+| `Strict-Transport-Security` | `max-age=31536000` **only** when `DASHBOARD_SECURE_COOKIES` is enabled | Instructs browsers to use HTTPS on subsequent visits. It has no effect over plain HTTP; enable secure cookies only when HTTPS is actually provided. No `includeSubDomains` or `preload` directive is set. |
+| `Cache-Control` | `no-store` on non-`/assets/` responses unless a handler already set a cache policy | Prevents caching of account data in pages and fragments. Assets use their own cache validators; handler-specific policies (such as SSE) are preserved. |
+
+`DASHBOARD_SECURE_COOKIES` is enabled by `true`, `1`, `yes`, or `on` (case-insensitive;
+surrounding whitespace is ignored). Other values leave it disabled.
+
+The exact `Content-Security-Policy` is:
+
+```text
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
+```
+
+- `default-src`, `script-src`, `font-src`, and `connect-src` limit their resources to the dashboard's own origin; scripts cannot use inline code or `eval`.
+- `style-src` allows same-origin CSS and inline styles for the ladder depth bars. This exception is for styling, **not** for scripts.
+- `img-src` permits same-origin images, HTTPS images (market thumbnails), and data URLs (CSS icons).
+- `frame-ancestors 'none'` prevents framing; `base-uri 'none'` blocks injected base URLs; `form-action 'self'` confines form submissions to this origin; `object-src 'none'` blocks embedded plugins.
+
+Session cookies are configured in `src/web/router.rs` with `HttpOnly`, `SameSite=Lax`, and `Path=/`.
+When `DASHBOARD_SECURE_COOKIES` is enabled, they also use `Secure` and the `__Host-polyfarmer`
+name (which forbids a `Domain` attribute). For local HTTP use, `Secure` is off and the cookie
+name is `polyfarmer_session`. These browser controls supplement, rather than replace, the
+per-session CSRF token and the server's cross-site write filter.
+
 If you run Polyfarmer yourself:
 
 - keep the dashboard on loopback and use Tailscale Serve, an SSH tunnel or an HTTPS proxy for remote
