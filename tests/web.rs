@@ -1345,3 +1345,42 @@ async fn custom_expiry_is_validated_and_saved() {
     assert!((left.num_seconds() - 3600).abs() < 30, "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A rejected edit re-opens the drawer with what the user typed (escaped and
+/// length-capped), not the saved values, so nothing has to be re-entered.
+#[tokio::test]
+async fn a_rejected_edit_keeps_what_was_typed() {
+    let (app, pw) = test_app_with_market();
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    // Valid size/distance/depth typed, but a custom expiry of 400 days (over a year).
+    let body = format!(
+        "csrf={csrf}&order_size=250&distance_cents=3.5&min_depth_usd=900&max_volatility_cents=4&expires_in=custom&expires_custom=400&expires_custom_unit=d"
+    );
+    let (status, out) = post_form(&app, &cookie, "/markets/mar_test_leg/edit", body).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(out.contains("between 1 hour and 1 year"), "{out}");
+    for typed in [r#"value="250""#, r#"value="3.5""#, r#"value="900""#, r#"value="4""#, r#"value="400""#] {
+        assert!(out.contains(typed), "missing {typed}");
+    }
+    assert!(out.contains(r#"<option value="custom" selected>"#) && out.contains(r#"<option value="d" selected>days"#));
+    assert!(!out.contains(r#"<option value="keep" selected>"#));
+
+    // Hostile or oversized input is escaped and cut, and an unknown choice falls back to "keep".
+    let evil = enc(r#""><script>alert(1)</script>"#);
+    let long = "9".repeat(5000);
+    let body = format!(
+        "csrf={csrf}&order_size={evil}&distance_cents={long}&min_depth_usd=500&max_volatility_cents=&expires_in=%22%3E%3Cb%3E&expires_custom=&expires_custom_unit=x"
+    );
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_test_leg/edit", body).await;
+    assert!(out.contains("alert err"), "rejected: {out}");
+    assert!(!out.contains("<script>alert(1)</script>") && !out.contains("<b>"), "echo is escaped");
+    assert!(
+        out.contains(&format!(r#"value="{}""#, "9".repeat(64))) && !out.contains(&"9".repeat(65)),
+        "echo is capped"
+    );
+    assert!(out.contains(r#"<option value="keep" selected>"#) && out.contains(r#"<option value="h" selected>hours"#));
+
+    // Nothing was saved by either rejected edit.
+    let (_, table, _) = get_authed(&app, &cookie, "/markets/table").await;
+    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below bid"), "{table}");
+}

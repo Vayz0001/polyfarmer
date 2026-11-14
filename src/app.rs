@@ -7,7 +7,7 @@ use crate::engine::executor::Executor;
 use crate::engine::quoter::QuoteAction;
 use crate::engine::ws_manager::AppState;
 use crate::engine::{heartbeat, placer, quoter, ws_manager};
-use crate::storage::{load_markets, save_markets};
+use crate::storage::load_markets;
 use crate::types::{EnginePhase, OrderStatus, WsCommand};
 
 use eyre::Result;
@@ -466,21 +466,17 @@ async fn wait_or_exit(wallet_ready: &Notify, retry_after: Duration) -> bool {
 
 // ── 30s fallback re-evaluation ────────────────────────────────────────────────
 
-const CANCEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
 async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Executor>, alerter: &Arc<Alerter>) {
-    // Reset any Cancelling states that have been stuck for longer than CANCEL_TIMEOUT.
-    // This recovers from hung HTTP cancel calls so the quoter can re-evaluate the market.
-    {
-        let mut s = state.write().await;
-        for status in s.order_status.values_mut() {
-            if let OrderStatus::Cancelling { order_id, since } = status {
-                if since.elapsed() > CANCEL_TIMEOUT {
-                    warn!("Cancel for order {} timed out — reverting to Idle", order_id);
-                    *status = OrderStatus::Idle;
-                }
-            }
-        }
+    // Retry cancels that have stayed unconfirmed past placer::CANCEL_RETRY_AFTER
+    // (a hung or failed HTTP call). The leg is freed only once Polymarket confirms
+    // the old order is gone, never on a timer alone.
+    let stuck = placer::claim_stuck_cancels(&mut *state.write().await);
+    for (config_id, order_id) in stuck {
+        warn!("Cancel of order {} unconfirmed for over 30s — retrying", order_id);
+        let (exec, st, al) = (Arc::clone(executor), Arc::clone(state), Arc::clone(alerter));
+        tokio::spawn(async move {
+            placer::confirm_stuck_cancel(&*exec, &st, &al, &config_id, &order_id).await;
+        });
     }
 
     let actions: Vec<(String, QuoteAction, String, rust_decimal::Decimal, rust_decimal::Decimal)> = {
@@ -535,12 +531,12 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                     let confirmed = match exec2.cancel_order_verified(&order_id).await {
                         Ok(true) => true,
                         Ok(false) => {
-                            warn!("Timer cancel: order {} still on CLOB after verified cancel — leaving Cancelling for timeout recovery", order_id);
+                            warn!("Timer cancel: order {} still on CLOB after verified cancel — leaving Cancelling for the timer to retry", order_id);
                             false
                         }
                         Err(e) => {
                             error!("Timer cancel order {} failed: {}", order_id, e);
-                            false // leave Cancelling; 30s timeout recovers
+                            false // leave Cancelling; the timer retries until confirmed
                         }
                     };
                     if confirmed {
@@ -594,18 +590,32 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                         return;
                     }
                     // Ok(true)  = confirmed off CLOB — safe to place.
-                    // Ok(false) = verified still active — leave Cancelling; 30s timeout recovers.
-                    // Err(_)    = network failure — leave Cancelling; 30s timeout recovers.
+                    // Ok(false) = verified still active — leave Cancelling; the timer retries until confirmed.
+                    // Err(_)    = network failure — leave Cancelling; the timer retries until confirmed.
                     match exec2.cancel_order_verified(&order_id).await {
                         Ok(true) => {}
                         Ok(false) => {
-                            warn!("Timer replace: cancel of {} verified still live — leaving Cancelling for timeout recovery", order_id);
-                            return; // leave state as Cancelling; 30s timeout will reset to Idle
+                            warn!("Timer replace: cancel of {} verified still live — leaving Cancelling for the timer to retry", order_id);
+                            return; // leave Cancelling; the timer retries until confirmed
                         }
                         Err(e) => {
                             error!("Timer replace: cancel {} failed — aborting replace: {}", order_id, e);
-                            return; // leave Cancelling; 30s timeout recovers
+                            return; // leave Cancelling; the timer retries until confirmed
                         }
+                    }
+
+                    // Paused or expired while the old order was being cancelled (e.g. a
+                    // volatility trip auto-paused it): place nothing, just free the leg.
+                    let stop = state2
+                        .read()
+                        .await
+                        .configs
+                        .iter()
+                        .find(|c| c.id == config_id)
+                        .is_some_and(|c| c.paused || chrono::Utc::now() >= c.expires_at);
+                    if stop {
+                        placer::free_if_cancelling(&mut *state2.write().await, &config_id, &order_id);
+                        return;
                     }
 
                     // Re-read the book for a fresh target — market may have moved during cancel.
@@ -676,7 +686,7 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                             } else {
                                 drop(s);
                                 warn!("Timer replace: state changed during cancel+place — cancelling orphan {}", oid);
-                                let _ = exec2.cancel_order(&oid).await;
+                                placer::cancel_orphan(&*exec2, &alert2, &oid).await;
                             }
                         }
                         Err(e) => {
@@ -698,23 +708,17 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
 
                 // Auto-pause config and save to disk for Volatility triggers.
                 if matches!(reason, DeactivateReason::Volatility) {
-                    let (markets_file, label) = {
-                        let mut s = state.write().await;
-                        let label = s
-                            .configs
-                            .iter()
-                            .find(|c| c.id == config_id)
-                            .map(|c| c.label.clone())
-                            .unwrap_or_else(|| config_id.clone());
-                        if let Some(cfg) = s.configs.iter_mut().find(|c| c.id == config_id) {
-                            cfg.paused = true;
+                    let label = match placer::auto_pause(state, &config_id).await {
+                        Some((label, Ok(()))) => label,
+                        Some((label, Err(e))) => {
+                            error!("Failed to save markets after volatility pause of '{}': {}", label, e);
+                            alerter.error(format!(
+                                "Auto-pause of '{label}' could not be saved: {e}\nIt is paused now but would resume after a restart."
+                            ));
+                            label
                         }
-                        (s.markets_file.clone(), label)
+                        None => config_id.clone(),
                     };
-                    let configs = state.read().await.configs.clone();
-                    if let Err(e) = save_markets(&markets_file, &configs) {
-                        error!("Failed to save markets after volatility pause of '{}': {}", label, e);
-                    }
                     alerter.warn(format!(
                         "Auto-paused · {}\nBest bid moved past your volatility limit — resume from Markets when stable",
                         label
@@ -748,13 +752,7 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                         let exec2 = Arc::clone(executor);
                         let state2 = Arc::clone(state);
                         tokio::spawn(async move {
-                            let _ = exec2.cancel_order_verified(&oid).await;
-                            let mut s = state2.write().await;
-                            if matches!(s.order_status.get(&config_id),
-                                Some(OrderStatus::Cancelling { order_id: existing, .. }) if existing == &oid)
-                            {
-                                s.order_status.insert(config_id, OrderStatus::Idle);
-                            }
+                            placer::cancel_deactivated(&*exec2, &state2, &config_id, &oid).await;
                         });
                     }
                     None => {

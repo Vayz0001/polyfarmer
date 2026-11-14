@@ -44,6 +44,18 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
     // transitioning (Live / Cancelling / Placing). If the market is already Idle
     // and the condition persists (paused, expired, volatile), return Hold — the
     // work is done and we don't need to fire another alert on every price tick.
+    //
+    // A leg already Cancelling holds too: its cancel is in flight, or unconfirmed
+    // and being retried by the timer (placer::confirm_stuck_cancel). Deactivating
+    // it again would repeat the alert and the cancel call on every book update.
+    // One exception: a volatility trip must still pause the leg (and save that),
+    // so it fires once; the leg is then paused and holds from the next update.
+    if matches!(status, OrderStatus::Cancelling { .. }) {
+        if !config.paused && volatility_tripped(config, book) {
+            return QuoteAction::Deactivate { order_id: live_order_id(status), reason: DeactivateReason::Volatility };
+        }
+        return QuoteAction::Hold;
+    }
     if config.paused {
         let order_id = live_order_id(status);
         if order_id.is_none() && matches!(status, OrderStatus::Idle) {
@@ -58,20 +70,16 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
         }
         return QuoteAction::Deactivate { order_id, reason: DeactivateReason::Expired };
     }
-    if let (Some(benchmark), Some(max_move)) = (config.benchmark_bid, config.max_volatility) {
-        if let Some(bb) = book.best_bid {
-            if (bb - benchmark).abs() >= max_move {
-                let order_id = live_order_id(status);
-                if order_id.is_none() && matches!(status, OrderStatus::Idle) {
-                    return QuoteAction::Hold;
-                }
-                return QuoteAction::Deactivate { order_id, reason: DeactivateReason::Volatility };
-            }
+    if volatility_tripped(config, book) {
+        let order_id = live_order_id(status);
+        if order_id.is_none() && matches!(status, OrderStatus::Idle) {
+            return QuoteAction::Hold;
         }
+        return QuoteAction::Deactivate { order_id, reason: DeactivateReason::Volatility };
     }
 
-    // ── 2. Skip if an async operation is already in flight ─────────────────
-    if matches!(status, OrderStatus::Cancelling { .. } | OrderStatus::Placing { .. }) {
+    // ── 2. Skip while a placement is in flight (Cancelling held above) ─────
+    if matches!(status, OrderStatus::Placing { .. }) {
         return QuoteAction::Hold;
     }
 
@@ -84,9 +92,14 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
     // ── 4. Compute target price (snapped to tick, always ≤ best_bid - distance) ──
     let raw_target = best_bid - config.distance;
     if raw_target <= dec!(0) {
-        // Degenerate market — best_bid is too low to quote below it
-        let order_id = live_order_id(status);
-        return QuoteAction::Cancel { order_id: order_id.unwrap_or_default(), reason: CancelReason::DepthDropped };
+        // Degenerate market — best_bid is too low to quote below it. Pull a
+        // live order; with none there is nothing to cancel (sending a Cancel
+        // with an empty id made a pointless API call and a false "Order
+        // cancelled" alert on every book update).
+        return match live_order_id(status) {
+            Some(order_id) => QuoteAction::Cancel { order_id, reason: CancelReason::DepthDropped },
+            None => QuoteAction::Hold,
+        };
     }
     let target = TokenBook::snap_to_tick(raw_target, config.tick_size);
 
@@ -144,6 +157,14 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
         }
 
         OrderStatus::Cancelling { .. } | OrderStatus::Placing { .. } => QuoteAction::Hold, // handled above
+    }
+}
+
+/// The best bid has moved at least `max_volatility` from where the leg started.
+fn volatility_tripped(config: &MarketConfig, book: &TokenBook) -> bool {
+    match (config.benchmark_bid, config.max_volatility, book.best_bid) {
+        (Some(benchmark), Some(max_move), Some(bb)) => (bb - benchmark).abs() >= max_move,
+        _ => false,
     }
 }
 
@@ -266,5 +287,55 @@ mod tests {
         let status = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };
         let action = evaluate(&cfg, &book, &status);
         assert!(matches!(action, QuoteAction::Deactivate { reason: DeactivateReason::Expired, .. }));
+    }
+
+    #[test]
+    fn a_market_too_low_to_quote_cancels_a_live_order_and_otherwise_holds() {
+        // best bid 1¢ with a 2¢ distance: there is no price to quote at.
+        let cfg = config(dec!(0.02), dec!(0));
+        let book = TokenBook { best_bid: Some(dec!(0.01)), best_ask: Some(dec!(0.02)), ..Default::default() };
+        let live = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.01) };
+        assert_eq!(
+            evaluate(&cfg, &book, &live),
+            QuoteAction::Cancel { order_id: "ord1".to_string(), reason: CancelReason::DepthDropped }
+        );
+        assert_eq!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Hold, "no order, nothing to cancel");
+        for status in [OrderStatus::Idle, OrderStatus::Placing { price: dec!(0.01) }] {
+            assert!(
+                !matches!(evaluate(&cfg, &book, &status), QuoteAction::Cancel { ref order_id, .. } if order_id.is_empty()),
+                "never a Cancel with an empty order id ({status:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn a_leg_already_cancelling_holds_even_when_paused_expired_or_volatile() {
+        let book = TokenBook { best_bid: Some(dec!(0.30)), best_ask: Some(dec!(0.31)), ..Default::default() };
+        let cancelling = OrderStatus::Cancelling { order_id: "ord1".to_string(), since: std::time::Instant::now() };
+        let mut paused = config(dec!(0.02), dec!(0));
+        paused.paused = true;
+        let mut expired = config(dec!(0.02), dec!(0));
+        expired.expires_at = Utc::now() - Duration::seconds(1);
+        let mut volatile = config(dec!(0.02), dec!(0));
+        volatile.benchmark_bid = Some(dec!(0.20));
+        volatile.max_volatility = Some(dec!(0.05));
+        for cfg in [&paused, &expired] {
+            assert_eq!(evaluate(cfg, &book, &cancelling), QuoteAction::Hold, "no repeat Deactivate while cancelling");
+        }
+        // A volatility trip still pauses the leg once (keeping the order being
+        // cancelled); once paused it holds like the others.
+        assert_eq!(
+            evaluate(&volatile, &book, &cancelling),
+            QuoteAction::Deactivate { order_id: Some("ord1".to_string()), reason: DeactivateReason::Volatility }
+        );
+        volatile.paused = true;
+        assert_eq!(evaluate(&volatile, &book, &cancelling), QuoteAction::Hold);
+        // With a live order they still deactivate, and a Placing leg is still reset.
+        let live = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.28) };
+        assert!(matches!(evaluate(&paused, &book, &live), QuoteAction::Deactivate { order_id: Some(_), .. }));
+        assert!(matches!(
+            evaluate(&paused, &book, &OrderStatus::Placing { price: dec!(0.28) }),
+            QuoteAction::Deactivate { order_id: None, .. }
+        ));
     }
 }
