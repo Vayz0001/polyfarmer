@@ -69,6 +69,9 @@ anything may change between releases.
 
 ### Changed
 
+- The market page's order book no longer marks the price you're about to bid with "NEW". It only appeared when
+  someone else already bid at that exact price and it pushed that row's price out of line. Clicking a bid still
+  sets your price, and the order panel still shows where your bid sits.
 - The shortest expiry is now 1 hour (it was 1 minute, which the forms never offered). Anything shorter is refused
   with a clear message.
 - Updated `tokio-tungstenite` (the WebSocket client for Polymarket's live feeds) from 0.24 to 0.30: faster message
