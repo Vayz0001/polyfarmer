@@ -341,7 +341,7 @@
   }
   function pct(w) { return Math.round(w * 100) + "%"; }
 
-  // Instant (client-side) reward weight + peg hint + preview marker.
+  // Instant (client-side) reward weight + peg hint.
   function mvUpdate(skipPreview) {
     var p = priceP(), usd = num($("#order_size").value), b = MV.book;
     var box = $("#score"), val = $("#score-val"), bar = $("#score-bar"), why = $("#score-why");
@@ -378,19 +378,7 @@
     // peg hint
     var hint = $("#peg-hint");
     if (hint) hint.textContent = b && b.bb > 0 && p > 0 && p < b.bb ? "follows " + ((b.bb - p) * 100).toFixed(1) + "¢ below best bid" : "";
-    mvMarkPreview();
     if (!skipPreview) { var pv = $("#placement-preview"); if (pv && window.htmx) htmx.trigger(pv, "pf:preview"); }
-  }
-
-  function mvMarkPreview() {
-    var p = priceP();
-    $$("#book .book-row.preview").forEach(function (r) { r.classList.remove("preview"); });
-    if (!(p > 0)) return;
-    var g = num(MV.group) || 0, target = g > 0 ? Math.floor(p / g + 1e-9) * g : p;
-    var rows = $$("#book .book-row.bid[data-price]");
-    for (var i = 0; i < rows.length; i++) {
-      if (Math.abs(num(rows[i].dataset.price) - target) < 1e-9) { rows[i].classList.add("preview"); break; }
-    }
   }
 
   // Centre the ladder on the spread. The spread row is position:sticky, so its

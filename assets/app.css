@@ -345,8 +345,6 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .book-row:hover { background: var(--hover); }
 .book-row.in-band { box-shadow: inset 2px 0 0 var(--accent); background: linear-gradient(90deg, var(--accent-bg), transparent 70%); }
 .book-row.live-mine .px::after { content: 'YOU'; margin-left: 6px; padding: 0 4px; border-radius: 3px; background: var(--accent); color: #fff; font: 700 9px/14px var(--sans); letter-spacing: .04em; vertical-align: 1px; }
-.book-row.preview { outline: 1px dashed var(--accent); outline-offset: -1px; }
-.book-row.preview .px::before { content: 'NEW '; color: var(--accent-2); font: 700 9px var(--sans); letter-spacing: .04em; }
 .book-row.empty-row { display: block; text-align: center; color: var(--faint); font-family: var(--sans); height: auto; padding: 14px; }
 .book-spread { position: sticky; top: 0; bottom: 0; z-index: 2; display: grid; grid-template-columns: repeat(3, 1fr); padding: 7px 14px; background: var(--panel-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .book-spread .k { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
