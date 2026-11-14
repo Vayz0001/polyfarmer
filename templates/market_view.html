@@ -8,7 +8,7 @@
   <div style="min-width:0;flex:1">
     <h1>{{ question }}</h1>
     <div class="mv-meta">
-      {% if has_rewards %}<span class="pill ok">Rewards on</span><span>zone <b class="num">{{ reward_max_spread }}</b> of mid</span><span class="sep"></span><span>min <b class="num">{{ reward_min }}</b></span>
+      {% if has_rewards %}<span class="pill ok">Rewards on</span><span>pool <b class="num">{{ reward_pool }}</b></span><span class="sep"></span><span>zone <b class="num">{{ reward_max_spread }}</b> of mid</span><span class="sep"></span><span>min <b class="num">{{ reward_min }}</b></span>
       {% else %}<span class="pill">No reward program</span>{% endif %}
       {% if let Some(g) = group_item_title %}<span class="sep"></span><span>{{ g }}</span>{% endif %}
       {% if let Some(r) = resolves %}<span class="sep"></span><span>Resolves {{ r }}{% if let Some(c) = countdown %} · {{ c }}{% endif %}</span>{% endif %}

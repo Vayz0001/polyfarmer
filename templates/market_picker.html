@@ -3,17 +3,17 @@
 {% block content %}
 <a class="crumb" href="/markets"><svg class="i sm"><use href="#i-back"/></svg>Markets</a>
 <div class="page-head">
-  <div><h1>Choose a market</h1><div class="sub">This event has several markets — pick the one to farm.</div></div>
+  <div><h1>Choose a market</h1><div class="sub">{% if rewarded == 0 %}None of these {{ candidates.len() }} markets pays rewards right now.{% else if rewarded == candidates.len() %}All {{ rewarded }} markets pay rewards. Pick the one to farm.{% else %}{{ rewarded }} of {{ candidates.len() }} markets pay rewards. They are listed first.{% endif %}</div></div>
 </div>
 <section class="panel">
   <table class="tbl">
-    <thead><tr><th>Candidate</th><th>Prices</th><th>Rewards</th><th></th></tr></thead>
+    <thead><tr><th>Market</th><th>Prices</th><th>Reward pool</th><th></th></tr></thead>
     <tbody>
       {% for c in candidates %}
-      <tr>
+      <tr{% if !c.has_rewards %} class="dim"{% endif %}>
         <td class="mkt"><div class="mkt-title">{% if let Some(img) = c.image %}<img class="thumb" src="{{ img }}" alt="" />{% endif %}<a class="name" href="/markets/view?slug={{ c.market_slug }}">{{ c.label }}</a></div></td>
         <td class="num muted">{% for (o, p) in c.outcomes.iter().zip(c.prices_cents.iter()) %}{{ o }} {{ p }}¢{% if !loop.last %} · {% endif %}{% endfor %}</td>
-        <td>{% if c.has_rewards %}<span class="pill ok">Eligible</span>{% else %}<span class="pill">None</span>{% endif %}</td>
+        <td>{% if c.has_rewards %}<span class="pill ok num">{{ c.reward_pool }}</span>{% else %}<span class="pill">None</span>{% endif %}</td>
         <td class="right"><a class="btn sm" href="/markets/view?slug={{ c.market_slug }}">Open<svg class="i sm"><use href="#i-chev"/></svg></a></td>
       </tr>
       {% endfor %}
