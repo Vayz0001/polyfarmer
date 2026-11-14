@@ -892,6 +892,11 @@ pub struct StartFarmingForm {
     min_depth_usd: String,
     #[serde(default)]
     expires_in: String,
+    /// With `expires_in=custom`: a whole number of hours or days.
+    #[serde(default)]
+    expires_custom: String,
+    #[serde(default)]
+    expires_custom_unit: String,
     #[serde(default)]
     max_volatility_cents: String,
 }
@@ -932,7 +937,7 @@ pub async fn start_farming(
         Ok(v) => v,
         Err(e) => return render_start_error(&e),
     };
-    let expires_at = match input::expiry(&form.expires_in) {
+    let expires_at = match input::expiry_choice(&form.expires_in, &form.expires_custom, &form.expires_custom_unit) {
         Ok(e) => e,
         Err(e) => return render_start_error(&e),
     };
@@ -1380,6 +1385,10 @@ pub struct EditForm {
     max_volatility_cents: String,
     #[serde(default)]
     expires_in: String,
+    #[serde(default)]
+    expires_custom: String,
+    #[serde(default)]
+    expires_custom_unit: String,
 }
 
 /// POST /markets/{id}/edit — write-through update of one leg. Size/distance
@@ -1423,7 +1432,7 @@ pub async fn edit_submit(
     };
     let expires_at = match form.expires_in.trim() {
         "" | "keep" => None,
-        other => match input::expiry(other) {
+        other => match input::expiry_choice(other, &form.expires_custom, &form.expires_custom_unit) {
             Ok(t) => Some(t),
             Err(e) => return fail(e).await,
         },

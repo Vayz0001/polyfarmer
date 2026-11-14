@@ -12,6 +12,8 @@ anything may change between releases.
 - A project website at [polyfarmer.xyz](https://polyfarmer.xyz), in `site/`: what Polyfarmer does, a simulated
   live dashboard, an interactive look at Polymarket's reward scoring, install steps and an FAQ. Static files only,
   no third-party scripts or tracking, and every animation turns off for people who prefer reduced motion.
+- "Stop quoting after" has a **Custom…** option, on the new-order form and in the edit drawer: type a whole number
+  of hours or days, from 1 hour to 1 year (for example 12 hours before a game starts).
 
 ### Fixed
 
@@ -48,6 +50,8 @@ anything may change between releases.
 
 ### Changed
 
+- The shortest expiry is now 1 hour (it was 1 minute, which the forms never offered). Anything shorter is refused
+  with a clear message.
 - Updated `tokio-tungstenite` (the WebSocket client for Polymarket's live feeds) from 0.24 to 0.30: faster message
   reading, and one fewer duplicate dependency.
 - Updated `rand` from 0.8 to 0.10. Keys, salts and nonces still come straight from the operating system's random

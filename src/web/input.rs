@@ -34,8 +34,8 @@ pub const MAX_SEARCH_LEN: usize = 200;
 pub const MAX_CURSOR_LEN: usize = 512;
 /// Longest market slug accepted.
 pub const MAX_SLUG_LEN: usize = 200;
-/// Expiry bounds, in seconds.
-const MIN_EXPIRY_SECS: i64 = 60;
+/// Expiry bounds, in seconds: at least 1 hour, at most 366 days.
+const MIN_EXPIRY_SECS: i64 = 3_600;
 const MAX_EXPIRY_SECS: i64 = 366 * 86_400;
 
 /// Parse a plain decimal (no exponent), bounded in length.
@@ -96,9 +96,9 @@ pub fn volatility_cents(s: &str) -> Result<Option<Decimal>, String> {
     }
 }
 
-/// `"<digits><unit>"` with unit s/m/h/d (any case), e.g. `7d`, `4h`, `30m`;
+/// `"<digits><unit>"` with unit s/m/h/d (any case), e.g. `7d`, `4h`, `90m`;
 /// `never` (a far-future sentinel — `MarketConfig::expires_at` isn't optional);
-/// blank = 7 days. Between 1 minute and 366 days.
+/// blank = 7 days. Between 1 hour and 366 days.
 ///
 /// Built from checked integer maths and bounds-tested *before* any `chrono`
 /// call, so no input can overflow `Duration`/`DateTime` (both panic on overflow).
@@ -108,7 +108,7 @@ pub fn expiry(s: &str) -> Result<DateTime<Utc>, String> {
         return Ok(Utc::now() + Duration::days(36_500));
     }
     let s = if s.is_empty() { "7d" } else { s };
-    let invalid = || "Invalid expiry — use a number and a unit, e.g. 7d, 4h or 30m.".to_string();
+    let invalid = || "Invalid expiry — use a whole number and a unit, e.g. 7d or 12h.".to_string();
 
     // Split off the LAST CHARACTER (not byte: it may be multibyte).
     let mut chars = s.chars();
@@ -127,9 +127,28 @@ pub fn expiry(s: &str) -> Result<DateTime<Utc>, String> {
     };
     let secs = n * per_unit; // ≤ 8.7e13: fits i64 comfortably
     if !(MIN_EXPIRY_SECS..=MAX_EXPIRY_SECS).contains(&secs) {
-        return Err("Expiry must be between 1 minute and 1 year.".to_string());
+        return Err("Expiry must be between 1 hour and 1 year.".to_string());
     }
     Ok(Utc::now() + Duration::seconds(secs))
+}
+
+/// The "Stop quoting after" choice from a form: a preset handled by
+/// [`expiry`] (`1d`, `7d`, `never`, …), or `custom` with a whole number of
+/// hours or days the user typed (`custom_n`, `custom_unit` = `h` | `d`).
+pub fn expiry_choice(choice: &str, custom_n: &str, custom_unit: &str) -> Result<DateTime<Utc>, String> {
+    if !choice.trim().eq_ignore_ascii_case("custom") {
+        return expiry(choice);
+    }
+    let n = custom_n.trim();
+    if n.is_empty() {
+        return Err("Enter how long to keep quoting: at least 1 hour.".to_string());
+    }
+    let unit = match custom_unit.trim() {
+        "h" | "H" => 'h',
+        "d" | "D" => 'd',
+        _ => return Err("Invalid expiry unit — choose hours or days.".to_string()),
+    };
+    expiry(&format!("{n}{unit}"))
 }
 
 /// A search string, cut to [`MAX_SEARCH_LEN`] characters.
@@ -195,8 +214,10 @@ mod tests {
         assert!(near(expiry("7d").unwrap(), 7 * 86400));
         assert!(near(expiry("").unwrap(), 7 * 86400), "blank = 7 days");
         assert!(near(expiry("4H").unwrap(), 4 * 3600), "unit is case-insensitive");
-        assert!(near(expiry(" 30m ").unwrap(), 30 * 60));
-        assert!(near(expiry("90s").unwrap(), 90));
+        assert!(near(expiry(" 90m ").unwrap(), 90 * 60));
+        assert!(near(expiry("1h").unwrap(), 3600), "the minimum");
+        assert!(near(expiry("60m").unwrap(), 3600));
+        assert!(near(expiry("3600s").unwrap(), 3600));
         assert!(near(expiry("366d").unwrap(), 366 * 86400));
         assert!(expiry("never").unwrap() > Utc::now() + Duration::days(36_000));
         assert!(expiry("NEVER").is_ok());
@@ -218,7 +239,12 @@ mod tests {
             "+5d",
             "7.5d",
             "0d",
+            "0h",
             "59s",
+            "90s",
+            "30m",
+            "59m",
+            "3599s",
             "367d",
             "400d",
             "2x",
@@ -232,6 +258,40 @@ mod tests {
         }
         // 9 digits is the widest accepted number; even then the maths cannot overflow.
         assert!(expiry("999999999d").is_err());
+    }
+
+    #[test]
+    fn custom_expiry_takes_whole_hours_or_days_from_one_hour_to_a_year() {
+        let near = |d: DateTime<Utc>, secs: i64| (d - Utc::now()).num_seconds().abs_diff(secs) < 5;
+        assert!(near(expiry_choice("custom", "1", "h").unwrap(), 3600), "the minimum");
+        assert!(near(expiry_choice("custom", " 12 ", "h").unwrap(), 12 * 3600));
+        assert!(near(expiry_choice("CUSTOM", "36", "h").unwrap(), 36 * 3600));
+        assert!(near(expiry_choice("custom", "10", "d").unwrap(), 10 * 86400));
+        assert!(near(expiry_choice("custom", "8784", "h").unwrap(), 8784 * 3600), "366 days in hours");
+        assert!(near(expiry_choice("custom", "366", "D").unwrap(), 366 * 86400));
+        // Presets still go through `expiry`; the custom fields are ignored.
+        assert!(near(expiry_choice("3d", "999999", "x").unwrap(), 3 * 86400));
+        assert!(expiry_choice("never", "", "").unwrap() > Utc::now() + Duration::days(36_000));
+        for (n, unit) in [
+            ("", "h"),
+            ("0", "h"),
+            ("0", "d"),
+            ("8785", "h"),
+            ("367", "d"),
+            ("1.5", "h"),
+            ("-1", "h"),
+            ("1e3", "h"),
+            ("12", "m"),
+            ("12", "s"),
+            ("12", ""),
+            ("12", "hours"),
+            ("12h", "h"),
+            ("１２", "h"),
+            ("99999999999999999999", "h"),
+            ("💥", "d"),
+        ] {
+            assert!(expiry_choice("custom", n, unit).is_err(), "{n:?} {unit:?} must be rejected");
+        }
     }
 
     #[test]

@@ -1251,3 +1251,97 @@ async fn a_leg_whose_order_cannot_be_cancelled_is_kept_paused_not_removed() {
     let saved = std::fs::read_to_string(markets_file).unwrap();
     assert!(saved.contains("\"paused\": true"), "{saved}");
 }
+
+/// "Stop quoting after → Custom…": whole hours or days, 1 hour to 1 year, on
+/// both the start form and the edit drawer; a valid custom edit is saved.
+#[tokio::test]
+async fn custom_expiry_is_validated_and_saved() {
+    use polyfarmer::types::{MarketConfig, OrderStatus};
+    use rust_decimal_macros::dec;
+    let dir = unique_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let markets_file = dir.join("markets.json");
+    let store = CredentialStore::open(dir.join("data")).unwrap();
+    let pw = "test-password-123".to_string();
+    store.set_password(&pw).unwrap();
+    let engine =
+        Arc::new(tokio::sync::RwLock::new(polyfarmer::engine::ws_manager::AppState::new(markets_file.clone())));
+    {
+        let mut s = engine.try_write().unwrap();
+        s.configs.push(MarketConfig {
+            id: "mar_test_leg".into(),
+            url: "https://polymarket.com/event/test-event/test-market".into(),
+            label: "Will the test pass?".into(),
+            condition_id: "0xabc".into(),
+            token_id: "123".into(),
+            token_label: "Yes".into(),
+            tick_size: dec!(0.01),
+            distance: dec!(0.02),
+            min_depth_between: dec!(500),
+            order_size: dec!(100),
+            expires_at: chrono::Utc::now() + chrono::Duration::days(7),
+            paused: true,
+            benchmark_bid: None,
+            max_volatility: None,
+        });
+        s.order_status.insert("mar_test_leg".into(), OrderStatus::Idle);
+    }
+    let app = router(WebState::new(Arc::new(store), engine.clone()));
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+
+    // Both forms offer the Custom option and the hours/days inputs.
+    let (_, drawer, _) = get_authed(&app, &cookie, "/markets/mar_test_leg/edit").await;
+    assert!(drawer.contains(r#"value="custom""#) && drawer.contains(r#"name="expires_custom""#), "{drawer}");
+    assert!(drawer.contains(r#"<option value="h" selected>hours</option>"#));
+
+    let edit = |exp: &str, n: &str, unit: &str| {
+        format!(
+            "csrf={csrf}&order_size=100&distance_cents=2&min_depth_usd=500&max_volatility_cents=&expires_in={}&expires_custom={}&expires_custom_unit={}",
+            enc(exp),
+            enc(n),
+            enc(unit)
+        )
+    };
+    let start = |n: &str, unit: &str| {
+        format!(
+            "csrf={csrf}&slug=whatever&side=0&sides=one&price_cents=18&order_size=100&min_depth_usd=0&max_volatility_cents=&expires_in=custom&expires_custom={}&expires_custom_unit={}",
+            enc(n),
+            enc(unit)
+        )
+    };
+    for (uri, body, expect) in [
+        ("/markets/mar_test_leg/edit", edit("custom", "", "h"), "at least 1 hour"),
+        ("/markets/mar_test_leg/edit", edit("custom", "0", "h"), "between 1 hour and 1 year"),
+        ("/markets/mar_test_leg/edit", edit("custom", "367", "d"), "between 1 hour and 1 year"),
+        ("/markets/mar_test_leg/edit", edit("custom", "8785", "h"), "between 1 hour and 1 year"),
+        ("/markets/mar_test_leg/edit", edit("custom", "1.5", "h"), "Invalid expiry"),
+        ("/markets/mar_test_leg/edit", edit("custom", "12", "m"), "Invalid expiry unit"),
+        ("/markets/mar_test_leg/edit", edit("30m", "", ""), "between 1 hour and 1 year"),
+        ("/markets/start", start("", "h"), "at least 1 hour"),
+        ("/markets/start", start("0", "d"), "between 1 hour and 1 year"),
+        ("/markets/start", start("12", "weeks"), "Invalid expiry unit"),
+        ("/markets/start", start("💥", "h"), "Invalid expiry"),
+    ] {
+        let (status, out) = post_form(&app, &cookie, uri, body.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(out.contains(expect), "expected {expect:?} for {body}\n got: {out}");
+        assert!(!out.contains("Internal error"), "panicked for {body}");
+    }
+    let before = engine.read().await.configs[0].expires_at;
+    assert!(before > chrono::Utc::now() + chrono::Duration::days(6), "rejected edits left the expiry alone");
+    assert!(!markets_file.exists(), "rejected edits saved nothing");
+
+    // A valid custom edit (12 hours from now) lands in memory and on disk.
+    let (status, out) = post_form(&app, &cookie, "/markets/mar_test_leg/edit", edit("custom", "12", "h")).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let left = engine.read().await.configs[0].expires_at - chrono::Utc::now();
+    assert!((left.num_seconds() - 12 * 3600).abs() < 30, "expires in ~12h, got {left:?}");
+    let saved = std::fs::read_to_string(&markets_file).unwrap();
+    let saved_at = engine.read().await.configs[0].expires_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    assert!(saved.contains(&saved_at[..16]), "saved file has the new expiry: {saved}");
+    // The 1-hour minimum is accepted too.
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_test_leg/edit", edit("custom", "1", "h")).await;
+    let left = engine.read().await.configs[0].expires_at - chrono::Utc::now();
+    assert!((left.num_seconds() - 3600).abs() < 30, "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
