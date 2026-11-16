@@ -237,6 +237,24 @@
     });
   }
 
+  // ── refreshes keep your place ───────────────────────────────────────────
+  // Live fragments (the Markets table every 5s, the Overview book every 10s)
+  // are replaced wholesale. Focus survives because every control in them has
+  // a stable id (htmx restores focus by id); the sideways scroll of their
+  // tables is carried across the swap here.
+  var keptScroll = null;
+  document.addEventListener("htmx:beforeSwap", function (e) {
+    var t = e.detail.target; keptScroll = null;
+    if (!t) return;
+    var wraps = $$(".tbl-wrap", t);
+    if (wraps.some(function (w) { return w.scrollLeft > 0; })) keptScroll = { target: t, left: wraps.map(function (w) { return w.scrollLeft; }) };
+  });
+  document.addEventListener("htmx:afterSwap", function (e) {
+    if (!keptScroll || keptScroll.target !== e.detail.target) return;
+    var left = keptScroll.left; keptScroll = null;
+    $$(".tbl-wrap", e.detail.target).forEach(function (w, i) { if (left[i]) w.scrollLeft = left[i]; });
+  });
+
   // ── activity filters ────────────────────────────────────────────────────
   var actLevel = "all", actCat = "all";
   function applyActivityFilter() {
