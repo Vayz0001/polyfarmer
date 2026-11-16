@@ -1322,6 +1322,59 @@ fn leg_of<'a>(s: &'a polyfarmer::engine::ws_manager::AppState, id: &str) -> &'a 
     s.configs.iter().find(|c| c.id == id).unwrap()
 }
 
+/// If saving fails, a resume is undone exactly: the paused leg stays paused
+/// with its old reference, and a leg that was already running stays running.
+#[tokio::test]
+async fn a_failed_save_undoes_a_resume_exactly() {
+    use polyfarmer::engine::orderbook::TokenBook;
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, markets_file) = app_with_leg(OrderStatus::Idle);
+    {
+        let mut s = engine.write().await;
+        let leg = &mut s.configs[0];
+        leg.paused = true;
+        leg.max_volatility = Some(dec!(0.05));
+        leg.benchmark_bid = Some(dec!(0.20));
+        let mut other = leg.clone();
+        other.id = "mar_other".into();
+        other.token_id = "456".into();
+        other.paused = false;
+        s.configs.push(other);
+        s.books.insert(
+            "123".into(),
+            TokenBook { best_bid: Some(dec!(0.40)), best_ask: Some(dec!(0.41)), ..Default::default() },
+        );
+        // A directory where the file should be: every save fails.
+        std::fs::create_dir_all(markets_file.with_extension("dir")).unwrap();
+        s.markets_file = markets_file.with_extension("dir");
+    }
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    for uri in ["/markets/mar_leg/resume", "/markets/mar_other/resume"] {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.clone())
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("csrf={csrf}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_string(res).await;
+        assert!(body.contains("Failed to save"), "{uri}: {body}");
+    }
+    let s = engine.read().await;
+    let leg = leg_of(&s, "mar_leg");
+    assert_eq!((leg.paused, leg.benchmark_bid), (true, Some(dec!(0.20))), "resume undone");
+    let other = leg_of(&s, "mar_other");
+    assert_eq!((other.paused, other.benchmark_bid), (false, Some(dec!(0.20))), "running leg left running");
+}
+
 /// Resuming a leg with no auto-pause limit needs no price and changes nothing else.
 #[tokio::test]
 async fn resume_without_a_limit_leaves_the_reference_alone() {

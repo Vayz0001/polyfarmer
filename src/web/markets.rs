@@ -1737,34 +1737,39 @@ async fn best_bid_now(state: &WebState, token: &str) -> Option<Decimal> {
     }
 }
 
-/// Pause/resume one leg (`pausing` picks the direction).
-async fn set_paused(state: &WebState, id: &str, pausing: bool) -> Result<(), String> {
-    // Resuming a paused leg with an auto-pause limit restarts that limit from
-    // today's best bid. Without this, a leg auto-paused after a move would
-    // stay over its limit and never quote again.
-    let restart_from = if pausing {
-        None
-    } else {
-        let leg = {
-            let s = state.engine.read().await;
-            s.configs.iter().find(|c| c.id == id).map(|c| (c.paused, c.max_volatility.is_some(), c.token_id.clone()))
-        };
-        match leg {
-            Some((true, true, token)) => match best_bid_now(state, &token).await {
-                Some(bb) => Some(bb),
-                None => return Err("Could not read the current best bid to restart auto-pause — try again.".into()),
-            },
-            _ => None,
-        }
+/// The best bid a resumed leg's auto-pause limit restarts from: `None` when
+/// the leg isn't paused or has no limit (nothing to restart).
+async fn restart_price(state: &WebState, id: &str) -> Result<Option<Decimal>, String> {
+    let leg = {
+        let s = state.engine.read().await;
+        s.configs.iter().find(|c| c.id == id).map(|c| (c.paused, c.max_volatility.is_some(), c.token_id.clone()))
     };
-    let (configs_snapshot, order_to_cancel, markets_file, old_benchmark) = {
+    match leg {
+        Some((true, true, token)) => match best_bid_now(state, &token).await {
+            Some(bb) => Ok(Some(bb)),
+            None => Err("Couldn't read the current best bid, so auto-pause can't restart. Try again, or turn \
+                         auto-pause off in Edit."
+                .into()),
+        },
+        _ => Ok(None),
+    }
+}
+
+/// Pause/resume one leg (`pausing` picks the direction). Resuming a paused
+/// leg with an auto-pause limit restarts that limit from `restart_from` (the
+/// current best bid; see `restart_price`), whether it was auto-paused or
+/// paused by hand. Without this, a leg auto-paused after a move would stay
+/// over its limit and never quote again.
+async fn set_paused(state: &WebState, id: &str, pausing: bool, restart_from: Option<Decimal>) -> Result<(), String> {
+    let (configs_snapshot, order_to_cancel, markets_file, old, restarted) = {
         let mut s = state.engine.write().await;
         let Some(c) = s.configs.iter_mut().find(|c| c.id == id) else {
             return Ok(()); // already gone
         };
-        let old_benchmark = c.benchmark_bid;
+        let old = (c.paused, c.benchmark_bid);
         // Only a leg still paused with a limit now: a concurrent resume or edit may have got here first.
-        if let Some(bb) = restart_from.filter(|_| c.paused && c.max_volatility.is_some()) {
+        let restarted = restart_from.filter(|_| !pausing && c.paused && c.max_volatility.is_some());
+        if let Some(bb) = restarted {
             c.benchmark_bid = Some(bb);
         }
         c.paused = pausing;
@@ -1785,14 +1790,20 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool) -> Result<(), Str
         } else {
             None
         };
-        (s.configs.clone(), order_to_cancel, s.markets_file.clone(), old_benchmark)
+        (s.configs.clone(), order_to_cancel, s.markets_file.clone(), old, restarted)
     };
 
     if let Err(e) = save_markets(&markets_file, &configs_snapshot) {
+        // Undo only what this call changed and nothing has changed since
+        // (an auto-pause may have landed in between).
         let mut s = state.engine.write().await;
-        for c in s.configs.iter_mut().filter(|c| c.id == id) {
-            c.paused = !pausing;
-            c.benchmark_bid = old_benchmark;
+        if let Some(c) = s.configs.iter_mut().find(|c| c.id == id) {
+            if c.paused == pausing {
+                c.paused = old.0;
+            }
+            if restarted.is_some() && c.benchmark_bid == restarted {
+                c.benchmark_bid = old.1;
+            }
         }
         return Err(format!("Failed to save: {e}"));
     }
@@ -1813,9 +1824,19 @@ async fn pause_resume(state: WebState, session: Session, ids: Vec<String>, csrf:
             .await
             .into_response();
     }
-    let mut flash = None;
+    // Read every restart price before resuming anything, so a group resume
+    // resumes all its legs or none (a lone leg would only wait on the
+    // two-sided rule).
+    let mut restart = Vec::with_capacity(ids.len());
     for id in &ids {
-        if let Err(e) = set_paused(&state, id, pausing).await {
+        match if pausing { Ok(None) } else { restart_price(&state, id).await } {
+            Ok(p) => restart.push(p),
+            Err(e) => return render_markets_table(&state, &session, Some(e)).await,
+        }
+    }
+    let mut flash = None;
+    for (id, restart_from) in ids.iter().zip(restart) {
+        if let Err(e) = set_paused(&state, id, pausing, restart_from).await {
             flash = Some(e);
             break;
         }
