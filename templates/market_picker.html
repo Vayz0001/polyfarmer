@@ -6,12 +6,12 @@
   <div><h1>Choose a market</h1><div class="sub">{% if rewarded == 0 %}None of these {{ candidates.len() }} markets pays rewards right now.{% else if rewarded == candidates.len() %}All {{ rewarded }} markets pay rewards. Pick the one to farm.{% else %}{{ rewarded }} of {{ candidates.len() }} markets pay rewards. They are listed first.{% endif %}</div></div>
 </div>
 <section class="panel">
-  <table class="tbl">
+  <table class="tbl" id="picker-table">
     <thead><tr><th>Market</th><th class="num">Prices</th><th>Reward pool</th><th></th></tr></thead>
     <tbody>
       {% for c in candidates %}
       <tr{% if !c.has_rewards %} class="dim"{% endif %}>
-        <td class="mkt"><div class="mkt-title">{% if let Some(img) = c.image %}<img class="thumb" src="{{ img }}" alt="" />{% endif %}<a class="name" href="/markets/view?slug={{ c.market_slug }}">{{ c.label }}</a></div></td>
+        <td class="mkt"><div class="mkt-title">{% if let Some(img) = c.image %}<img class="thumb" src="{{ img }}" alt="" />{% endif %}<a class="name" href="/markets/view?slug={{ c.market_slug }}" title="{{ c.label }}">{{ c.label }}</a></div></td>
         <td class="num muted">{% for (o, p) in c.outcomes.iter().zip(c.prices_cents.iter()) %}{{ o }} {{ p }}¢{% if !loop.last %} · {% endif %}{% endfor %}</td>
         <td>{% if c.has_rewards %}<span class="pill ok num">{{ c.reward_pool }}</span>{% else %}<span class="pill">None</span>{% endif %}</td>
         <td class="right"><a class="btn sm" href="/markets/view?slug={{ c.market_slug }}">Open<svg class="i sm"><use href="#i-chev"/></svg></a></td>
@@ -20,5 +20,9 @@
       {% if candidates.is_empty() %}<tr><td colspan="4"><div class="empty">No tradeable markets found for this URL.</div></td></tr>{% endif %}
     </tbody>
   </table>
+  {% if rewarded > 0 && rewarded < candidates.len() %}
+  {# Shown by app.js, which also hides the rows without rewards (all rows stay visible without JS). #}
+  <div class="panel-foot picker-more" hidden><button type="button" class="btn sm" data-action="picker-toggle" data-n="{{ candidates.len() - rewarded }}">Show {{ candidates.len() - rewarded }} markets without rewards</button></div>
+  {% endif %}
 </section>
 {% endblock %}

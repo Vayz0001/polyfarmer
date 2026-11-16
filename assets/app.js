@@ -14,19 +14,23 @@
   function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
   function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
   function num(v) { var n = parseFloat(v); return isFinite(n) ? n : NaN; }
-  function relTime(iso) {
+  // Older than a week: the date, and (where there's room) the time of day,
+  // which the day headings above a feed don't give.
+  function relTime(iso, withTime) {
     var t = new Date(iso).getTime(); if (isNaN(t)) return "";
     var s = Math.max(0, (Date.now() - t) / 1000);
     if (s < 45) return "just now";
     if (s < 3600) return Math.floor(s / 60) + "m ago";
     if (s < 86400) return Math.floor(s / 3600) + "h ago";
     if (s < 86400 * 7) return Math.floor(s / 86400) + "d ago";
-    return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    var opts = { month: "short", day: "numeric" };
+    if (withTime) { opts.hour = "numeric"; opts.minute = "2-digit"; }
+    return new Date(t).toLocaleString(undefined, opts);
   }
   PF.relTime = function (root) {
     $$(".feed-time[data-ts]", root).forEach(function (el) {
       var iso = el.getAttribute("data-ts");
-      el.textContent = relTime(iso);
+      el.textContent = relTime(iso, !el.closest(".tbl"));   // table Time columns stay compact
       el.title = new Date(iso).toLocaleString();
     });
   };
@@ -309,16 +313,57 @@
     $$(".tbl-wrap", e.detail.target).forEach(function (w, i) { if (left[i]) w.scrollLeft = left[i]; });
   });
 
+  // ── "Added to your markets" after Start farming ─────────────────────────
+  // The start request answers with a redirect to Markets; note the market in
+  // sessionStorage and say so on the next page. (No handler change: this only
+  // reads the response the form already gets.)
+  document.addEventListener("htmx:afterRequest", function (e) {
+    var d = e.detail;
+    if (!d || !d.elt || d.elt.id !== "order-form" || !d.successful || !d.xhr || !d.xhr.getResponseHeader("HX-Redirect")) return;
+    var h = $(".mv-head h1");
+    try { sessionStorage.setItem("pf-started", ((h && h.textContent) || "").trim().slice(0, 200)); } catch (_) {}
+  });
+  function startedToast() {
+    var q = null;
+    try { q = sessionStorage.getItem("pf-started"); sessionStorage.removeItem("pf-started"); } catch (_) {}
+    if (q !== null) toast("Added to your markets", q, "info", 8000);
+  }
+
+  // ── picker: markets without rewards are tucked away ────────────────────
+  function setPickerDim(hide) {
+    var b = $('[data-action="picker-toggle"]'); if (!b) return;
+    $$("#picker-table tr.dim").forEach(function (r) { r.hidden = hide; });
+    b.dataset.shown = hide ? "" : "1";
+    b.textContent = (hide ? "Show " : "Hide ") + b.dataset.n + " markets without rewards";
+  }
+  function initPicker() { var more = $(".picker-more"); if (!more) return; more.hidden = false; setPickerDim(true); }
+
   // ── activity filters ────────────────────────────────────────────────────
   var actLevel = "all", actCat = "all";
   function applyActivityFilter() {
     var feed = $("#activity-feed"); if (!feed) return;
-    $$(".feed-row", feed).forEach(function (r) {
+    var rows = $$(".feed-row", feed), shown = 0;
+    rows.forEach(function (r) {
       var lv = r.dataset.level;
       var okLevel = actLevel === "all" || (actLevel === "warn" ? lv === "warn" || lv === "error" : lv === actLevel);
       var okCat = actCat === "all" || r.dataset.cat === actCat;
       r.hidden = !(okLevel && okCat);
+      if (!r.hidden) shown++;
     });
+    // A day heading shows only while one of its rows does.
+    $$(".feed-day", feed).forEach(function (d) {
+      var any = false;
+      for (var n = d.nextElementSibling; n && !n.classList.contains("feed-day"); n = n.nextElementSibling) {
+        if (n.classList.contains("feed-row") && !n.hidden) { any = true; break; }
+      }
+      d.hidden = !any;
+    });
+    // Its own class: prependFeeds removes .feed-empty when live rows arrive.
+    var none = $(".feed-nomatch", feed);
+    if (rows.length && !shown) {
+      if (!none) { none = document.createElement("div"); none.className = "feed-nomatch"; none.textContent = "No activity matches this filter."; feed.appendChild(none); }
+      none.hidden = false;
+    } else if (none) none.hidden = true;
   }
 
   // ── settings: private-key check (client-only, instant) ─────────────────
@@ -556,6 +601,7 @@
         $$('[data-action="filter"][data-kind="' + kind + '"]').forEach(function (c) { c.classList.toggle("selected", c === el); });
         applyActivityFilter(); break;
       }
+      case "picker-toggle": setPickerDim(!!el.dataset.shown); break;
       case "tab": $$("button", el.parentElement).forEach(function (b) { b.classList.toggle("selected", b === el); }); break;
       case "side": if (MV) mvSelectSide(parseInt(el.dataset.side, 10)); break;
       case "mode": if (MV) mvSetMode(el.dataset.mode); break;
@@ -626,6 +672,8 @@
     connectEvents();
     mvInit();
     syncExpiry();
+    initPicker();
+    startedToast();
     PF.relTime();
     PF.localTimes();
     setInterval(function () { PF.relTime(); }, 30000);

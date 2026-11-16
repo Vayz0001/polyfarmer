@@ -289,7 +289,7 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .feed-body { color: var(--muted); font-size: 12px; white-space: pre-line; word-break: break-word; margin-top: 1px; }
 .feed-time { color: var(--faint); font: 11px var(--mono); white-space: nowrap; }
 .feed-row.tone-err .feed-title { color: var(--ask); }
-.feed-empty { padding: 28px 14px; color: var(--muted); }
+.feed-empty, .feed-nomatch { padding: 28px 14px; color: var(--muted); }
 .feed.compact .feed-row { grid-template-columns: 8px 1fr auto; padding: 8px 12px; }
 .feed.compact .feed-cat { display: none; }
 
