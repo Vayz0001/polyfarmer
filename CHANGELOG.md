@@ -20,6 +20,23 @@ anything may change between releases.
 - The market page's order book drew each depth bar from that level's own size, while the Total column next to it is a
   running total, so a row could show a small bar beside a big total. Bars now draw the running total, growing away from
   the spread, on one scale for bids and asks (the deeper side is the full width), as on polyfarmer.xyz.
+- Dashboard layout: at 1280px the Markets table cut off Expires and the Pause/Edit/Remove buttons, Browse titles ran
+  over the numbers next to them, and Overview cut Score to "SCO". Tables now fit, the row buttons stay pinned in
+  reach on narrower screens, the app works from 1024px wide, and sticky table headers no longer slide under the
+  status bar.
+- The 5-second Markets refresh no longer drops keyboard focus or a table's sideways scroll. The edit drawer and the
+  Remove dialog keep Tab inside, return focus where it came from, and the closed drawer can't be reached by Tab
+  (its shadow no longer shows along the right edge). Remove's dialog focuses Cancel and names the action. Toasts
+  moved to the bottom right, clear of the page's buttons.
+- Faint text, the blue and red buttons and the light theme's green, amber and blue now read at 4.5:1 or better.
+- Money is shown one way: dollars and cents everywhere on Rewards ("<$0.01" for dust, the exact amount on hover),
+  the same style for Size and Min depth, "<$1" instead of "$0" for tiny book levels, and amounts are rounded rather
+  than cut off.
+- The order preview no longer shows negative distances ("−74¢ below best bid"); the score box says roughly what size
+  reaches the reward minimum. Starting a market shows "Added to your markets". Activity keeps the time of day for
+  older entries and says when a filter matches nothing. The link-error page has a paste box. One name, "Find
+  markets", for the market finder; Rewards uses the Markets page's status words; every status explains itself on
+  hover; Browse says "ended" for markets past their end date; big event pickers tuck away markets without rewards.
 - A cancel that failed (for example a network error) could still free the leg: pausing, expiry and auto-pause
   marked it "waiting" whatever the cancel's result, and any cancel left unconfirmed for 30 seconds was reset the same
   way. The old order could then keep resting on Polymarket while the leg showed as paused, or next to a new one.
