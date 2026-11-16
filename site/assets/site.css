@@ -213,10 +213,12 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 
 .kpis { display: grid; grid-template-columns: 1fr 1fr; border-right: 1px solid var(--line); align-content: start; }
 @media (max-width: 900px) { .kpis { border-right: 0; border-bottom: 1px solid var(--line); } }
-/* Label on top, value and note at the bottom: when one label wraps, the two
-   values in that row still line up. */
-.kpi { display: flex; flex-direction: column; padding: 20px 22px; border-bottom: 1px solid var(--line); min-width: 0; }
-.kpi .lbl { margin-bottom: auto; }
+.kpi { padding: 20px 22px; border-bottom: 1px solid var(--line); min-width: 0; }
+/* Label, value and note rows are shared across each pair of cells, so when a
+   label or a note wraps in one cell, the values in that row still line up. */
+@supports (grid-template-rows: subgrid) {
+  .kpi { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0; align-content: start; }
+}
 .kpi:nth-child(odd) { border-right: 1px solid var(--line); }
 .lbl { color: var(--faint); font: 600 11px/1 var(--sans); letter-spacing: .09em; text-transform: uppercase; }
 .kpi .v { margin-top: 12px; font: 600 28px/1 var(--mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
