@@ -818,7 +818,7 @@ async fn execute_actions(
                         ));
                     }
                     alerter.warn(format!(
-                        "Auto-paused · {}\nBest bid moved past your volatility limit — resume from Markets when stable",
+                        "Auto-paused · {}\nBest bid moved past your auto-pause limit — resume from Markets to restart from the current price",
                         label
                     ));
                 } else {

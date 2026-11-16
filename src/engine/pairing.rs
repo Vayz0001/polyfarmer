@@ -21,7 +21,7 @@
 //! neither acts nor forgets: a price flickering across 90¢ can't keep resetting
 //! it. Pure decision logic: no I/O.
 
-use crate::engine::quoter::{self, CancelReason, QuoteAction};
+use crate::engine::quoter::{self, CancelReason, DeactivateReason, QuoteAction};
 use crate::engine::ws_manager::AppState;
 use crate::rewards::market_data::single_sided_allowed;
 use crate::types::{MarketConfig, OrderStatus};
@@ -93,6 +93,26 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
         let raw = quoter::evaluate(c, book, &status);
         let (id, token, size, tick) = (c.id.clone(), c.token_id.clone(), c.order_size, c.tick_size);
         let action = gate(s, i, &status, raw, now);
+        if let QuoteAction::Deactivate { order_id, reason: DeactivateReason::Volatility } = &action {
+            // Record the auto-pause now, under the lock (the runner saves it),
+            // so the timer and the feed can't both fire it: a racing evaluation
+            // sees a paused leg with a cancelling order, or none, and holds.
+            s.configs[i].paused = true;
+            match (&status, order_id) {
+                (OrderStatus::Live { .. }, Some(oid)) => {
+                    s.order_status.insert(
+                        id.clone(),
+                        OrderStatus::Cancelling { order_id: oid.clone(), since: std::time::Instant::now() },
+                    );
+                }
+                // A placement in flight finds it no longer owns the leg and
+                // cancels the order it gets back (placer::run_place).
+                (OrderStatus::Placing { .. }, _) => {
+                    s.order_status.insert(id.clone(), OrderStatus::Idle);
+                }
+                _ => {}
+            }
+        }
         out.push((id, action, token, size, tick));
     }
     out
@@ -344,6 +364,57 @@ mod tests {
 
     fn all(s: &mut AppState, now: Instant) -> Vec<Decision> {
         decide(s, |_| true, now)
+    }
+
+    /// An auto-pause is recorded when it is decided, so a second evaluation
+    /// (the timer racing the feed) holds instead of alerting and cancelling again.
+    #[test]
+    fn an_auto_pause_is_decided_once() {
+        for live_order in [true, false] {
+            let mut s = AppState::new(PathBuf::from("unused.json"));
+            let mut c = leg("y", "YES", CID);
+            c.benchmark_bid = Some(dec!(0.40));
+            c.max_volatility = Some(dec!(0.05));
+            s.configs = vec![c];
+            s.books.insert("YES".into(), book(dec!(0.50), dec!(0.51), dec!(100)));
+            if live_order {
+                live(&mut s, "y", dec!(0.49));
+            }
+            let now = Instant::now();
+            let first = action_of(&all(&mut s, now), "y");
+            let QuoteAction::Deactivate { order_id, reason: DeactivateReason::Volatility } = first else {
+                panic!("expected an auto-pause, got {first:?}");
+            };
+            assert_eq!(order_id.is_some(), live_order);
+            assert!(s.configs[0].paused, "paused at decision time");
+            if live_order {
+                assert!(matches!(s.order_status.get("y"), Some(OrderStatus::Cancelling { .. })));
+            }
+            assert_eq!(action_of(&all(&mut s, now), "y"), QuoteAction::Hold, "no second alert or cancel");
+        }
+    }
+
+    /// A trip while an order is being placed: the placement no longer owns the
+    /// leg (so it cancels what it gets back), and a racing evaluation holds
+    /// rather than sending a second, "Paused", alert.
+    #[test]
+    fn an_auto_pause_during_a_placement_releases_it() {
+        let mut s = AppState::new(PathBuf::from("unused.json"));
+        let mut c = leg("y", "YES", CID);
+        c.benchmark_bid = Some(dec!(0.40));
+        c.max_volatility = Some(dec!(0.05));
+        s.configs = vec![c];
+        s.books.insert("YES".into(), book(dec!(0.50), dec!(0.51), dec!(100)));
+        let now = Instant::now();
+        placer::begin_place(&mut s, "y", dec!(0.49), now).expect("slot claimed");
+        assert!(matches!(s.order_status.get("y"), Some(OrderStatus::Placing { .. })));
+        assert_eq!(
+            action_of(&all(&mut s, now), "y"),
+            QuoteAction::Deactivate { order_id: None, reason: DeactivateReason::Volatility }
+        );
+        assert!(s.configs[0].paused);
+        assert!(matches!(s.order_status.get("y"), Some(OrderStatus::Idle)), "placement released");
+        assert_eq!(action_of(&all(&mut s, now), "y"), QuoteAction::Hold, "no second alert");
     }
 
     #[test]

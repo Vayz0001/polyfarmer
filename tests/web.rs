@@ -1255,6 +1255,152 @@ async fn a_leg_whose_order_cannot_be_cancelled_is_kept_paused_not_removed() {
     assert!(saved.contains("\"paused\": true"), "{saved}");
 }
 
+/// Resume after an auto-pause restarts the limit from today's best bid, so
+/// the leg quotes again instead of sitting over its old limit. A leg that
+/// wasn't paused, or has no limit, keeps its reference.
+#[tokio::test]
+async fn resume_restarts_auto_pause_from_the_current_best_bid() {
+    use polyfarmer::engine::orderbook::TokenBook;
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, markets_file) = app_with_leg(OrderStatus::Idle);
+    {
+        let mut s = engine.write().await;
+        let leg = &mut s.configs[0];
+        leg.paused = true; // auto-paused at a 5¢ limit from 20¢
+        leg.max_volatility = Some(dec!(0.05));
+        leg.benchmark_bid = Some(dec!(0.20));
+        let mut other = leg.clone(); // the other outcome, running, same limit
+        other.id = "mar_other".into();
+        other.token_id = "456".into();
+        other.paused = false;
+        s.configs.push(other);
+        s.books.insert(
+            "123".into(),
+            TokenBook { best_bid: Some(dec!(0.40)), best_ask: Some(dec!(0.41)), ..Default::default() },
+        );
+        s.books.insert(
+            "456".into(),
+            TokenBook { best_bid: Some(dec!(0.59)), best_ask: Some(dec!(0.60)), ..Default::default() },
+        );
+    }
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/markets/group/0xabc/resume")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("csrf={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let s = engine.read().await;
+    let leg = s.configs.iter().find(|c| c.id == "mar_leg").unwrap();
+    assert!(!leg.paused);
+    assert_eq!(leg.benchmark_bid, Some(dec!(0.40)), "restarted from the current best bid");
+    let other = s.configs.iter().find(|c| c.id == "mar_other").unwrap();
+    assert_eq!(other.benchmark_bid, Some(dec!(0.20)), "a running leg keeps its reference");
+    let saved = std::fs::read_to_string(&markets_file).unwrap();
+    let saved: Vec<polyfarmer::types::MarketConfig> = serde_json::from_str(&saved).unwrap();
+    let saved_leg = saved.iter().find(|c| c.id == "mar_leg").unwrap();
+    assert_eq!((saved_leg.paused, saved_leg.benchmark_bid), (false, Some(dec!(0.40))), "saved");
+    drop(s);
+
+    // The quoter no longer sees the old move: the resumed leg is free to quote.
+    let s = engine.read().await;
+    let book = s.books.get("123").unwrap();
+    let action = polyfarmer::engine::quoter::evaluate(leg_of(&s, "mar_leg"), book, &OrderStatus::Idle);
+    assert!(!matches!(action, polyfarmer::engine::quoter::QuoteAction::Deactivate { .. }), "not re-paused: {action:?}");
+}
+
+fn leg_of<'a>(s: &'a polyfarmer::engine::ws_manager::AppState, id: &str) -> &'a polyfarmer::types::MarketConfig {
+    s.configs.iter().find(|c| c.id == id).unwrap()
+}
+
+/// If saving fails, a resume is undone exactly: the paused leg stays paused
+/// with its old reference, and a leg that was already running stays running.
+#[tokio::test]
+async fn a_failed_save_undoes_a_resume_exactly() {
+    use polyfarmer::engine::orderbook::TokenBook;
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, markets_file) = app_with_leg(OrderStatus::Idle);
+    {
+        let mut s = engine.write().await;
+        let leg = &mut s.configs[0];
+        leg.paused = true;
+        leg.max_volatility = Some(dec!(0.05));
+        leg.benchmark_bid = Some(dec!(0.20));
+        let mut other = leg.clone();
+        other.id = "mar_other".into();
+        other.token_id = "456".into();
+        other.paused = false;
+        s.configs.push(other);
+        s.books.insert(
+            "123".into(),
+            TokenBook { best_bid: Some(dec!(0.40)), best_ask: Some(dec!(0.41)), ..Default::default() },
+        );
+        // A directory where the file should be: every save fails.
+        std::fs::create_dir_all(markets_file.with_extension("dir")).unwrap();
+        s.markets_file = markets_file.with_extension("dir");
+    }
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    for uri in ["/markets/mar_leg/resume", "/markets/mar_other/resume"] {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header(header::COOKIE, cookie.clone())
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("csrf={csrf}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_string(res).await;
+        assert!(body.contains("Failed to save"), "{uri}: {body}");
+    }
+    let s = engine.read().await;
+    let leg = leg_of(&s, "mar_leg");
+    assert_eq!((leg.paused, leg.benchmark_bid), (true, Some(dec!(0.20))), "resume undone");
+    let other = leg_of(&s, "mar_other");
+    assert_eq!((other.paused, other.benchmark_bid), (false, Some(dec!(0.20))), "running leg left running");
+}
+
+/// Resuming a leg with no auto-pause limit needs no price and changes nothing else.
+#[tokio::test]
+async fn resume_without_a_limit_leaves_the_reference_alone() {
+    use polyfarmer::types::OrderStatus;
+    let (app, pw, engine, _) = app_with_leg(OrderStatus::Idle);
+    engine.write().await.configs[0].paused = true;
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/markets/mar_leg/resume")
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("csrf={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let s = engine.read().await;
+    assert!(!s.configs[0].paused);
+    assert_eq!(s.configs[0].benchmark_bid, None);
+}
+
 /// "Stop quoting after → Custom…": whole hours or days, 1 hour to 1 year, on
 /// both the start form and the edit drawer; a valid custom edit is saved.
 #[tokio::test]

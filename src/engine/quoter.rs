@@ -69,7 +69,8 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
     // and being retried by the timer (placer::confirm_stuck_cancel). Deactivating
     // it again would repeat the alert and the cancel call on every book update.
     // One exception: a volatility trip must still pause the leg (and save that),
-    // so it fires once; the leg is then paused and holds from the next update.
+    // so it fires once whatever the status — even with no order yet — and the
+    // leg is then paused and holds from the next update.
     if matches!(status, OrderStatus::Cancelling { .. }) {
         if !config.paused && volatility_tripped(config, book) {
             return QuoteAction::Deactivate { order_id: live_order_id(status), reason: DeactivateReason::Volatility };
@@ -91,11 +92,9 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
         return QuoteAction::Deactivate { order_id, reason: DeactivateReason::Expired };
     }
     if volatility_tripped(config, book) {
-        let order_id = live_order_id(status);
-        if order_id.is_none() && matches!(status, OrderStatus::Idle) {
-            return QuoteAction::Hold;
-        }
-        return QuoteAction::Deactivate { order_id, reason: DeactivateReason::Volatility };
+        // Idle too: holding would leave an unpaused leg waiting silently until
+        // the price came back, which auto-pause promises not to do.
+        return QuoteAction::Deactivate { order_id: live_order_id(status), reason: DeactivateReason::Volatility };
     }
 
     // ── 2. Skip while a placement is in flight (Cancelling held above) ─────
@@ -357,5 +356,40 @@ mod tests {
             evaluate(&paused, &book, &OrderStatus::Placing { price: dec!(0.28) }),
             QuoteAction::Deactivate { order_id: None, .. }
         ));
+    }
+
+    #[test]
+    fn a_volatility_trip_pauses_a_leg_even_with_no_order() {
+        let book = TokenBook { best_bid: Some(dec!(0.30)), best_ask: Some(dec!(0.31)), ..Default::default() };
+        let mut cfg = config(dec!(0.02), dec!(0));
+        cfg.benchmark_bid = Some(dec!(0.20));
+        cfg.max_volatility = Some(dec!(0.05));
+        // Waiting with no order: it pauses (and alerts) instead of holding silently.
+        assert_eq!(
+            evaluate(&cfg, &book, &OrderStatus::Idle),
+            QuoteAction::Deactivate { order_id: None, reason: DeactivateReason::Volatility }
+        );
+        assert_eq!(
+            evaluate(&cfg, &book, &OrderStatus::Placing { price: dec!(0.28) }),
+            QuoteAction::Deactivate { order_id: None, reason: DeactivateReason::Volatility }
+        );
+        // Once paused it holds: one alert, not one per book update.
+        cfg.paused = true;
+        assert_eq!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Hold);
+        // Inside the limit (exactly at it trips; just under doesn't).
+        cfg.paused = false;
+        cfg.benchmark_bid = Some(dec!(0.2501));
+        assert!(!matches!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Deactivate { .. }));
+        cfg.benchmark_bid = Some(dec!(0.25));
+        assert!(matches!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Deactivate { .. }));
+        // No limit or no reference: never trips.
+        cfg.max_volatility = None;
+        assert!(!matches!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Deactivate { .. }));
+        // An expired leg with no order still just holds (expiry is checked first).
+        let mut expired = config(dec!(0.02), dec!(0));
+        expired.benchmark_bid = Some(dec!(0.20));
+        expired.max_volatility = Some(dec!(0.05));
+        expired.expires_at = Utc::now() - Duration::seconds(1);
+        assert_eq!(evaluate(&expired, &book, &OrderStatus::Idle), QuoteAction::Hold);
     }
 }
