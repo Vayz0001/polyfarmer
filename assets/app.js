@@ -429,23 +429,31 @@
       var shares = perUsd / p;
       var meets = shares >= MV.minShares;
       var w = weight(b.mid, p), thisW = meets ? w : 0, otherW = null;
-      if (!meets) reasons.push("needs ≥ " + MV.minShares + " shares per side (have " + Math.floor(shares) + ")");
+      // The other leg's price (Both sides): same distance below its own best bid.
+      var op = both() && b.bb > 0 && b.ba > 0 ? (1 - b.ba) - (b.bb - p) : 0;
+      if (!meets) {
+        // What it would take: the minimum in shares at the dearer leg's price.
+        var needPer = MV.minShares * Math.max(p, op > 0 ? op : 0);
+        reasons.push("needs ≥ " + MV.minShares + " shares per side (have " + Math.floor(shares) + "): about $" + Math.ceil(needPer * (both() ? 2 : 1)) + " in total");
+      }
       if (w === 0) reasons.push(p >= b.mid ? "at or above the midpoint" : "outside the reward zone (±" + MV.maxSpread + "¢)");
       if (b.bb > 0 && p >= b.bb) reasons.push("must sit below the best bid (" + (b.bb * 100).toFixed(1) + "¢)");
       if (both()) {
         if (b.bb > 0 && b.ba > 0) {
-          var op = (1 - b.ba) - (b.bb - p), om = 1 - b.mid, osh = op > 0 ? perUsd / op : 0;
+          var om = 1 - b.mid, osh = op > 0 ? perUsd / op : 0;
           otherW = op > 0 && osh >= MV.minShares ? weight(om, op) : 0;
           if (otherW === 0) reasons.push("other leg (" + (op * 100).toFixed(1) + "¢) doesn't score");
         } else otherW = 0;
       }
       eff = effective(b.mid, thisW, otherW);
-      if (!both()) reasons.push(singleOk(b.mid) ? "one-sided scores ÷3 — Both sides for full weight" : "one-sided earns 0 while mid is under 10¢ / over 90¢");
+      // (The "one side scores a third" note is in the preview below; only the
+      // case that explains a 0% is repeated here.)
+      if (!both() && !singleOk(b.mid)) reasons.push("one-sided earns 0 while mid is under 10¢ / over 90¢");
       var tone = eff >= 0.4 ? "ok" : eff > 0 ? "warn" : "bad";
       box.className = "score " + tone;
       val.textContent = pct(eff);
       bar.style.width = Math.min(100, eff * 100) + "%";
-      why.textContent = reasons.length ? reasons.join(" · ") : "Inside the zone, two-sided, above the size minimum.";
+      why.textContent = reasons.length ? reasons.join(" · ") : both() ? "Inside the zone, two-sided, above the size minimum." : "Inside the zone and above the size minimum.";
     }
     // peg hint
     var hint = $("#peg-hint");
