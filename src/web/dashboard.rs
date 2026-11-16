@@ -41,6 +41,18 @@ pub(super) fn cents(p: Decimal) -> String {
     format!("{:.1}", p * dec!(100))
 }
 
+/// "Auto-pauses if the best bid reaches 26.0¢ or 36.0¢": the limit either way
+/// from the reference it is measured from (if known).
+fn auto_pause_title(limit: Decimal, reference: Option<Decimal>) -> String {
+    match reference {
+        Some(r) if r - limit > dec!(0) => {
+            format!("Auto-pauses if the best bid reaches {}¢ or {}¢", cents(r - limit), cents(r + limit))
+        }
+        Some(r) => format!("Auto-pauses if the best bid reaches {}¢", cents(r + limit)),
+        None => format!("Auto-pauses if the best bid moves {}¢ either way", cents(limit)),
+    }
+}
+
 /// Weight in [0, 1] → rounded whole percent ("53%"). Decimal's `{:.0}`
 /// truncates, so round explicitly.
 pub(super) fn pct(w: Decimal) -> String {
@@ -121,7 +133,8 @@ pub struct LegRow {
     pub min_depth: String,
     pub expires: String,
     pub expires_title: String,
-    pub auto_pause: Option<String>,
+    /// Auto-pause limit ("5.0¢") and a tooltip naming the prices that trip it.
+    pub auto_pause: Option<(String, String)>,
     token_id: String,
     mid_value: Option<Decimal>,
     /// This order's own weight, before the two-sided rule (live legs only).
@@ -315,7 +328,7 @@ fn leg_row(
         "Live" => "Your order is resting on the book.",
         "Placing" => "Placing the order on Polymarket…",
         "Cancelling" => "Cancelling the order: waiting for Polymarket to confirm it's gone.",
-        "Expired" => "Past its expiry: no order.",
+        "Expired" => "Expired: no order. Set a new expiry in Edit to quote again.",
         _ => "No order right now: waiting until your depth and price conditions are met.",
     };
     let (price, dmid, in_zone, raw_weight, is_scoring) = match (&live, mid) {
@@ -356,7 +369,7 @@ fn leg_row(
         min_depth: if c.min_depth_between > dec!(0) { usd(c.min_depth_between) } else { "—".to_string() },
         expires: until(c.expires_at),
         expires_title: c.expires_at.format("%b %-d, %Y %H:%M UTC").to_string(),
-        auto_pause: c.max_volatility.map(|v| format!("{}¢", cents(v))),
+        auto_pause: c.max_volatility.map(|v| (format!("{}¢", cents(v)), auto_pause_title(v, c.benchmark_bid))),
         token_id: c.token_id.clone(),
         mid_value: mid,
         raw_weight,
@@ -640,6 +653,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn auto_pause_tag_names_the_trigger_prices() {
+        assert_eq!(
+            auto_pause_title(dec!(0.05), Some(dec!(0.31))),
+            "Auto-pauses if the best bid reaches 26.0¢ or 36.0¢"
+        );
+        assert_eq!(auto_pause_title(dec!(0.05), Some(dec!(0.03))), "Auto-pauses if the best bid reaches 8.0¢");
+        assert_eq!(auto_pause_title(dec!(0.05), None), "Auto-pauses if the best bid moves 5.0¢ either way");
+    }
+
+    #[test]
     fn until_formats_ranges() {
         assert_eq!(until(Utc::now() - chrono::Duration::minutes(1)), "expired");
         assert_eq!(until(Utc::now() + chrono::Duration::days(36500)), "never");
@@ -787,7 +810,7 @@ mod tests {
 
     #[test]
     fn usd_rounds_to_cents_and_compacts_thousands() {
-        assert_eq!(usd(dec!(150)), "$150.00", "Size and Min depth share one style");
+        assert_eq!(usd(dec!(150)), "$150.00", "Size and Depth ahead share one style");
         assert_eq!(usd(dec!(2.675)), "$2.68", "half away from zero, not truncated");
         assert_eq!(usd(dec!(0.004)), "$0.00");
         assert_eq!(usd(dec!(1500)), "$1.5k");

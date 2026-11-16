@@ -44,9 +44,9 @@ manage everything from a local web dashboard.
 | Setting | What it does |
 | --- | --- |
 | **Distance** | How far below the best bid your order rests. It is re-pegged as the bid moves. |
-| **Minimum depth** (USD) | The order is cancelled if less than this sits between it and the best bid, so others get filled first. |
-| **Auto-pause** | Stops quoting if the best bid moves further than your volatility limit. |
-| **Expiry** | After this time the order is cancelled and not placed again. |
+| **Depth ahead** (USD) | The minimum of other bids above yours, up to and including the best bid, so others get filled first. With less, the order is pulled or not placed. |
+| **Auto-pause** | Pauses the leg and cancels its order if the best bid moves this many cents either way. Resuming restarts it from the price then. |
+| **Expires** | After this time the order is cancelled and the leg stops; edit it to extend. |
 | **Shutdown, disconnect, heartbeat failure** | All resting orders are cancelled. |
 
 ## The dashboard

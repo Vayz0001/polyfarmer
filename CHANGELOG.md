@@ -15,6 +15,16 @@ anything may change between releases.
 - "Stop quoting after" has a **Custom…** option, on the new-order form and in the edit drawer: type a whole number
   of hours or days, from 1 hour to 1 year (for example 12 hours before a game starts).
 
+### Changed
+
+- Shorter, consistent names for the order safeguards, the same in the forms, the Markets table, alerts, the README and
+  the website: **Safeguards** (was "Safety & expiry"), **Depth ahead** (was "Min depth ahead" / "Min depth" /
+  "Minimum depth"), **Auto-pause** (was "Auto-pause if best bid moves" / "volatility limit") and **Expires** (was
+  "Stop quoting after"). Their help text now says exactly what each does: depth counts the bids above yours up to and
+  including the best bid, auto-pause triggers either way and restarts on resume, and an expired leg can be extended.
+  The Markets table's auto-pause tag shows the two prices that would trigger it, and the edit drawer's labels
+  match the new-order form ("Size", "Distance").
+
 ### Fixed
 
 - Auto-pause: resuming a leg it had paused didn't restart the limit, so if the price hadn't come all the way back the

@@ -824,7 +824,7 @@ async fn execute_actions(
                 } else {
                     let (title, msg) = match reason {
                         DeactivateReason::Paused => ("Paused", "Order cancelled — resume from Markets"),
-                        DeactivateReason::Expired => ("Expired", "Expiry reached — stopped quoting"),
+                        DeactivateReason::Expired => ("Expired", "Order cancelled — edit the leg to extend it"),
                         DeactivateReason::Volatility => unreachable!(),
                     };
                     alerter.info(format!("{} · {}\n{}", title, label, msg));

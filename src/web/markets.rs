@@ -1350,7 +1350,7 @@ struct EditTemplate {
     min_depth_usd: String,
     max_volatility_cents: String,
     expires: String,
-    /// Selected "Stop quoting" option and the custom amount/unit shown with it.
+    /// Selected "Expires" option and the custom amount/unit shown with it.
     expires_choice: String,
     expires_custom: String,
     expires_custom_unit: String,
@@ -1390,7 +1390,7 @@ impl TypedEdit {
     }
 }
 
-/// The edit drawer's "Stop quoting" options.
+/// The edit drawer's "Expires" options.
 const EXPIRY_CHOICES: [&str; 7] = ["keep", "1d", "3d", "7d", "30d", "never", "custom"];
 
 async fn edit_template(

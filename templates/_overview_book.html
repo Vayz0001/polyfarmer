@@ -7,7 +7,7 @@
 {% else %}
 <div class="tbl-wrap">
 <table class="tbl">
-  <thead><tr><th>Market</th><th>Side</th><th>Status</th><th class="num">Bid</th><th class="num">Δ mid</th><th class="num">Score</th></tr></thead>
+  <thead><tr><th>Market</th><th>Side</th><th>Status</th><th class="num">Bid</th><th class="num" title="Your bid's distance from the midpoint">Δ mid</th><th class="num">Score</th></tr></thead>
   {% for row in rows %}
   <tbody class="group">
     {% for leg in row.legs %}

@@ -190,7 +190,7 @@ mod tests {
             "order"
         );
         assert_eq!(category_for("Auto-paused · Will X?\nBest bid moved"), "market");
-        assert_eq!(category_for("Expired · Will X?\nExpiry reached — stopped quoting"), "market");
+        assert_eq!(category_for("Expired · Will X?\nOrder cancelled — edit the leg to extend it"), "market");
         assert_eq!(category_for("WS connected"), "connection");
         assert_eq!(category_for("Heartbeat failed 3 consecutive times — cancelling orders and pausing"), "connection");
         assert_eq!(category_for("WS disconnected (stream ended) — cancelling 3 open orders"), "connection");

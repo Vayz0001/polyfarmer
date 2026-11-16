@@ -653,7 +653,7 @@
     document.body.addEventListener("htmx:beforeSwap", hide);
   }
 
-  // ── "Stop quoting after → Custom…" ──────────────────────────────────────
+  // ── "Expires → Custom…" ──────────────────────────────────────────────────
   // The custom hours/days inputs are only enabled (and so only validated and
   // sent) while Custom is chosen; a stale value can't block a preset submit.
   function syncExpiry(root) {
