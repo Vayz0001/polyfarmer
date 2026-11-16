@@ -83,10 +83,12 @@ Pick your system:
    sudo pacman -S base-devel cmake openssl pkgconf git curl
    ```
 
-2. Install Rust with [rustup](https://rustup.rs), then restart your terminal.
+2. Install Rust with [rustup](https://rustup.rs). Then restart your terminal, or load Rust into the one
+   you have open with the second line.
 
    ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+   . "$HOME/.cargo/env"
    ```
 
 3. Download and run Polyfarmer.
@@ -112,7 +114,7 @@ Pick your system:
    If it says `command not found`, do step 2.
 
 2. Install Apple's developer tools and Rust. If a pop-up window opens for the developer tools, let it
-   finish. Then close Terminal and open it again.
+   finish. Then close Terminal and open it again (or run `. "$HOME/.cargo/env"` to keep using this one).
 
    ```bash
    xcode-select --install

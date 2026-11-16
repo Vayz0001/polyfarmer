@@ -62,8 +62,8 @@
     --fg: #0b1210; --fg-2: #2c3631; --muted: #5a6560; --faint: #646d68;
     --accent: #3456e8; --accent-2: #2443c9; --accent-bg: rgba(52, 86, 232, .09); --accent-line: rgba(52, 86, 232, .4);
     --zone: rgba(52, 86, 232, .06);
-    --bid: #0b7a4b; --bid-bg: rgba(17, 144, 90, .11); --leaf-text: #11905a; --ask: #d23a4f; --ask-bg: rgba(210, 58, 79, .09);
-    --warn: #a86d0b; --warn-bg: rgba(168, 109, 11, .1); --side-a: #1f7fd1; --side-b: #8a4fd6;
+    --bid: #0b7a4b; --bid-bg: rgba(17, 144, 90, .11); --leaf-text: #11905a; --ask: #aa2f40; --ask-bg: rgba(210, 58, 79, .09);
+    --warn: #885809; --warn-bg: rgba(168, 109, 11, .1); --side-a: #1f7fd1; --side-b: #8a4fd6;
     --field: rgba(11, 18, 16, .16); --field-zone: rgba(52, 86, 232, .55);
     --glow: rgba(52, 86, 232, .13); --spot: rgba(52, 86, 232, .07);
     --shadow: 0 40px 100px -24px rgba(11, 18, 16, .22), 0 0 0 1px var(--line-2);
@@ -76,8 +76,8 @@
   --fg: #0b1210; --fg-2: #2c3631; --muted: #5a6560; --faint: #646d68;
   --accent: #3456e8; --accent-2: #2443c9; --accent-bg: rgba(52, 86, 232, .09); --accent-line: rgba(52, 86, 232, .4);
   --zone: rgba(52, 86, 232, .06);
-  --bid: #0b7a4b; --bid-bg: rgba(17, 144, 90, .11); --leaf-text: #11905a; --ask: #d23a4f; --ask-bg: rgba(210, 58, 79, .09);
-  --warn: #a86d0b; --warn-bg: rgba(168, 109, 11, .1); --side-a: #1f7fd1; --side-b: #8a4fd6;
+  --bid: #0b7a4b; --bid-bg: rgba(17, 144, 90, .11); --leaf-text: #11905a; --ask: #aa2f40; --ask-bg: rgba(210, 58, 79, .09);
+  --warn: #885809; --warn-bg: rgba(168, 109, 11, .1); --side-a: #1f7fd1; --side-b: #8a4fd6;
   --field: rgba(11, 18, 16, .16); --field-zone: rgba(52, 86, 232, .55);
   --glow: rgba(52, 86, 232, .13); --spot: rgba(52, 86, 232, .07);
   --shadow: 0 40px 100px -24px rgba(11, 18, 16, .22), 0 0 0 1px var(--line-2);
@@ -154,7 +154,10 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .nav a { color: var(--muted); font-size: 15px; font-weight: 500; }
 .nav a:hover { color: var(--fg); }
 .top .actions { display: flex; gap: 8px; }
-@media (max-width: 900px) { .nav { display: none; } .top .wrap { justify-content: space-between; } }
+/* Without the section nav, the header keeps one way to the install steps. */
+.top .install-btn { display: none; }
+@media (max-width: 900px) { .nav { display: none; } .top .wrap { justify-content: space-between; } .top .install-btn { display: inline-flex; } }
+@media (max-width: 420px) { .top .wrap { gap: 12px; } .top .actions .icon { display: none; } }
 
 /* ── hero ─────────────────────────────────────────────────────────────── */
 .hero { position: relative; padding-block: 72px 0; isolation: isolate; }
@@ -182,7 +185,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
   .hero h1 { font-stretch: 112%; font-size: 9.6vw; }
   .hero .field { top: 600px; height: 460px; }
 }
-.hero h1 .line { display: block; overflow: hidden; padding-bottom: .06em; margin-bottom: -.06em; }
+/* The mask is deep enough for descenders ("y", "p"); the negative margin
+   keeps the line spacing. */
+.hero h1 .line { display: block; overflow: hidden; padding-bottom: .16em; margin-bottom: -.16em; }
 .hero h1 .line > span { display: inline-block; }
 .hero h1 .leaf { color: var(--leaf-text); }
 .hero .below { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px; align-items: end; margin-top: 40px; }
@@ -209,6 +214,11 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .kpis { display: grid; grid-template-columns: 1fr 1fr; border-right: 1px solid var(--line); align-content: start; }
 @media (max-width: 900px) { .kpis { border-right: 0; border-bottom: 1px solid var(--line); } }
 .kpi { padding: 20px 22px; border-bottom: 1px solid var(--line); min-width: 0; }
+/* Label, value and note rows are shared across each pair of cells, so when a
+   label or a note wraps in one cell, the values in that row still line up. */
+@supports (grid-template-rows: subgrid) {
+  .kpi { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0; align-content: start; }
+}
 .kpi:nth-child(odd) { border-right: 1px solid var(--line); }
 .lbl { color: var(--faint); font: 600 11px/1 var(--sans); letter-spacing: .09em; text-transform: uppercase; }
 .kpi .v { margin-top: 12px; font: 600 28px/1 var(--mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
@@ -262,7 +272,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .gap.off { opacity: 0; }
 .gap.stretched { border-color: var(--warn); } .gap.stretched span { color: var(--warn); }
 .mid { display: flex; justify-content: space-between; align-items: center; height: 32px; margin: 5px 0; padding: 0 9px; border-block: 1px dashed var(--line-2); color: var(--muted); font: 12.5px/1 var(--mono); }
-.mid b { color: var(--fg); font-weight: 600; }
+/* Fixed width: "48.5¢" and "49¢" alternate as the spread changes. */
+.mid b { min-width: 5ch; text-align: center; color: var(--fg); font-weight: 600; }
 
 /* ── facts strip ──────────────────────────────────────────────────────── */
 /* Five equal cells, each word centred in its cell. Below 900px the cells
@@ -284,6 +295,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .block { padding-block: 150px 0; }
 .sec-head { max-width: 760px; }
 .sec-head h2 { margin-top: 20px; font-size: clamp(36px, 5.4vw, 72px); }
+/* A heading made of two short sentences breaks between them, not inside one. */
+.sec-head h2 .sent { display: inline-block; }
 .sec-head p { margin-top: 22px; color: var(--fg-2); font-size: clamp(17px, 1.6vw, 19px); max-width: 60ch; }
 @media (max-width: 640px) { .block { padding-block: 104px 0; } }
 
@@ -291,7 +304,7 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .story { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 72px; margin-top: 72px; }
 .story .pin { position: sticky; top: 104px; align-self: start; }
 .story .steps { list-style: none; margin: 0; padding: 0; }
-.story .step { position: relative; min-height: 56vh; display: flex; flex-direction: column; justify-content: center; gap: 14px; padding-block: 24px; padding-left: 26px; }
+.story .step { position: relative; min-height: 56vh; display: flex; flex-direction: column; justify-content: center; gap: 14px; padding-block: 24px; padding-left: 26px; cursor: pointer; }
 .story .step::before { content: ""; position: absolute; left: 0; top: 50%; height: 0; width: 2px; border-radius: 2px; background: var(--accent); translate: 0 -50%; transition: height .6s var(--ease); }
 .story .step.on::before { height: 70%; }
 .story .step h3 { color: var(--muted); transition: color .5s var(--ease); }
@@ -330,6 +343,11 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .dg-curve.dim { stroke: var(--accent-line); stroke-width: 1.5; stroke-dasharray: 4 5; }
 .dg-mid { stroke: var(--fg-2); stroke-width: 1.25; }
 .dg-txt { fill: var(--muted); font: 14px var(--mono); }
+/* SVG text scales with the chart: bigger user units on small screens keep
+   the labels around 11-13px on screen. */
+@media (max-width: 640px) { .dg-txt { font-size: 18px; } }
+@media (max-width: 480px) { .dg-txt { font-size: 22px; } .plot { padding: 24px 16px 18px; } }
+@media (max-width: 360px) { .dg-txt { font-size: 26px; } }
 .dg-txt.strong { fill: var(--fg); font-weight: 600; }
 .dg-txt.accent { fill: var(--accent-2); }
 .dg-bid { fill: var(--bid); }
@@ -393,7 +411,18 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .mini > div { background: var(--panel-2); padding: 14px 16px; min-width: 0; }
 .mini dt { color: var(--faint); font: 600 11px/1 var(--sans); letter-spacing: .09em; text-transform: uppercase; }
 .mini dd { margin: 10px 0 0; font: 600 18px/1 var(--mono); letter-spacing: -.02em; white-space: nowrap; }
-.mini dd span { color: var(--accent-2); font-size: 12px; }
+/* "Top 1%" sits under the rank: on one line it doesn't fit the narrow cells. */
+.mini dd span { display: block; margin-top: 6px; color: var(--accent-2); font-size: 12px; }
+/* When the card is too narrow for three columns (narrow phones, and the
+   bento's 5/12 column just above 960px), "YESTERDAY" and "$41.41" don't fit:
+   the stats become rows, label on the left and value on the right. */
+.stat { container-type: inline-size; }
+@container (max-width: 339px) {
+  .mini { grid-template-columns: minmax(0, 1fr); }
+  .mini > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 14px; }
+  .mini dd { margin: 0; text-align: right; }
+  .mini dd span { display: inline; margin: 0 0 0 6px; }
+}
 
 /* security */
 .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; margin-top: 56px; align-items: start; }
@@ -415,6 +444,7 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .tab { height: 38px; padding: 0 18px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 600 15px/1 var(--sans); cursor: pointer; white-space: nowrap; transition: color .2s, background .2s; }
 .tab:hover { color: var(--fg); }
 .tab[aria-selected="true"] { background: var(--panel-2); color: var(--fg); box-shadow: 0 0 0 1px var(--line-2); }
+.pane { display: grid; gap: 12px; }
 .code { border-radius: var(--r); background: var(--panel); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
 .code .label { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; padding: 0 10px 0 18px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 14px; }
 .code pre { margin: 0; padding: 18px; overflow-x: auto; font: 14px/1.8 var(--mono); color: var(--fg); }
@@ -449,7 +479,9 @@ footer .cols { display: flex; justify-content: space-between; align-items: cente
 footer .links { display: flex; gap: 4px 28px; flex-wrap: wrap; }
 footer .links a { display: inline-flex; align-items: center; min-height: 32px; color: var(--muted); } footer .links a:hover { color: var(--fg); }
 footer .links a.ico { justify-content: center; min-width: 32px; }
-footer .links .social { display: inline-flex; gap: 14px; }
+/* Each 18px icon is centred in a 32px hit area: pull the group out by the 7px
+   of padding so the icons' ink lines up with the content edges. */
+footer .links .social { display: inline-flex; gap: 14px; margin-inline: -7px; }
 footer .links a.ico svg { width: 18px; height: 18px; }
 .disclaimer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px 56px; margin-top: 32px; padding-top: 28px; border-top: 1px solid var(--line); color: var(--faint); font-size: 13.5px; line-height: 1.7; }
 .disclaimer p { text-wrap: pretty; }
@@ -470,7 +502,7 @@ footer .links a.ico svg { width: 18px; height: 18px; }
 /* privacy */
 .top .wrap > .btn:last-child { margin-left: auto; }
 .legal { padding-block: 72px 96px; }
-.legal .wrap, .legal-foot .wrap { max-width: 760px; }
+.legal .wrap, .legal-foot .wrap, .top.narrow .wrap { max-width: 760px; }
 .legal h1 { margin-top: 18px; font: 800 clamp(40px, 6vw, 64px)/.95 var(--display); font-stretch: 120%; letter-spacing: -.04em; }
 .legal .updated { margin-top: 14px; color: var(--muted); font: 13px/1.4 var(--mono); }
 .legal .intro { margin-top: 32px; color: var(--fg); font-size: 19px; line-height: 1.55; }
@@ -498,7 +530,7 @@ footer .links a.ico svg { width: 18px; height: 18px; }
   .hero h1 .line:nth-child(3) > span { animation-delay: .28s; }
   .hero h1 .line:nth-child(4) > span { animation-delay: .37s; }
   .d0 { --d: 0s; } .d1 { --d: .55s; } .d2 { --d: .65s; } .d3 { --d: .8s; }
-  @keyframes line-rush { from { transform: translate(-4%, 108%) skewX(-8deg); filter: blur(4px); } 60% { filter: blur(0); } to { transform: none; filter: none; } }
+  @keyframes line-rush { from { transform: translate(-4%, 120%) skewX(-8deg); filter: blur(4px); } 60% { filter: blur(0); } to { transform: none; filter: none; } }
   .rise { animation: rise 1s var(--ease) both; animation-delay: var(--d, .5s); }
   @keyframes rise { from { opacity: 0; translate: 0 16px; } to { opacity: 1; translate: 0 0; } }
   .stage.rise { animation-duration: 1.4s; }

@@ -8,7 +8,9 @@
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
 
   // ── header gets a backdrop once the page scrolls ─────────────────────
-  var top = document.getElementById("top");
+  // (Not id="top": with no such element, the logo's href="#top" scrolls to
+  // the top of the page; the sticky header itself is always "in view".)
+  var top = document.getElementById("site-header");
   if (top) {
     var onScroll = function () { top.classList.toggle("scrolled", window.scrollY > 12); };
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -29,19 +31,50 @@
     });
   }
 
-  // ── story: the step in the middle of the screen drives the window ────
+  // ── story: which step's scene the window plays ───────────────────────
+  // Wide screens: the window is pinned and the step in the middle of the
+  // screen drives it. Narrow screens: the window sits above the steps, so
+  // the steps can't be centred while it's visible; instead it cycles through
+  // the scenes while it's on screen (paused on hover or focus). Choosing a
+  // step, or tapping the window, takes manual control until it scrolls away.
   var steps = $$(".story .step");
+  var storyWin = document.querySelector(".story .window");
   if (steps.length && "IntersectionObserver" in window) {
-    var current = null;
+    var current = steps.filter(function (s) { return s.classList.contains("on"); })[0] || steps[0];
+    var narrow = window.matchMedia("(max-width: 960px)");
+    var show = function (step) {
+      if (!step || step === current) return;
+      current = step;
+      steps.forEach(function (s) { s.classList.toggle("on", s === step); });
+      document.dispatchEvent(new CustomEvent("pf:step", { detail: step.getAttribute("data-step") }));
+    };
     var stepIo = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (!e.isIntersecting || e.target === current) return;
-        current = e.target;
-        steps.forEach(function (s) { s.classList.toggle("on", s === current); });
-        document.dispatchEvent(new CustomEvent("pf:step", { detail: current.getAttribute("data-step") }));
-      });
+      if (narrow.matches) return;
+      entries.forEach(function (e) { if (e.isIntersecting) show(e.target); });
     }, { rootMargin: "-45% 0px -45% 0px" });
     steps.forEach(function (s) { stepIo.observe(s); });
+
+    var cycle = null, inView = false, hovered = false, held = false;
+    var syncCycle = function () {
+      var want = narrow.matches && !reduce && inView && !hovered && !held && !document.hidden;
+      if (want && cycle === null) cycle = setInterval(function () { show(steps[(steps.indexOf(current) + 1) % steps.length]); }, 6500);
+      if (!want && cycle !== null) { clearInterval(cycle); cycle = null; }
+    };
+    if (storyWin) {
+      new IntersectionObserver(function (e) {
+        inView = e[0].intersectionRatio >= 0.5;
+        if (!inView) held = false;
+        syncCycle();
+      }, { threshold: [0, 0.5, 1] }).observe(storyWin);
+      storyWin.addEventListener("pointerenter", function (e) { if (e.pointerType === "mouse") { hovered = true; syncCycle(); } });
+      storyWin.addEventListener("pointerleave", function (e) { if (e.pointerType === "mouse") { hovered = false; syncCycle(); } });
+      storyWin.addEventListener("focusin", function () { hovered = true; syncCycle(); });
+      storyWin.addEventListener("focusout", function () { hovered = false; syncCycle(); });
+      storyWin.addEventListener("click", function () { held = !held; syncCycle(); });
+    }
+    steps.forEach(function (s) { s.addEventListener("click", function () { held = true; syncCycle(); show(s); }); });
+    document.addEventListener("visibilitychange", syncCycle);
+    if (narrow.addEventListener) narrow.addEventListener("change", syncCycle);
   }
 
   // ── scoring explorer ─────────────────────────────────────────────────
@@ -52,6 +85,15 @@
     var one = document.getElementById("sc-one");
     var dot = document.getElementById("sc-bid"), drop = document.getElementById("sc-drop");
     var dot2 = document.getElementById("sc-bid2"), drop2 = document.getElementById("sc-drop2");
+    var yes = document.getElementById("sc-yes"), no = document.getElementById("sc-no");
+    // Near the chart's edges a label flips to the inner side of its dot so it
+    // stays inside the card.
+    var label = function (t, inward, outward) {
+      if (!t) return;
+      var side = inward ? outward * -1 : outward;
+      t.setAttribute("x", String(14 * side));
+      t.setAttribute("text-anchor", side < 0 ? "end" : "start");
+    };
     var sides = document.getElementById("sc-sides");
     var outDist = document.getElementById("sc-dist-out"), outScore = document.getElementById("sc-score");
     var outScoreNote = document.getElementById("sc-score-note");
@@ -70,6 +112,8 @@
       drop.setAttribute("y2", (210 - y).toFixed(1));
       dot2.style.transform = "translate(" + x2.toFixed(1) + "px, " + y.toFixed(1) + "px)";
       drop2.setAttribute("y2", (210 - y).toFixed(1));
+      label(yes, x < 60, -1);  // Yes normally sits left of its dot
+      label(no, x2 > 500, 1);  // No normally sits right of its dot
       dot2.classList.toggle("off", one.checked);
       sides.textContent = one.checked
         ? "Yes bid only: a third of the score, and nothing below 10¢ or above 90¢."
@@ -111,6 +155,9 @@
       });
       if (focus) tab.focus();
     }
+    // Every pane is visible without JavaScript; show only the selected one.
+    var initial = tabs.filter(function (t) { return t.getAttribute("aria-selected") === "true"; })[0] || tabs[0];
+    if (initial) select(initial, false);
     tabs.forEach(function (t, i) {
       t.addEventListener("click", function () { select(t, false); });
       t.addEventListener("keydown", function (e) {

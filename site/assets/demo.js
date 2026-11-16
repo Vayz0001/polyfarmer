@@ -92,6 +92,10 @@
   BookWidget.prototype.setMode = function (mode) {
     if (mode === this.mode) return;
     this.mode = mode; this.ticks = 0; this.thin = 0;
+    // With reduced motion there is no clock, so each scene is shown at its
+    // point in a single frame: the book has just moved, or thinned out.
+    if (reduce && mode === "follow") this.lastBest = this.bestBid - this.o.step;
+    if (reduce && mode === "guard") this.thin = 1;
     this.render();
   };
 
@@ -157,7 +161,9 @@
     var s = mid - you, w = pulled || !placed ? 0 : weight(s, o.zone);
     this.set("mid", cm(mid));
     this.set("spread", "spread " + c1(this.spread));
-    this.set("zone", "zone " + cm(mid - o.zone).slice(0, -1) + "–" + cm(mid + o.zone));
+    // The zone label names the first and last whole-cent levels inside the
+    // zone, the same rows the strict check above highlights.
+    this.set("zone", "zone " + (Math.floor(mid - o.zone + 1e-9) + 1) + "–" + (Math.ceil(mid + o.zone - 1e-9) - 1) + "¢");
     if (o.main) {
       this.set("weight", Math.round(w * 100) + "%");
       var bar = this.out("weight-bar"); if (bar) bar.style.width = (w * 100).toFixed(1) + "%";
@@ -210,7 +216,8 @@
     peg.animate([{ transform: old }, { transform: to }], { duration: SLIDE, delay: HOLD, easing: ease, fill: "backwards" });
     gap.animate([{ height: from * P + "px" }, { height: at * P + "px" }], { duration: SLIDE, delay: HOLD, easing: ease, fill: "backwards" });
     this.glow.animate(glow, { duration: 700, delay: HOLD + SLIDE - 120, easing: "ease-out", fill: "backwards" });
-    this.later = setTimeout(function () { self.later = null; self.gapLabel.textContent = c1(self.o.dist); gap.classList.remove("stretched"); }, HOLD + SLIDE / 2);
+    // The ease-out slide is mostly done a fifth of the way in: reset the label then.
+    this.later = setTimeout(function () { self.later = null; self.gapLabel.textContent = c1(self.o.dist); gap.classList.remove("stretched"); }, HOLD + SLIDE * 0.2);
   };
 
   BookWidget.prototype.note = function (placed, pulled, ahead, you, w) {
