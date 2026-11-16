@@ -8,7 +8,9 @@
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
 
   // ── header gets a backdrop once the page scrolls ─────────────────────
-  var top = document.getElementById("top");
+  // (Not id="top": with no such element, the logo's href="#top" scrolls to
+  // the top of the page; the sticky header itself is always "in view".)
+  var top = document.getElementById("site-header");
   if (top) {
     var onScroll = function () { top.classList.toggle("scrolled", window.scrollY > 12); };
     window.addEventListener("scroll", onScroll, { passive: true });

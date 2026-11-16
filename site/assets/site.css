@@ -471,7 +471,7 @@ footer .links a.ico svg { width: 18px; height: 18px; }
 /* privacy */
 .top .wrap > .btn:last-child { margin-left: auto; }
 .legal { padding-block: 72px 96px; }
-.legal .wrap, .legal-foot .wrap { max-width: 760px; }
+.legal .wrap, .legal-foot .wrap, .top.narrow .wrap { max-width: 760px; }
 .legal h1 { margin-top: 18px; font: 800 clamp(40px, 6vw, 64px)/.95 var(--display); font-stretch: 120%; letter-spacing: -.04em; }
 .legal .updated { margin-top: 14px; color: var(--muted); font: 13px/1.4 var(--mono); }
 .legal .intro { margin-top: 32px; color: var(--fg); font-size: 19px; line-height: 1.55; }

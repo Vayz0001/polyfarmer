@@ -7,7 +7,8 @@
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Privacy · Polyfarmer</title>
 <meta name="description" content="What the Polyfarmer website and software do with your data: no cookies, no analytics, no telemetry.">
-<meta name="theme-color" content="#07090c">
+<meta name="theme-color" content="#07090c" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f5f1" media="(prefers-color-scheme: light)">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preload" href="/assets/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
@@ -16,7 +17,9 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
-<header class="top">
+<!-- No script on this page: the header is always opaque ("scrolled") and
+     uses the article's narrower column so the logo lines up with the text. -->
+<header class="top scrolled narrow">
   <div class="wrap">
     <a class="brand" href="/" aria-label="Polyfarmer home"><img src="/assets/img/mark.svg" alt="" width="28" height="28">Polyfarmer</a>
     <a class="btn sm" href="/">Back to the homepage</a>
