@@ -46,12 +46,13 @@ pub(super) fn pct(w: Decimal) -> String {
     format!("{}%", (w * dec!(100)).round_dp(0))
 }
 
-/// "$1,234.56"-ish without thousands separators (tabular, compact).
+/// "$1,234.56"-ish without thousands separators (tabular, compact), rounded
+/// half away from zero (`{:.2}` on a Decimal truncates).
 pub(super) fn usd(v: Decimal) -> String {
     if v.abs() >= dec!(1000) {
         market_data::fmt_usd(v)
     } else {
-        format!("${v:.2}")
+        format!("${:.2}", v.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero))
     }
 }
 
@@ -93,6 +94,8 @@ pub struct LegRow {
     pub status_label: &'static str,
     /// "live" | "busy" | "idle" | "paused" | "expired"
     pub status_class: &'static str,
+    /// What the status means (hover text).
+    pub status_title: &'static str,
     /// Resting price (¢) when live.
     pub price: Option<String>,
     /// Current midpoint (¢) from the engine's live book.
@@ -281,6 +284,14 @@ fn leg_row(
             _ => ("Waiting", "idle", None),
         }
     };
+    let status_title = match status_label {
+        "Paused" => "Paused: no order. Resume to quote again.",
+        "Live" => "Your order is resting on the book.",
+        "Placing" => "Placing the order on Polymarket…",
+        "Cancelling" => "Cancelling the order: waiting for Polymarket to confirm it's gone.",
+        "Expired" => "Past its expiry: no order.",
+        _ => "No order right now: waiting until your depth and price conditions are met.",
+    };
     let (price, dmid, in_zone, raw_weight, is_scoring) = match (&live, mid) {
         (Some((oid, p)), Some(m)) => {
             let w = max_spread.map(|v| market_data::score_weight(m, *p, v));
@@ -302,6 +313,7 @@ fn leg_row(
         side_class: if slot == 0 { "a" } else { "b" },
         status_label,
         status_class,
+        status_title,
         price,
         mid: mid.map(cents),
         dmid,
@@ -310,8 +322,10 @@ fn leg_row(
         weight: raw_weight.map(pct),
         weight_note: String::new(),
         scoring: is_scoring,
-        peg: format!("{}¢ below bid", cents(c.distance)),
-        size: format!("${}", c.order_size.normalize()),
+        // A no-break space keeps "below bid" together, so a narrow column
+        // wraps as "1.0¢ / below bid" rather than three lines.
+        peg: format!("{}¢ below\u{a0}bid", cents(c.distance)),
+        size: usd(c.order_size),
         shares: shares_label(c, live.as_ref().map(|(_, p)| *p), top.and_then(|(b, _)| *b)),
         min_depth: if c.min_depth_between > dec!(0) { usd(c.min_depth_between) } else { "—".to_string() },
         expires: until(c.expires_at),
@@ -702,5 +716,13 @@ mod tests {
     fn slug_is_last_segment() {
         assert_eq!(slug_of("https://polymarket.com/event/ev/mk"), "mk");
         assert_eq!(slug_of("https://polymarket.com/event/mk/"), "mk");
+    }
+
+    #[test]
+    fn usd_rounds_to_cents_and_compacts_thousands() {
+        assert_eq!(usd(dec!(150)), "$150.00", "Size and Min depth share one style");
+        assert_eq!(usd(dec!(2.675)), "$2.68", "half away from zero, not truncated");
+        assert_eq!(usd(dec!(0.004)), "$0.00");
+        assert_eq!(usd(dec!(1500)), "$1.5k");
     }
 }

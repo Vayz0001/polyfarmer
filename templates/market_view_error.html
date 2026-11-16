@@ -4,6 +4,10 @@
 <a class="crumb" href="/markets"><svg class="i sm"><use href="#i-back"/></svg>Markets</a>
 <div class="stack" style="max-width:640px">
   <div class="alert err"><svg class="i"><use href="#i-warn"/></svg>{{ message }}</div>
-  <p class="muted">Try <a href="/markets/browse">browsing reward-eligible markets</a> or pasting the URL again.</p>
+  <form class="url-form" action="/markets/resolve" method="get">
+    <input class="input" type="text" name="url" placeholder="Paste a Polymarket URL…" aria-label="Polymarket market or event link" required />
+    <button class="btn" type="submit">Open link</button>
+  </form>
+  <p class="muted">Or <a href="/markets/browse">find reward-eligible markets</a>.</p>
 </div>
 {% endblock %}

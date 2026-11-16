@@ -12,7 +12,7 @@
       <span class="k">{{ leg.label }}</span>
       <span class="v">
         {{ leg.status }}{% match leg.scoring %}{% when Some(true) %} <span class="check">✓</span>{% when Some(false) %} <span class="cross">✗</span>{% when None %}{% endmatch %}
-        <button class="btn ghost icon" title="Edit leg" hx-get="/markets/{{ leg.id }}/edit" hx-target="#pf-drawer"><svg class="i sm"><use href="#i-edit"/></svg></button>
+        <button class="btn ghost icon" id="pos-{{ leg.id }}-edit" title="Edit leg" hx-get="/markets/{{ leg.id }}/edit" hx-target="#pf-drawer"><svg class="i sm"><use href="#i-edit"/></svg></button>
       </span>
     </div>
     {% endfor %}

@@ -1210,6 +1210,16 @@ fn parse_end_date(s: &str) -> Option<chrono::DateTime<Utc>> {
         .map(|d| d.with_timezone(&Utc))
 }
 
+/// Time left on a listed market; one past its end date (still listed while
+/// its rewards run) reads "ended" rather than "expired", which on this app
+/// means one of your legs stopped quoting.
+fn browse_ends(t: chrono::DateTime<Utc>) -> String {
+    match until(t) {
+        s if s == "expired" => "ended".to_string(),
+        s => s,
+    }
+}
+
 fn to_browse_row(m: markets_browse::RewardsMultiMarket, tracked: &[String]) -> BrowseRow {
     let daily_pool: Decimal = m.rewards_config.iter().map(|c| c.rate_per_day).sum();
     let qualifies_now = m.spread <= m.rewards_max_spread;
@@ -1226,7 +1236,7 @@ fn to_browse_row(m: markets_browse::RewardsMultiMarket, tracked: &[String]) -> B
         spread_now: format!("{:.1}¢", m.spread * dec!(100)),
         qualifies_now,
         volume_24hr: m.volume_24hr.map(market_data::fmt_usd).unwrap_or_else(|| "—".to_string()),
-        ends: m.end_date.as_deref().and_then(parse_end_date).map(until).unwrap_or_else(|| "—".to_string()),
+        ends: m.end_date.as_deref().and_then(parse_end_date).map(browse_ends).unwrap_or_else(|| "—".to_string()),
         outcomes,
         prices_cents,
         needs_two_sided: !market_data::single_sided_allowed(first_price),
@@ -1924,5 +1934,11 @@ mod tests {
         // Scheme-less with trailing slash is normalised.
         let with_slash = sanitize_market_url("polymarket.com/event/x/").unwrap();
         assert_eq!(with_slash, "https://polymarket.com/event/x/");
+    }
+
+    #[test]
+    fn browse_says_ended_for_listed_markets_past_their_end_date() {
+        assert_eq!(browse_ends(Utc::now() - chrono::Duration::hours(1)), "ended");
+        assert_eq!(browse_ends(Utc::now() + chrono::Duration::days(3) + chrono::Duration::minutes(5)), "3d 0h");
     }
 }

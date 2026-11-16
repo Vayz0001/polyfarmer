@@ -382,7 +382,7 @@ async fn markets_table_shows_min_depth_in_usd_and_real_status() {
     let body = body_string(res).await;
     assert!(body.contains("Will the test pass?"));
     assert!(body.contains("$500.00"), "min depth shown in USD");
-    assert!(body.contains("2.0¢ below bid"), "peg shown");
+    assert!(body.contains("2.0¢ below\u{a0}bid"), "peg shown");
     assert!(body.contains(">Paused<"), "paused leg");
 
     // Engine never started → the status strip must not claim it's running.
@@ -1111,7 +1111,7 @@ async fn edit_rejects_hostile_values_and_leaves_the_config_untouched() {
     }
     // None of the rejected edits changed the saved leg (still $100, 2¢, $500 depth).
     let (_, table, _) = get_authed(&app, &cookie, "/markets/table").await;
-    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below bid"), "{table}");
+    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below\u{a0}bid"), "{table}");
 }
 
 #[tokio::test]
@@ -1382,5 +1382,41 @@ async fn a_rejected_edit_keeps_what_was_typed() {
 
     // Nothing was saved by either rejected edit.
     let (_, table, _) = get_authed(&app, &cookie, "/markets/table").await;
-    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below bid"), "{table}");
+    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below\u{a0}bid"), "{table}");
+}
+
+/// Markup the dashboard's keyboard and refresh behaviour relies on: stable
+/// ids on every row control (htmx restores focus by id after the 5s
+/// refresh), the dialog's action label, the pinned actions column, one name
+/// for the market finder, and a paste box on the link-error page.
+#[tokio::test]
+async fn markets_markup_supports_focus_restore_and_clear_names() {
+    let (app, pw) = test_app_with_market();
+    let cookie = login(&app, &pw).await;
+
+    let (status, table, _) = get_authed(&app, &cookie, "/markets/table").await;
+    assert_eq!(status, StatusCode::OK);
+    for id in ["leg-mar_test_leg-toggle", "leg-mar_test_leg-edit", "leg-mar_test_leg-remove", "markets-score-tip"] {
+        assert_eq!(table.matches(&format!("id=\"{id}\"")).count(), 1, "exactly one #{id}");
+    }
+    assert!(table.contains("id=\"mkt-0xabc-name\"") && table.contains("id=\"mkt-0xabc-ext\""));
+    assert!(table.contains("data-confirm-label=\"Remove\""), "the dialog names the action");
+    assert_eq!(table.matches("class=\"actions-col\"").count(), 2, "header + one row");
+    assert!(table.contains("title=\"Paused: no order. Resume to quote again.\""), "status explained on hover");
+
+    let (_, page, _) = get_authed(&app, &cookie, "/markets").await;
+    assert!(page.contains("Find markets") && page.contains(">Open link</button>"));
+    assert!(!page.contains("Add market"));
+    assert!(page.contains("id=\"markets-panel\" tabindex=\"-1\""), "focus can wait on the panel after a Remove");
+
+    let (_, browse, _) = get_authed(&app, &cookie, "/markets/browse").await;
+    assert!(browse.contains("<h1>Find markets</h1>"));
+
+    // A link that can't be opened leads back to a paste box, not a dead end.
+    let (status, err, _) = get_authed(&app, &cookie, &format!("/markets/view?slug={}", "x".repeat(300))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(err.contains("action=\"/markets/resolve\"") && err.contains("name=\"url\""), "{err}");
+
+    // The drawer starts inert (no Tab stops or Enter-submit while closed).
+    assert!(page.contains("<aside id=\"pf-drawer\" class=\"drawer\" aria-hidden=\"true\" inert></aside>"));
 }

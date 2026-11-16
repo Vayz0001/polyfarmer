@@ -9,9 +9,9 @@
     {% for row in rows %}
     <tr>
       <td class="mkt"><div class="mkt-title">{% if row.slug.is_empty() %}<span class="name" title="{{ row.label }}">{{ row.label }}</span>{% else %}<a class="name" href="/markets/view?slug={{ row.slug }}" title="{{ row.label }}">{{ row.label }}</a>{% endif %}</div></td>
-      <td>{% if row.status == "farming" %}<span class="pill live">farming</span>{% else if row.status == "paused" %}<span class="pill paused">paused</span>{% else if row.status == "removed" %}<span class="pill">removed</span>{% else %}<span class="pill">waiting</span>{% endif %}</td>
+      <td>{% if row.status == "farming" %}<span class="pill live" title="At least one of your orders is resting on the book">Farming</span>{% else if row.status == "placing" %}<span class="pill busy" title="An order is being placed or cancelled on Polymarket">Placing</span>{% else if row.status == "paused" %}<span class="pill paused" title="Paused in Markets: no order">Paused</span>{% else if row.status == "expired" %}<span class="pill expired" title="Past its expiry: no order">Expired</span>{% else if row.status == "removed" %}<span class="pill" title="No longer in your Markets list">Removed</span>{% else %}<span class="pill" title="No order right now: waiting until your depth and price conditions are met">Waiting</span>{% endif %}</td>
       <td class="num"><b>{{ row.share }}</b></td>
-      <td class="num pos">{{ row.earned_today }}</td>
+      <td class="num pos" title="{{ row.earned_exact }}">{{ row.earned_today }}</td>
       <td class="num muted">{{ row.pool_per_day }}</td>
     </tr>
     {% endfor %}

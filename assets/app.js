@@ -14,19 +14,23 @@
   function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
   function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
   function num(v) { var n = parseFloat(v); return isFinite(n) ? n : NaN; }
-  function relTime(iso) {
+  // Older than a week: the date, and (where there's room) the time of day,
+  // which the day headings above a feed don't give.
+  function relTime(iso, withTime) {
     var t = new Date(iso).getTime(); if (isNaN(t)) return "";
     var s = Math.max(0, (Date.now() - t) / 1000);
     if (s < 45) return "just now";
     if (s < 3600) return Math.floor(s / 60) + "m ago";
     if (s < 86400) return Math.floor(s / 3600) + "h ago";
     if (s < 86400 * 7) return Math.floor(s / 86400) + "d ago";
-    return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    var opts = { month: "short", day: "numeric" };
+    if (withTime) { opts.hour = "numeric"; opts.minute = "2-digit"; }
+    return new Date(t).toLocaleString(undefined, opts);
   }
   PF.relTime = function (root) {
     $$(".feed-time[data-ts]", root).forEach(function (el) {
       var iso = el.getAttribute("data-ts");
-      el.textContent = relTime(iso);
+      el.textContent = relTime(iso, !el.closest(".tbl"));   // table Time columns stay compact
       el.title = new Date(iso).toLocaleString();
     });
   };
@@ -197,13 +201,18 @@
   // ── confirm modal (replaces window.confirm for hx-confirm) ─────────────
   function initModal() {
     var m = $("#pf-modal"); if (!m) return;
-    var pending = null;
-    function close() { m.hidden = true; pending = null; }
+    var pending = null, ok = $("#pf-modal-ok");
+    // Back to the button that opened it (it's still on the page: swaps of its
+    // panel are held while the dialog is open).
+    function close() { var back = pending && pending.elt; m.hidden = true; pending = null; if (back && back.isConnected) back.focus(); }
     document.addEventListener("htmx:confirm", function (e) {
       if (!e.detail.question) return;
       e.preventDefault();
       $("#pf-modal-q").textContent = e.detail.question;
-      pending = e.detail; m.hidden = false; $("#pf-modal-ok").focus();
+      // The action's own name ("Remove") on the button; Cancel has focus, so
+      // Enter or Space never confirms by accident.
+      ok.textContent = (e.detail.elt && e.detail.elt.getAttribute("data-confirm-label")) || "Confirm";
+      pending = e.detail; m.hidden = false; $("#pf-modal-cancel").focus();
     });
     // While the dialog is open, don't let a background refresh replace the
     // panel holding the clicked button: htmx silently drops a request whose
@@ -211,19 +220,68 @@
     document.body.addEventListener("htmx:beforeSwap", function (e) {
       if (pending && e.detail.target && e.detail.target.contains(pending.elt)) e.detail.shouldSwap = false;
     });
-    $("#pf-modal-ok").onclick = function () { if (pending) { var d = pending; close(); d.issueRequest(true); } };
+    ok.onclick = function () {
+      if (!pending) return;
+      var d = pending; pending = null; m.hidden = true;
+      // The row may disappear with the response: park focus on its panel.
+      var home = d.elt && d.elt.closest("[tabindex='-1']");
+      if (home) home.focus({ preventScroll: true });
+      d.issueRequest(true);
+    };
     $("#pf-modal-cancel").onclick = close;
     m.addEventListener("click", function (e) { if (e.target === m) close(); });
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !m.hidden) close(); });
+    document.addEventListener("keydown", function (e) {
+      if (m.hidden) return;
+      if (e.key === "Escape") { close(); return; }
+      if (e.key === "Tab") trapTab(e, m);
+    });
+  }
+
+  // Keep Tab / Shift+Tab inside an open dialog or drawer.
+  function trapTab(e, box) {
+    var f = $$("a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])", box)
+      .filter(function (el) { return el.offsetParent !== null; });
+    if (!f.length) { e.preventDefault(); return; }
+    var first = f[0], last = f[f.length - 1];
+    if (!box.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }
 
   // ── drawer (edit leg) ───────────────────────────────────────────────────
-  function drawerOpen() { var d = $("#pf-drawer"); $("#pf-drawer-scrim").hidden = false; d.setAttribute("aria-hidden", "false"); requestAnimationFrame(function () { d.classList.add("open"); }); var f = $("input:not([type=hidden])", d); if (f) f.focus(); }
-  function drawerClose() { var d = $("#pf-drawer"); if (!d) return; d.classList.remove("open"); d.setAttribute("aria-hidden", "true"); $("#pf-drawer-scrim").hidden = true; }
+  // The closed drawer is inert (no Tab stops, no Enter-submit of its hidden
+  // form). Opening focuses its first field once it's visible; every way of
+  // closing it returns focus to the button that opened it (found by id, as
+  // the table may have refreshed meanwhile).
+  var drawerOpener = null;
+  function drawerIsOpen() { var d = $("#pf-drawer"); return !!d && d.classList.contains("open"); }
+  function drawerOpen() {
+    var d = $("#pf-drawer"); $("#pf-drawer-scrim").hidden = false;
+    d.removeAttribute("inert"); d.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(function () {
+      d.classList.add("open");
+      var f = $("input:not([type=hidden])", d); if (f) f.focus({ preventScroll: true });
+    });
+  }
+  function drawerClose() {
+    var d = $("#pf-drawer"); if (!d || !drawerIsOpen()) return;
+    d.classList.remove("open"); d.setAttribute("aria-hidden", "true"); d.setAttribute("inert", "");
+    $("#pf-drawer-scrim").hidden = true;
+    var back = drawerOpener && document.getElementById(drawerOpener); drawerOpener = null;
+    if (back) back.focus();
+  }
   function initDrawer() {
     if (!$("#pf-drawer")) return;
     $("#pf-drawer-scrim").addEventListener("click", drawerClose);
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape") drawerClose(); });
+    document.addEventListener("keydown", function (e) {
+      var modal = $("#pf-modal");
+      if (!drawerIsOpen() || (modal && !modal.hidden)) return;   // the dialog handles its own keys
+      if (e.key === "Escape") drawerClose();
+      else if (e.key === "Tab") trapTab(e, $("#pf-drawer"));
+    });
+    document.body.addEventListener("htmx:beforeRequest", function (e) {
+      if (e.detail.target && e.detail.target.id === "pf-drawer" && e.detail.elt && e.detail.elt.id && !$("#pf-drawer").contains(e.detail.elt)) drawerOpener = e.detail.elt.id;
+    });
     document.body.addEventListener("htmx:afterSwap", function (e) { if (e.target.id === "pf-drawer" && e.target.innerHTML.trim()) drawerOpen(); });
     // Errors from a row action (server sends HX-Trigger: {"pf-error": "…"}). A
     // toast, because the panel's own banner is replaced by the next refresh.
@@ -237,16 +295,76 @@
     });
   }
 
+  // ── refreshes keep your place ───────────────────────────────────────────
+  // Live fragments (the Markets table every 5s, the Overview book every 10s)
+  // are replaced wholesale. Focus survives because every control in them has
+  // a stable id (htmx restores focus by id); the sideways scroll of their
+  // tables is carried across the swap here.
+  var keptScroll = null;
+  document.addEventListener("htmx:beforeSwap", function (e) {
+    var t = e.detail.target; keptScroll = null;
+    if (!t) return;
+    var wraps = $$(".tbl-wrap", t);
+    if (wraps.some(function (w) { return w.scrollLeft > 0; })) keptScroll = { target: t, left: wraps.map(function (w) { return w.scrollLeft; }) };
+  });
+  document.addEventListener("htmx:afterSwap", function (e) {
+    if (!keptScroll || keptScroll.target !== e.detail.target) return;
+    var left = keptScroll.left; keptScroll = null;
+    $$(".tbl-wrap", e.detail.target).forEach(function (w, i) { if (left[i]) w.scrollLeft = left[i]; });
+  });
+
+  // ── "Added to your markets" after Start farming ─────────────────────────
+  // The start request answers with a redirect to Markets; note the market in
+  // sessionStorage and say so on the next page. (No handler change: this only
+  // reads the response the form already gets.)
+  document.addEventListener("htmx:afterRequest", function (e) {
+    var d = e.detail;
+    // (htmx follows HX-Redirect before it sets d.successful, so check the status.)
+    if (!d || !d.elt || d.elt.id !== "order-form" || !d.xhr || d.xhr.status < 200 || d.xhr.status >= 300 || !d.xhr.getResponseHeader("HX-Redirect")) return;
+    var h = $(".mv-head h1");
+    try { sessionStorage.setItem("pf-started", ((h && h.textContent) || "").trim().slice(0, 200)); } catch (_) {}
+  });
+  function startedToast() {
+    var q = null;
+    try { q = sessionStorage.getItem("pf-started"); sessionStorage.removeItem("pf-started"); } catch (_) {}
+    if (q !== null) toast("Added to your markets", q, "info", 8000);
+  }
+
+  // ── picker: markets without rewards are tucked away ────────────────────
+  function setPickerDim(hide) {
+    var b = $('[data-action="picker-toggle"]'); if (!b) return;
+    $$("#picker-table tr.dim").forEach(function (r) { r.hidden = hide; });
+    b.dataset.shown = hide ? "" : "1";
+    b.textContent = (hide ? "Show " : "Hide ") + b.dataset.n + " markets without rewards";
+  }
+  function initPicker() { var more = $(".picker-more"); if (!more) return; more.hidden = false; setPickerDim(true); }
+
   // ── activity filters ────────────────────────────────────────────────────
   var actLevel = "all", actCat = "all";
   function applyActivityFilter() {
     var feed = $("#activity-feed"); if (!feed) return;
-    $$(".feed-row", feed).forEach(function (r) {
+    var rows = $$(".feed-row", feed), shown = 0;
+    rows.forEach(function (r) {
       var lv = r.dataset.level;
       var okLevel = actLevel === "all" || (actLevel === "warn" ? lv === "warn" || lv === "error" : lv === actLevel);
       var okCat = actCat === "all" || r.dataset.cat === actCat;
       r.hidden = !(okLevel && okCat);
+      if (!r.hidden) shown++;
     });
+    // A day heading shows only while one of its rows does.
+    $$(".feed-day", feed).forEach(function (d) {
+      var any = false;
+      for (var n = d.nextElementSibling; n && !n.classList.contains("feed-day"); n = n.nextElementSibling) {
+        if (n.classList.contains("feed-row") && !n.hidden) { any = true; break; }
+      }
+      d.hidden = !any;
+    });
+    // Its own class: prependFeeds removes .feed-empty when live rows arrive.
+    var none = $(".feed-nomatch", feed);
+    if (rows.length && !shown) {
+      if (!none) { none = document.createElement("div"); none.className = "feed-nomatch"; none.textContent = "No activity matches this filter."; feed.appendChild(none); }
+      none.hidden = false;
+    } else if (none) none.hidden = true;
   }
 
   // ── settings: private-key check (client-only, instant) ─────────────────
@@ -357,23 +475,31 @@
       var shares = perUsd / p;
       var meets = shares >= MV.minShares;
       var w = weight(b.mid, p), thisW = meets ? w : 0, otherW = null;
-      if (!meets) reasons.push("needs ≥ " + MV.minShares + " shares per side (have " + Math.floor(shares) + ")");
+      // The other leg's price (Both sides): same distance below its own best bid.
+      var op = both() && b.bb > 0 && b.ba > 0 ? (1 - b.ba) - (b.bb - p) : 0;
+      if (!meets) {
+        // What it would take: the minimum in shares at the dearer leg's price.
+        var needPer = MV.minShares * Math.max(p, op > 0 ? op : 0);
+        reasons.push("needs ≥ " + MV.minShares + " shares per side (have " + Math.floor(shares) + "): about $" + Math.ceil(needPer * (both() ? 2 : 1)) + " in total");
+      }
       if (w === 0) reasons.push(p >= b.mid ? "at or above the midpoint" : "outside the reward zone (±" + MV.maxSpread + "¢)");
       if (b.bb > 0 && p >= b.bb) reasons.push("must sit below the best bid (" + (b.bb * 100).toFixed(1) + "¢)");
       if (both()) {
         if (b.bb > 0 && b.ba > 0) {
-          var op = (1 - b.ba) - (b.bb - p), om = 1 - b.mid, osh = op > 0 ? perUsd / op : 0;
+          var om = 1 - b.mid, osh = op > 0 ? perUsd / op : 0;
           otherW = op > 0 && osh >= MV.minShares ? weight(om, op) : 0;
           if (otherW === 0) reasons.push("other leg (" + (op * 100).toFixed(1) + "¢) doesn't score");
         } else otherW = 0;
       }
       eff = effective(b.mid, thisW, otherW);
-      if (!both()) reasons.push(singleOk(b.mid) ? "one-sided scores ÷3 — Both sides for full weight" : "one-sided earns 0 while mid is under 10¢ / over 90¢");
+      // (The "one side scores a third" note is in the preview below; only the
+      // case that explains a 0% is repeated here.)
+      if (!both() && !singleOk(b.mid)) reasons.push("one-sided earns 0 while mid is under 10¢ / over 90¢");
       var tone = eff >= 0.4 ? "ok" : eff > 0 ? "warn" : "bad";
       box.className = "score " + tone;
       val.textContent = pct(eff);
       bar.style.width = Math.min(100, eff * 100) + "%";
-      why.textContent = reasons.length ? reasons.join(" · ") : "Inside the zone, two-sided, above the size minimum.";
+      why.textContent = reasons.length ? reasons.join(" · ") : both() ? "Inside the zone, two-sided, above the size minimum." : "Inside the zone and above the size minimum.";
     }
     // peg hint
     var hint = $("#peg-hint");
@@ -476,6 +602,7 @@
         $$('[data-action="filter"][data-kind="' + kind + '"]').forEach(function (c) { c.classList.toggle("selected", c === el); });
         applyActivityFilter(); break;
       }
+      case "picker-toggle": setPickerDim(!!el.dataset.shown); break;
       case "tab": $$("button", el.parentElement).forEach(function (b) { b.classList.toggle("selected", b === el); }); break;
       case "side": if (MV) mvSelectSide(parseInt(el.dataset.side, 10)); break;
       case "mode": if (MV) mvSetMode(el.dataset.mode); break;
@@ -546,6 +673,8 @@
     connectEvents();
     mvInit();
     syncExpiry();
+    initPicker();
+    startedToast();
     PF.relTime();
     PF.localTimes();
     setInterval(function () { PF.relTime(); }, 30000);
