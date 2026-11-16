@@ -19,7 +19,7 @@ use polymarket_client_sdk_v2::clob::types::request::{MidpointRequest, OrderBookS
 use polymarket_client_sdk_v2::clob::types::Interval;
 use polymarket_client_sdk_v2::clob::{Client, Config as ClobConfig};
 use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 
 use crate::engine::orderbook::TokenBook;
@@ -507,13 +507,19 @@ fn fmt_shares(s: Decimal) -> String {
     }
 }
 
+/// Compact dollars: "$999", "$1.5k", "$2.3M", rounded half away from zero
+/// (`{:.N}` on a Decimal truncates). A positive amount under a dollar shows as
+/// "<$1" rather than "$0".
 pub fn fmt_usd(v: Decimal) -> String {
-    if v >= dec!(1000000) {
-        format!("${:.1}M", v / dec!(1000000))
-    } else if v >= dec!(1000) {
-        format!("${:.1}k", v / dec!(1000))
+    let round = |x: Decimal, dp: u32| x.round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero);
+    if v >= dec!(999950) {
+        format!("${:.1}M", round(v / dec!(1000000), 1))
+    } else if v >= dec!(999.5) {
+        format!("${:.1}k", round(v / dec!(1000), 1))
+    } else if v > Decimal::ZERO && v < Decimal::ONE {
+        "<$1".to_string()
     } else {
-        format!("${:.0}", v)
+        format!("${:.0}", round(v, 0))
     }
 }
 
@@ -790,5 +796,21 @@ mod tests {
         assert_eq!(l.bids[0].total_usd, "$40");
         assert_eq!(l.bids[1].total_usd, "$59");
         assert_eq!(l.bids[1].total, "150");
+    }
+
+    #[test]
+    fn fmt_usd_rounds_and_never_shows_zero_for_dust() {
+        assert_eq!(fmt_usd(dec!(0)), "$0");
+        assert_eq!(fmt_usd(dec!(0.4)), "<$1", "a tiny level isn't $0");
+        assert_eq!(fmt_usd(dec!(0.99)), "<$1");
+        assert_eq!(fmt_usd(dec!(1)), "$1");
+        assert_eq!(fmt_usd(dec!(1.5)), "$2", "half away from zero");
+        assert_eq!(fmt_usd(dec!(999.4)), "$999");
+        assert_eq!(fmt_usd(dec!(999.5)), "$1.0k", "never \"$1000\"");
+        assert_eq!(fmt_usd(dec!(1549)), "$1.5k");
+        assert_eq!(fmt_usd(dec!(1550)), "$1.6k", "rounded, not truncated");
+        assert_eq!(fmt_usd(dec!(999949)), "$999.9k");
+        assert_eq!(fmt_usd(dec!(999950)), "$1.0M", "never \"$1000.0k\"");
+        assert_eq!(fmt_usd(dec!(2345678)), "$2.3M");
     }
 }

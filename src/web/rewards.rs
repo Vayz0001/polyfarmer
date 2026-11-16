@@ -179,8 +179,26 @@ fn thousands(n: u64) -> String {
     out
 }
 
+/// Dollars and cents, rounded half away from zero (`{:.2}` on a Decimal
+/// truncates). Used everywhere on the Rewards page.
 fn money(v: Decimal) -> String {
-    format!("${v:.2}")
+    format!("${:.2}", v.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero))
+}
+
+/// [`money`] for per-market and per-day amounts, which can be fractions of a
+/// cent: a positive amount that would show as "$0.00" shows as "<$0.01".
+/// The exact value goes in the cell's title ([`money_exact`]).
+fn money_fine(v: Decimal) -> String {
+    if v > Decimal::ZERO && v < dec!(0.005) {
+        "<$0.01".to_string()
+    } else {
+        money(v)
+    }
+}
+
+/// The unrounded amount, for a hover title: "$1.8312".
+fn money_exact(v: Decimal) -> String {
+    format!("${}", v.normalize())
 }
 
 /// A UTC moment shown as "07:00 (00:00 UTC)" in the viewer's own time zone.
@@ -352,6 +370,7 @@ pub struct PayoutRow {
     pub day: String,
     pub paid_at: LocalTime,
     pub amount: String,
+    pub amount_exact: String,
 }
 
 #[derive(Template)]
@@ -386,7 +405,8 @@ pub async fn history(State(state): State<WebState>) -> Html<String> {
             .map(|d| PayoutRow {
                 day: d.earned_day.format("%a %b %-d, %Y").to_string(),
                 paid_at: LocalTime::new(d.paid_at, true),
-                amount: format!("${:.4}", d.amount),
+                amount: money_fine(d.amount),
+                amount_exact: money_exact(d.amount),
             })
             .collect(),
     })
@@ -401,6 +421,7 @@ pub struct RewardRow {
     pub status: &'static str,
     pub share: String,
     pub earned_today: String,
+    pub earned_exact: String,
     pub pool_per_day: String,
     earned: Decimal,
     share_pct: Decimal,
@@ -485,7 +506,8 @@ fn build_table(
                 slug: e.market_slug.clone(),
                 status,
                 share: format!("{:.2}%", e.earning_percentage),
-                earned_today: format!("${paid:.4}"),
+                earned_today: money_fine(paid),
+                earned_exact: money_exact(paid),
                 pool_per_day: if pool > Decimal::ZERO { format!("${:.0}/day", pool) } else { "—".into() },
                 earned: paid,
                 share_pct: e.earning_percentage,
@@ -506,7 +528,8 @@ fn build_table(
             slug: slug_of(&c.url),
             status: status_of(&c.condition_id),
             share: "0.00%".into(),
-            earned_today: "$0.0000".into(),
+            earned_today: money_fine(Decimal::ZERO),
+            earned_exact: money_exact(Decimal::ZERO),
             pool_per_day: "—".into(),
             earned: Decimal::ZERO,
             share_pct: Decimal::ZERO,
@@ -575,10 +598,7 @@ mod tests {
 
         let rows = build_table(&entries, &configs, &status);
         let got: Vec<(&str, &str)> = rows.iter().map(|r| (r.status, r.earned_today.as_str())).collect();
-        assert_eq!(
-            got,
-            vec![("paused", "$0.4000"), ("farming", "$0.1000"), ("removed", "$0.0500"), ("waiting", "$0.0000")]
-        );
+        assert_eq!(got, vec![("paused", "$0.40"), ("farming", "$0.10"), ("removed", "$0.05"), ("waiting", "$0.00")]);
         assert_eq!(rows[3].slug, "farmed-market");
     }
 
@@ -603,5 +623,19 @@ mod tests {
         assert_eq!(earned(&entries[0]), dec!(0.30));
         assert_eq!(total_earned(&entries), dec!(1.40));
         assert_eq!(total_earned(&[]), Decimal::ZERO);
+    }
+
+    #[test]
+    fn money_is_two_decimals_rounded_with_dust_and_exact_titles() {
+        assert_eq!(money(dec!(0)), "$0.00");
+        assert_eq!(money(dec!(1.8312)), "$1.83");
+        assert_eq!(money(dec!(1.835)), "$1.84", "half away from zero, not truncated");
+        assert_eq!(money(dec!(12.345)), "$12.35");
+        assert_eq!(money_fine(dec!(0)), "$0.00");
+        assert_eq!(money_fine(dec!(0.004)), "<$0.01", "non-zero never shows as $0.00");
+        assert_eq!(money_fine(dec!(0.005)), "$0.01");
+        assert_eq!(money_fine(dec!(0.4999)), "$0.50");
+        assert_eq!(money_exact(dec!(1.83120)), "$1.8312");
+        assert_eq!(money_exact(dec!(0)), "$0");
     }
 }
