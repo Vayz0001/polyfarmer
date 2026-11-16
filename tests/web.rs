@@ -382,7 +382,7 @@ async fn markets_table_shows_min_depth_in_usd_and_real_status() {
     let body = body_string(res).await;
     assert!(body.contains("Will the test pass?"));
     assert!(body.contains("$500.00"), "min depth shown in USD");
-    assert!(body.contains("2.0¢ below bid"), "peg shown");
+    assert!(body.contains("2.0¢ below\u{a0}bid"), "peg shown");
     assert!(body.contains(">Paused<"), "paused leg");
 
     // Engine never started → the status strip must not claim it's running.
@@ -1111,7 +1111,7 @@ async fn edit_rejects_hostile_values_and_leaves_the_config_untouched() {
     }
     // None of the rejected edits changed the saved leg (still $100, 2¢, $500 depth).
     let (_, table, _) = get_authed(&app, &cookie, "/markets/table").await;
-    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below bid"), "{table}");
+    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below\u{a0}bid"), "{table}");
 }
 
 #[tokio::test]
@@ -1382,5 +1382,5 @@ async fn a_rejected_edit_keeps_what_was_typed() {
 
     // Nothing was saved by either rejected edit.
     let (_, table, _) = get_authed(&app, &cookie, "/markets/table").await;
-    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below bid"), "{table}");
+    assert!(table.contains("$100") && table.contains("$500.00") && table.contains("2.0¢ below\u{a0}bid"), "{table}");
 }

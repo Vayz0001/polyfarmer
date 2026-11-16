@@ -17,7 +17,7 @@
       <th>Market</th><th>Side</th><th>Status</th>
       <th class="num">Bid</th><th class="num" title="Mid price">Δ mid</th>
       <th class="num">Score <span class="tip left" tabindex="0" data-tip="Reward weight of your live order, ((zone − distance from mid) / zone)², after Polymarket's two-sided rule: with both sides live the weaker one counts; one side alone scores a third, or nothing under 10¢ / over 90¢. Hover a score for details. ✓ = Polymarket confirms it's scoring. 'out' = outside the reward zone, earning nothing.">i</span></th>
-      <th>Peg</th><th class="num">Size</th><th class="num">Min depth</th><th>Expires</th><th></th>
+      <th>Peg</th><th class="num">Size</th><th class="num">Min depth</th><th>Expires</th><th class="actions-col"><span hidden>Actions</span></th>
     </tr>
   </thead>
   {% for row in rows %}
@@ -54,11 +54,11 @@
         {% match leg.scoring %}{% when Some(true) %}<span class="check" title="Polymarket: scoring">✓</span>{% when Some(false) %}<span class="cross" title="Polymarket: not scoring">✗</span>{% when None %}{% endmatch %}
         </span>
       </td>
-      <td class="nowrap muted">{{ leg.peg }}{% if let Some(v) = leg.auto_pause %} <span class="tag" title="Auto-pauses if the best bid moves {{ v }} from where it started">±{{ v }}</span>{% endif %}</td>
+      <td class="muted">{{ leg.peg }}{% if let Some(v) = leg.auto_pause %} <span class="tag" title="Auto-pauses if the best bid moves {{ v }} from where it started">±{{ v }}</span>{% endif %}</td>
       <td class="num"><div class="cell-stack"><span>{{ leg.size }}</span>{% if let Some(s) = leg.shares %}<small>{{ s }}</small>{% endif %}</div></td>
       <td class="num">{{ leg.min_depth }}</td>
       <td class="nowrap"><span class="{% if leg.status_class == "expired" %}neg{% else %}muted{% endif %}" title="{{ leg.expires_title }}">{{ leg.expires }}</span></td>
-      <td>
+      <td class="actions-col">
         <div class="row-actions">
           {% if leg.paused %}
           <button class="btn ghost icon" title="Resume" hx-post="/markets/{{ leg.id }}/resume" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#markets-panel"><svg class="i sm"><use href="#i-play"/></svg></button>

@@ -310,7 +310,9 @@ fn leg_row(
         weight: raw_weight.map(pct),
         weight_note: String::new(),
         scoring: is_scoring,
-        peg: format!("{}¢ below bid", cents(c.distance)),
+        // A no-break space keeps "below bid" together, so a narrow column
+        // wraps as "1.0¢ / below bid" rather than three lines.
+        peg: format!("{}¢ below\u{a0}bid", cents(c.distance)),
         size: format!("${}", c.order_size.normalize()),
         shares: shares_label(c, live.as_ref().map(|(_, p)| *p), top.and_then(|(b, _)| *b)),
         min_depth: if c.min_depth_between > dec!(0) { usd(c.min_depth_between) } else { "—".to_string() },

@@ -53,7 +53,7 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { background: var(--bg); }
-body { color: var(--fg); font: 13px/1.5 var(--sans); -webkit-font-smoothing: antialiased; min-width: 1100px; }
+body { color: var(--fg); font: 13px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
 a { color: var(--accent-2); text-decoration: none; }
 a:hover { color: var(--fg); }
 button, input, select { font: inherit; color: inherit; }
@@ -72,7 +72,7 @@ button, input, select { font: inherit; color: inherit; }
 .i.sm { width: 13px; height: 13px; }
 
 /* ── App shell ───────────────────────────────────────────────────────────── */
-.app { display: grid; grid-template-columns: var(--side-w) 1fr; min-height: 100vh; background: linear-gradient(to right, var(--bg-side) var(--side-w), var(--bg) var(--side-w)); }
+.app { display: grid; grid-template-columns: var(--side-w) 1fr; min-height: 100vh; min-width: 1024px; background: linear-gradient(to right, var(--bg-side) var(--side-w), var(--bg) var(--side-w)); }
 .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; background: var(--bg-side); border-right: 1px solid var(--line); padding: 14px 10px; }
 .brand { display: flex; align-items: center; gap: 9px; padding: 4px 8px 18px; color: var(--fg); font-weight: 650; font-size: 14px; letter-spacing: -.01em; }
 .brand:hover { color: var(--fg); }
@@ -212,10 +212,18 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .tbl .num { text-align: right; }
 .tbl th.num { text-align: right; }
 .tbl td.mkt { max-width: 300px; }
+/* The Markets and Overview tables cap the title block itself (a td max-width
+   also acts as a floor here), so the other columns keep their room. */
+#markets-panel td.mkt > * { max-width: 240px; }
+#markets-panel .tbl :is(th, td) { padding-left: 8px; padding-right: 8px; }
+#overview-book td.mkt > * { max-width: 200px; }
+/* Pause / Edit / Remove stay in reach when the table is wider than its panel. */
+#markets-panel .actions-col { position: sticky; right: 0; z-index: 1; background: var(--panel); box-shadow: inset 1px 0 0 var(--line); }
+#markets-panel .tbl tbody tr:hover td.actions-col { background: color-mix(in srgb, var(--hover) 55%, var(--panel)); }
 .score-cell { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
 .tbl tbody.group + tbody.group tr:first-child td { border-top: 1px solid var(--line-2); }
 .mkt-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.mkt-title .name { color: var(--fg); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mkt-title .name { display: block; color: var(--fg); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .mkt-title a.name:hover { color: var(--accent-2); }
 .mkt-title .ext { color: var(--faint); display: inline-flex; }
 .mkt-title .ext:hover { color: var(--fg); }
@@ -403,6 +411,15 @@ details.adv summary:hover { color: var(--fg); }
 .cand-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .pf-rise { animation: pf-rise .25s var(--ease) both; }
 @keyframes pf-rise { from { opacity: 0; transform: translateY(4px); } }
+
+/* ── Laptop widths (1024–1279px): a narrower sidebar and gutters, the
+   Overview's two columns stacked, shorter market titles in the Markets table. */
+@media (max-width: 1279px) {
+  :root { --side-w: 180px; }
+  .page { padding: 16px 16px 56px; }
+  .grid.side-main { grid-template-columns: minmax(0, 1fr); }
+  #markets-panel td.mkt > * { max-width: 180px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
