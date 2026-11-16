@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 /// The action the quoter wants to take for a single market config this cycle.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum QuoteAction {
     /// Place a new GTC BUY at this price (no active order exists)
     Place { price: Decimal },
@@ -19,12 +19,32 @@ pub enum QuoteAction {
     Deactivate { order_id: Option<String>, reason: DeactivateReason },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CancelReason {
     DepthDropped,
+    /// Two-sided-only market and the other outcome's order isn't up
+    /// (`engine::pairing`).
+    OtherSideDown,
+    /// Two-sided-only market and only this outcome is farmed (`engine::pairing`).
+    OneSidedNotRewarded,
 }
 
-#[derive(Debug, PartialEq)]
+impl CancelReason {
+    /// Why the order was cancelled, for the Activity alert.
+    pub fn describe(&self) -> &'static str {
+        match self {
+            CancelReason::DepthDropped => "depth ahead fell below your minimum",
+            CancelReason::OtherSideDown => {
+                "the other side has no live order, and below 10¢ or above 90¢ Polymarket only rewards both sides together"
+            }
+            CancelReason::OneSidedNotRewarded => {
+                "below 10¢ or above 90¢ Polymarket only rewards both sides together, and only this side is farmed"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum DeactivateReason {
     Expired,
     Paused,

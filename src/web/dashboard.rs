@@ -19,6 +19,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tower_sessions::Session;
 
+use crate::engine::pairing::PairWait;
 use crate::rewards::{gamma_resolve, market_data, portfolio};
 use crate::types::{MarketConfig, OrderStatus};
 
@@ -164,12 +165,12 @@ async fn scoring_swr(state: &WebState, mut live_ids: Vec<String>) -> HashMap<Str
 }
 
 pub(super) async fn build_rows(state: &WebState) -> Vec<MarketRow> {
-    let (configs, order_status, tops) = {
+    let (configs, order_status, tops, pair_wait) = {
         let s = state.engine.read().await;
         // Top of book per token, from the engine's live WS-fed books.
         let tops: HashMap<String, (Option<Decimal>, Option<Decimal>)> =
             s.books.iter().map(|(t, b)| (t.clone(), (b.best_bid, b.best_ask))).collect();
-        (s.configs.clone(), s.order_status.clone(), tops)
+        (s.configs.clone(), s.order_status.clone(), tops, s.pair_wait.clone())
     };
 
     let live_ids: Vec<String> = order_status
@@ -203,7 +204,10 @@ pub(super) async fn build_rows(state: &WebState) -> Vec<MarketRow> {
             let mut legs: Vec<LegRow> = legs_cfg
                 .iter()
                 .enumerate()
-                .map(|(i, c)| leg_row(c, i, order_status.get(&c.id), tops.get(&c.token_id), max_spread, &scoring))
+                .map(|(i, c)| {
+                    let row = leg_row(c, i, order_status.get(&c.id), tops.get(&c.token_id), max_spread, &scoring);
+                    with_pair_wait(row, pair_wait.get(&c.id).copied())
+                })
                 .collect();
             apply_two_sided(&mut legs);
             MarketRow {
@@ -241,6 +245,28 @@ fn apply_two_sided(legs: &mut [LegRow]) {
                 .to_string(),
         };
     }
+}
+
+/// A leg the engine is holding off the book under Polymarket's two-sided rule
+/// (`engine::pairing`) says so instead of the generic "Waiting".
+fn with_pair_wait(mut row: LegRow, wait: Option<PairWait>) -> LegRow {
+    if row.status_label != "Waiting" {
+        return row;
+    }
+    match wait {
+        Some(PairWait::OtherSide) => {
+            row.status_title = "Waiting for the other side: below 10¢ or above 90¢ Polymarket only rewards both \
+                                sides together, so both orders go up at once.";
+        }
+        Some(PairWait::NoOtherSide) => {
+            row.status_label = "Needs both sides";
+            row.status_class = "warn";
+            row.status_title = "Not quoting: below 10¢ or above 90¢ Polymarket only rewards both sides together, \
+                                and only this side is farmed. Farm the other side too to earn here.";
+        }
+        None => {}
+    }
+    row
 }
 
 /// Shares behind a leg's USD size, as the engine would compute them
@@ -670,6 +696,47 @@ mod tests {
         // A 2¢-wide book around `mid`.
         let top = (Some(mid - dec!(0.01)), Some(mid + dec!(0.01)));
         leg_row(&c, slot, status.as_ref(), Some(&top), Some(dec!(4)), &HashMap::new())
+    }
+
+    #[test]
+    fn a_leg_held_by_the_two_sided_rule_says_why() {
+        let idle = |paused: bool| {
+            let mut row = leg("y", "yes", 0, None, dec!(0.95));
+            if !paused {
+                // `leg` pauses a leg without a price; rebuild it unpaused and idle.
+                let c = MarketConfig {
+                    id: "y".into(),
+                    url: String::new(),
+                    label: String::new(),
+                    condition_id: "0xabc".into(),
+                    token_id: "yes".into(),
+                    token_label: String::new(),
+                    tick_size: dec!(0.01),
+                    distance: dec!(0.01),
+                    min_depth_between: dec!(0),
+                    order_size: dec!(100),
+                    expires_at: Utc::now() + chrono::Duration::days(1),
+                    paused: false,
+                    benchmark_bid: None,
+                    max_volatility: None,
+                };
+                row = leg_row(&c, 0, Some(&OrderStatus::Idle), None, None, &HashMap::new());
+            }
+            row
+        };
+        assert_eq!(idle(false).status_label, "Waiting");
+        let other = with_pair_wait(idle(false), Some(PairWait::OtherSide));
+        assert_eq!((other.status_label, other.status_class), ("Waiting", "idle"));
+        assert!(other.status_title.starts_with("Waiting for the other side"));
+        let lone = with_pair_wait(idle(false), Some(PairWait::NoOtherSide));
+        assert_eq!((lone.status_label, lone.status_class), ("Needs both sides", "warn"));
+        assert!(lone.status_title.contains("only this side is farmed"));
+        // Any other status wins: a paused or live leg reads as before.
+        let paused = with_pair_wait(idle(true), Some(PairWait::NoOtherSide));
+        assert_eq!(paused.status_label, "Paused");
+        let live = with_pair_wait(leg("y", "yes", 0, Some(dec!(0.94)), dec!(0.95)), Some(PairWait::OtherSide));
+        assert_eq!(live.status_label, "Live");
+        assert_eq!(with_pair_wait(idle(false), None).status_title, idle(false).status_title);
     }
 
     #[test]

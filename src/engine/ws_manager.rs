@@ -1,8 +1,9 @@
 use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
 use crate::engine::orderbook::TokenBook;
+use crate::engine::pairing;
 use crate::engine::placer;
-use crate::engine::quoter::{self, DeactivateReason, QuoteAction};
+use crate::engine::quoter::{DeactivateReason, QuoteAction};
 use crate::types::{MarketConfig, OrderStatus, WsBookSnapshot, WsCommand, WsPriceChangeEvent};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -61,6 +62,17 @@ pub struct AppState {
     pub last_ws_msg: Option<std::time::Instant>,
     /// When the last successful heartbeat completed (display only).
     pub last_heartbeat_ok: Option<std::time::Instant>,
+    /// Two-sided rule (`engine::pairing`): since when a live leg has been
+    /// without a live order on the other outcome.
+    pub pair_alone_since: HashMap<String, crate::engine::pairing::AloneClock>,
+    /// Two-sided rule: how many times a leg was pulled for being alone in a
+    /// row (sets its back-off; reset once both sides are live together).
+    pub pair_pulls: HashMap<String, u32>,
+    /// Two-sided rule: a pulled leg's back-off (kept apart from placement
+    /// failures' `place_retry_at`, and only applied while the rule is in force).
+    pub pair_retry_at: HashMap<String, tokio::time::Instant>,
+    /// Two-sided rule: legs held off the book by it, and why (display).
+    pub pair_wait: HashMap<String, crate::engine::pairing::PairWait>,
 }
 
 impl AppState {
@@ -81,6 +93,10 @@ impl AppState {
             ws_connected: false,
             last_ws_msg: None,
             last_heartbeat_ok: None,
+            pair_alone_since: HashMap::new(),
+            pair_pulls: HashMap::new(),
+            pair_retry_at: HashMap::new(),
+            pair_wait: HashMap::new(),
         }
     }
 }
@@ -429,41 +445,44 @@ async fn handle_message(text: &str, state: &Arc<RwLock<AppState>>, executor: &Ar
                 }
             }
 
-            // Evaluate and act for each affected config
-            // Read state, collect actions, then execute outside the lock
-            let actions: Vec<(String, QuoteAction, String, rust_decimal::Decimal, rust_decimal::Decimal)> = {
-                let s = state.read().await;
-                s.configs
+            // Evaluate and act for each affected config — and for the other
+            // outcome of the same market, so a two-sided pair moves together
+            // (engine::pairing). Decide under the lock, execute outside it.
+            let actions: Vec<pairing::Decision> = {
+                let mut s = state.write().await;
+                let markets: HashSet<String> = s
+                    .configs
                     .iter()
-                    .filter(|c| affected_tokens.contains(&c.token_id))
-                    .filter_map(|c| {
-                        // Book may not be populated yet if snapshot hasn't arrived.
-                        // Skip rather than panic — next event will re-evaluate.
-                        let book = s.books.get(&c.token_id)?;
-                        let status = s.order_status.get(&c.id).cloned().unwrap_or_default();
-                        let action = quoter::evaluate(c, book, &status);
-                        // Log depth from current order price (if Live) or target (otherwise),
-                        // matching what the quoter actually checks.
-                        let depth_lower = if let OrderStatus::Live { price, .. } = &status {
-                            *price
-                        } else {
-                            book.best_bid.unwrap_or_default() - c.distance
-                        };
-                        let depth = book.bid_depth_between(depth_lower, book.best_bid.unwrap_or_default());
-                        if matches!(action, QuoteAction::Hold) {
-                            debug!(
-                                "[{}] best_bid={:?} depth={} status={:?} → Hold",
-                                &c.label, book.best_bid, depth, status
-                            );
-                        } else {
-                            info!(
-                                "[{}] best_bid={:?} depth={} status={:?} → {:?}",
-                                &c.label, book.best_bid, depth, status, action
-                            );
-                        }
-                        Some((c.id.clone(), action, c.token_id.clone(), c.order_size, c.tick_size))
-                    })
-                    .collect()
+                    .filter(|c| affected_tokens.contains(&c.token_id) && !c.condition_id.is_empty())
+                    .map(|c| c.condition_id.to_ascii_lowercase())
+                    .collect();
+                let actions = pairing::decide(
+                    &mut s,
+                    |c| {
+                        affected_tokens.contains(&c.token_id)
+                            || (!c.condition_id.is_empty() && markets.contains(&c.condition_id.to_ascii_lowercase()))
+                    },
+                    tokio::time::Instant::now(),
+                );
+                for (id, action, token_id, _, _) in &actions {
+                    let Some(c) = s.configs.iter().find(|c| &c.id == id) else { continue };
+                    let book = s.books.get(token_id);
+                    let status = s.order_status.get(id).cloned().unwrap_or_default();
+                    // Depth from the live order's price (or the target), as the quoter checks it.
+                    let best_bid = book.and_then(|b| b.best_bid).unwrap_or_default();
+                    let lower =
+                        if let OrderStatus::Live { price, .. } = &status { *price } else { best_bid - c.distance };
+                    let depth = book.map(|b| b.bid_depth_between(lower, best_bid)).unwrap_or_default();
+                    if matches!(action, QuoteAction::Hold) {
+                        debug!("[{}] best_bid={:?} depth={} status={:?} → Hold", &c.label, best_bid, depth, status);
+                    } else {
+                        info!(
+                            "[{}] best_bid={:?} depth={} status={:?} → {:?}",
+                            &c.label, best_bid, depth, status, action
+                        );
+                    }
+                }
+                actions
             };
 
             execute_actions(actions, state, executor, alerter).await;
@@ -569,9 +588,7 @@ async fn execute_actions(
                 let exec = Arc::clone(executor);
                 let state2 = Arc::clone(state);
                 let alerter2 = Arc::clone(alerter);
-                let reason_str = match reason {
-                    quoter::CancelReason::DepthDropped => "depth ahead fell below your minimum",
-                };
+                let reason_str = reason.describe();
                 tokio::spawn(async move {
                     let confirmed = match exec.cancel_order_verified(&order_id).await {
                         Ok(true) => {

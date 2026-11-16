@@ -104,6 +104,13 @@ anything may change between releases.
   and passwords set now still work in earlier versions; tests pin both.
 - Removing a market now cancels its order first and only removes it once the cancel is confirmed. If the cancel
   fails, the market stays, paused, so its order is still tracked instead of being left on Polymarket unwatched.
+- Polymarket only rewards both sides together while a market's midpoint is under 10¢ or over 90¢, so a bid on one
+  side alone there earns nothing but can still be filled. In that range the bot now quotes a market's two sides
+  together: a side waits until the other can go up too, and a side left alone (the other paused, expired, short of
+  depth or failing to place) is pulled after 30 seconds, then waits a little longer each time (30 s up to 10 min)
+  so a failing side can't cause a place-and-cancel loop. A market farmed on one side only stays off the book in
+  that range. Markets shows why a side is waiting ("Waiting" with the reason, or "Needs both sides"), and Activity
+  notes each pull. Between 10¢ and 90¢, where one side alone still earns a third, nothing changes.
 
 - The install steps use the latest release (`git clone --branch v0.1.0`) instead of `main`, and the README
   explains how to update to a new version. CONTRIBUTING describes the release steps.
