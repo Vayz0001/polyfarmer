@@ -94,6 +94,8 @@ pub struct LegRow {
     pub status_label: &'static str,
     /// "live" | "busy" | "idle" | "paused" | "expired"
     pub status_class: &'static str,
+    /// What the status means (hover text).
+    pub status_title: &'static str,
     /// Resting price (¢) when live.
     pub price: Option<String>,
     /// Current midpoint (¢) from the engine's live book.
@@ -282,6 +284,14 @@ fn leg_row(
             _ => ("Waiting", "idle", None),
         }
     };
+    let status_title = match status_label {
+        "Paused" => "Paused: no order. Resume to quote again.",
+        "Live" => "Your order is resting on the book.",
+        "Placing" => "Placing the order on Polymarket…",
+        "Cancelling" => "Cancelling the order: waiting for Polymarket to confirm it's gone.",
+        "Expired" => "Past its expiry: no order.",
+        _ => "No order right now: waiting until your depth and price conditions are met.",
+    };
     let (price, dmid, in_zone, raw_weight, is_scoring) = match (&live, mid) {
         (Some((oid, p)), Some(m)) => {
             let w = max_spread.map(|v| market_data::score_weight(m, *p, v));
@@ -303,6 +313,7 @@ fn leg_row(
         side_class: if slot == 0 { "a" } else { "b" },
         status_label,
         status_class,
+        status_title,
         price,
         mid: mid.map(cents),
         dmid,

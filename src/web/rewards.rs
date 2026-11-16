@@ -417,7 +417,7 @@ pub async fn history(State(state): State<WebState>) -> Html<String> {
 pub struct RewardRow {
     pub label: String,
     pub slug: String,
-    /// "farming", "paused", "waiting" or "removed".
+    /// "farming", "placing", "paused", "expired", "waiting" or "removed".
     pub status: &'static str,
     pub share: String,
     pub earned_today: String,
@@ -486,6 +486,13 @@ fn build_table(
             "farming"
         } else if legs.iter().all(|c| c.paused) {
             "paused"
+        } else if legs.iter().any(|c| {
+            !c.paused
+                && matches!(order_status.get(&c.id), Some(OrderStatus::Placing { .. } | OrderStatus::Cancelling { .. }))
+        }) {
+            "placing"
+        } else if legs.iter().all(|c| c.paused || c.expires_at <= chrono::Utc::now()) {
+            "expired"
         } else {
             "waiting"
         }
@@ -637,5 +644,25 @@ mod tests {
         assert_eq!(money_fine(dec!(0.4999)), "$0.50");
         assert_eq!(money_exact(dec!(1.83120)), "$1.8312");
         assert_eq!(money_exact(dec!(0)), "$0");
+    }
+
+    #[test]
+    fn status_matches_the_markets_page_words() {
+        // Same leg states the Markets table shows, summarised per market.
+        // Farmed markets Polymarket hasn't listed yet: rows carry the config labels.
+        let entries: Vec<UserRewardsEarningResponse> = Vec::new();
+        let mut expired = config("c", 3, false);
+        expired.expires_at = chrono::Utc::now() - chrono::Duration::hours(1);
+        let configs = vec![config("a", 1, false), config("b", 2, false), expired];
+        let mut status = HashMap::new();
+        status.insert("a".to_string(), OrderStatus::Placing { price: dec!(0.5) });
+        status.insert("b".to_string(), OrderStatus::Idle);
+        let rows = build_table(&entries, &configs, &status);
+        let by_cid = |cid: u8| {
+            rows.iter().find(|r| r.label == format!("Farmed {}", ["a", "b", "c"][cid as usize - 1])).map(|r| r.status)
+        };
+        assert_eq!(by_cid(1), Some("placing"), "an order being placed is not just \"waiting\"");
+        assert_eq!(by_cid(2), Some("waiting"));
+        assert_eq!(by_cid(3), Some("expired"));
     }
 }

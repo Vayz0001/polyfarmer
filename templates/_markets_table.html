@@ -6,8 +6,8 @@
 {% if rows.is_empty() %}
 <div class="empty">
   <h3>No markets yet</h3>
-  <div>Browse reward-eligible markets, or paste a Polymarket URL above.</div>
-  <div class="actions"><a class="btn primary" href="/markets/browse"><svg class="i sm"><use href="#i-search"/></svg>Browse markets</a></div>
+  <div>Find a reward-eligible market, or paste a Polymarket link above.</div>
+  <div class="actions"><a class="btn primary" href="/markets/browse"><svg class="i sm"><use href="#i-search"/></svg>Find markets</a></div>
 </div>
 {% else %}
 <div class="tbl-wrap">
@@ -43,7 +43,7 @@
       </td>
       {% endif %}
       <td><span class="leg-label side-{{ leg.side_class }}">{{ leg.side_label }}</span></td>
-      <td><span class="pill {{ leg.status_class }}">{{ leg.status_label }}</span></td>
+      <td><span class="pill {{ leg.status_class }}" title="{{ leg.status_title }}">{{ leg.status_label }}</span></td>
       <td class="num">{% if let Some(p) = leg.price %}{{ p }}¢{% else %}<span class="faint">—</span>{% endif %}</td>
       <td class="num"><div class="cell-stack">{% if let Some(d) = leg.dmid %}<span>{{ d }}¢</span>{% else %}<span class="faint">—</span>{% endif %}{% if let Some(m) = leg.mid %}<small>mid {{ m }}¢</small>{% endif %}</div></td>
       <td class="num">
