@@ -6,7 +6,7 @@ use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
 use crate::engine::quoter::QuoteAction;
 use crate::engine::ws_manager::AppState;
-use crate::engine::{heartbeat, placer, quoter, ws_manager};
+use crate::engine::{heartbeat, pairing, placer, quoter, ws_manager};
 use crate::storage::load_markets;
 use crate::types::{EnginePhase, OrderStatus, WsCommand};
 
@@ -479,18 +479,9 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
         });
     }
 
-    let actions: Vec<(String, QuoteAction, String, rust_decimal::Decimal, rust_decimal::Decimal)> = {
-        let s = state.read().await;
-        s.configs
-            .iter()
-            .filter_map(|c| {
-                let book = s.books.get(&c.token_id)?;
-                let status = s.order_status.get(&c.id).cloned().unwrap_or_default();
-                let action = quoter::evaluate(c, book, &status);
-                Some((c.id.clone(), action, c.token_id.clone(), c.order_size, c.tick_size))
-            })
-            .collect()
-    };
+    // Every leg, with Polymarket's two-sided rule applied across each market's legs.
+    let actions: Vec<pairing::Decision> =
+        pairing::decide(&mut *state.write().await, |_| true, tokio::time::Instant::now());
 
     for (config_id, action, token_id, order_size, tick_size) in actions {
         match action {
@@ -517,9 +508,10 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                 ));
             }
 
-            QuoteAction::Cancel { order_id, .. } => {
+            QuoteAction::Cancel { order_id, reason } => {
                 let exec2 = Arc::clone(executor);
                 let state2 = Arc::clone(state);
+                let alert2 = Arc::clone(alerter);
                 {
                     let mut s = state.write().await;
                     s.order_status.insert(
@@ -544,7 +536,26 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                         if matches!(s.order_status.get(&config_id),
                             Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id)
                         {
-                            s.order_status.insert(config_id, OrderStatus::Idle);
+                            s.order_status.insert(config_id.clone(), OrderStatus::Idle);
+                        }
+                        // The two-sided rule's pulls are worth a line in Activity
+                        // (depth cancels from this timer stay quiet, as before).
+                        if reason != quoter::CancelReason::DepthDropped {
+                            let names = s
+                                .configs
+                                .iter()
+                                .find(|c| c.id == config_id)
+                                .map(|c| (c.label.clone(), c.order_size, c.token_label.clone()));
+                            drop(s);
+                            if let Some((label, size, token_label)) = names {
+                                alert2.info(format!(
+                                    "Order cancelled · {}\n${} of {} — {}",
+                                    label,
+                                    size,
+                                    token_label,
+                                    reason.describe()
+                                ));
+                            }
                         }
                     }
                 });

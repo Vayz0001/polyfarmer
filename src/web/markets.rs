@@ -1740,9 +1740,13 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool) -> Result<(), Str
             c.paused = pausing;
         }
         if !pausing {
-            // Resuming is a fresh start: no leftover retry delay or failure count.
+            // Resuming is a fresh start: no leftover retry delay or failure count,
+            // nor the two-sided rule's back-off (engine::pairing).
             s.place_retry_at.remove(id);
             s.place_failures.remove(id);
+            s.pair_retry_at.remove(id);
+            s.pair_pulls.remove(id);
+            s.pair_alone_since.remove(id);
         }
         let order_to_cancel = if pausing {
             match s.order_status.get(id) {
