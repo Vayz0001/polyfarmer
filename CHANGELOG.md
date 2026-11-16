@@ -17,6 +17,9 @@ anything may change between releases.
 
 ### Fixed
 
+- The market page's order book drew each depth bar from that level's own size, while the Total column next to it is a
+  running total, so a row could show a small bar beside a big total. Bars now draw the running total, growing away from
+  the spread, on one scale for bids and asks (the deeper side is the full width), as on polyfarmer.xyz.
 - A cancel that failed (for example a network error) could still free the leg: pausing, expiry and auto-pause
   marked it "waiting" whatever the cancel's result, and any cancel left unconfirmed for 30 seconds was reset the same
   way. The old order could then keep resting on Polymarket while the leg showed as paused, or next to a new one.
