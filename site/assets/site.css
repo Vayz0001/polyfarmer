@@ -293,6 +293,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .block { padding-block: 150px 0; }
 .sec-head { max-width: 760px; }
 .sec-head h2 { margin-top: 20px; font-size: clamp(36px, 5.4vw, 72px); }
+/* A heading made of two short sentences breaks between them, not inside one. */
+.sec-head h2 .sent { display: inline-block; }
 .sec-head p { margin-top: 22px; color: var(--fg-2); font-size: clamp(17px, 1.6vw, 19px); max-width: 60ch; }
 @media (max-width: 640px) { .block { padding-block: 104px 0; } }
 
@@ -466,7 +468,9 @@ footer .cols { display: flex; justify-content: space-between; align-items: cente
 footer .links { display: flex; gap: 4px 28px; flex-wrap: wrap; }
 footer .links a { display: inline-flex; align-items: center; min-height: 32px; color: var(--muted); } footer .links a:hover { color: var(--fg); }
 footer .links a.ico { justify-content: center; min-width: 32px; }
-footer .links .social { display: inline-flex; gap: 14px; }
+/* Each 18px icon is centred in a 32px hit area: pull the group out by the 7px
+   of padding so the icons' ink lines up with the content edges. */
+footer .links .social { display: inline-flex; gap: 14px; margin-inline: -7px; }
 footer .links a.ico svg { width: 18px; height: 18px; }
 .disclaimer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px 56px; margin-top: 32px; padding-top: 28px; border-top: 1px solid var(--line); color: var(--faint); font-size: 13.5px; line-height: 1.7; }
 .disclaimer p { text-wrap: pretty; }
