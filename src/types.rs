@@ -41,7 +41,7 @@ pub struct MarketConfig {
     /// USDC size of our resting GTC order
     pub order_size: Decimal,
 
-    /// Stop quoting after this time; cancel order and remove from active set
+    /// "Expires": after this time the order is cancelled and the leg stops quoting (it stays listed; editing extends it)
     pub expires_at: DateTime<Utc>,
 
     /// Manually paused from the dashboard — order cancelled, no new quotes until resumed

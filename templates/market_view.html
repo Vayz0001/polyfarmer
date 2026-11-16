@@ -107,21 +107,21 @@
         <div id="placement-preview" hx-target="this" hx-post="/markets/view/preview" hx-trigger="load, pf:preview delay:300ms" hx-include="#order-form" hx-swap="innerHTML"></div>
 
         <details class="adv" open>
-          <summary><svg class="i sm"><use href="#i-chev"/></svg>Safety &amp; expiry <span class="tag accent">Recommended</span></summary>
+          <summary><svg class="i sm"><use href="#i-chev"/></svg>Safeguards <span class="tag accent">Recommended</span></summary>
           <div class="adv-body">
-            <p class="help">These protect you from getting filled. They're pre-filled with cautious values — adjust to taste, or clear a field to turn that check off.</p>
+            <p class="help">Cautious defaults that help keep you from being filled. Leave Depth ahead or Auto-pause blank to turn it off.</p>
             <div class="field">
-              <label class="label" for="min_depth_usd">Min depth ahead <span class="hint">USD in front of you</span></label>
+              <label class="label" for="min_depth_usd">Depth ahead <span class="hint">minimum, USD</span></label>
               <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="any" min="0" name="min_depth_usd" id="min_depth_usd" value="500" /><span class="suf">USD</span></div>
-              <p class="help">Your bid is pulled whenever less than this sits between it and the best bid — your buffer against being filled. 0 = off.</p>
+              <p class="help">Bids above yours, up to and including the best bid. With less than this ahead of you, your order is pulled or not placed.</p>
             </div>
             <div class="field">
-              <label class="label" for="max_volatility_cents">Auto-pause if best bid moves <span class="hint">blank = off</span></label>
+              <label class="label" for="max_volatility_cents">Auto-pause <span class="hint">¢ either way, optional</span></label>
               <div class="affix"><input class="input mono" type="number" step="any" min="0.1" name="max_volatility_cents" id="max_volatility_cents" value="5" placeholder="e.g. 5" /><span class="suf">¢</span></div>
-              <p class="help">If the market jumps this far from where it started, the leg pauses itself and cancels its order.</p>
+              <p class="help">If the best bid moves this far either way from where it is when you start, the leg pauses and cancels its order. Resuming restarts it from the price then.</p>
             </div>
             <div class="field exp-field">
-              <label class="label" for="expires_in">Stop quoting after</label>
+              <label class="label" for="expires_in">Expires</label>
               <select class="input" name="expires_in" id="expires_in">
                 <option value="1d">1 day</option>
                 <option value="3d">3 days</option>
@@ -138,6 +138,7 @@
                 </select>
               </div>
               <p class="help exp-custom-help">Whole hours or days, from 1 hour to 1 year.</p>
+              <p class="help">Then the order is cancelled and the leg stops. Edit it to extend.</p>
             </div>
           </div>
         </details>

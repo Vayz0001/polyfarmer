@@ -1072,7 +1072,7 @@ async fn start_farming_rejects_hostile_values_with_a_message_not_a_panic() {
         (start("18", "79228162514264337593543950335", "0", "", "7d"), "Order size"), // Decimal-max size
         (start("0.0000000000000000000000000001", "100", "0", "", "7d"), "price between"), // size/price overflow
         (start("-5", "100", "0", "", "7d"), "price between"),
-        (start("18", "100", "99999999999999999999", "", "7d"), "Min depth"),
+        (start("18", "100", "99999999999999999999", "", "7d"), "Depth ahead"),
         (start("18", "100", "0", "1e999", "7d"), "Auto-pause"),
         (start("18", "100", "0", "101", "7d"), "Auto-pause"),
         (start("abc", "100", "0", "", "7d"), "price between"),
@@ -1104,7 +1104,7 @@ async fn edit_rejects_hostile_values_and_leaves_the_config_untouched() {
         (edit("100", "2", "500", "", "99999999999999d"), "Invalid expiry"),
         (edit("79228162514264337593543950335", "2", "500", "", "keep"), "Order size"),
         (edit("100", "9999", "500", "", "keep"), "Distance"),
-        (edit("100", "2", "-1", "", "keep"), "Min depth"),
+        (edit("100", "2", "-1", "", "keep"), "Depth ahead"),
         (edit("100", "2", "500", "5000", "keep"), "Auto-pause"),
     ] {
         let (status, out) = post_form(&app, &cookie, "/markets/mar_test_leg/edit", body.clone()).await;
@@ -1375,6 +1375,31 @@ async fn a_failed_save_undoes_a_resume_exactly() {
     assert_eq!((other.paused, other.benchmark_bid), (false, Some(dec!(0.20))), "running leg left running");
 }
 
+/// The safeguards use one set of names: Depth ahead, Auto-pause, Expires.
+#[tokio::test]
+async fn safeguards_use_the_same_names_everywhere() {
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, _) = app_with_leg(OrderStatus::Idle);
+    {
+        let mut s = engine.write().await;
+        s.configs[0].max_volatility = Some(dec!(0.05));
+        s.configs[0].benchmark_bid = Some(dec!(0.31));
+    }
+    let cookie = login(&app, &pw).await;
+    let (_, table, _) = get_authed(&app, &cookie, "/markets/table").await;
+    assert!(table.contains(">Depth ahead</th>") && table.contains(">Distance</th>"), "{table}");
+    assert!(table.contains(r#"title="Auto-pauses if the best bid reaches 26.0¢ or 36.0¢">±5.0¢"#), "{table}");
+    let (_, drawer, _) = get_authed(&app, &cookie, "/markets/mar_leg/edit").await;
+    for name in ["Depth ahead", "Auto-pause", "Expires", ">Size<", "Distance"] {
+        assert!(drawer.contains(name), "drawer lacks {name}");
+    }
+    for old in ["Min depth", "Stop quoting", "if best bid moves", "Order size", "Custom… from now"] {
+        assert!(!drawer.contains(old), "drawer still says {old}");
+    }
+    assert!(drawer.contains("left</span>"), "time left shown");
+}
+
 /// Resuming a leg with no auto-pause limit needs no price and changes nothing else.
 #[tokio::test]
 async fn resume_without_a_limit_leaves_the_reference_alone() {
@@ -1401,7 +1426,7 @@ async fn resume_without_a_limit_leaves_the_reference_alone() {
     assert_eq!(s.configs[0].benchmark_bid, None);
 }
 
-/// "Stop quoting after → Custom…": whole hours or days, 1 hour to 1 year, on
+/// "Expires → Custom…": whole hours or days, 1 hour to 1 year, on
 /// both the start form and the edit drawer; a valid custom edit is saved.
 #[tokio::test]
 async fn custom_expiry_is_validated_and_saved() {

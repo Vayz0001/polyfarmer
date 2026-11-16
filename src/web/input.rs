@@ -73,7 +73,7 @@ pub fn depth_usd(s: &str) -> Result<Decimal, String> {
     }
     match decimal(&t) {
         Some(v) if v >= dec!(0) && v <= MAX_MIN_DEPTH_USD => Ok(v),
-        _ => Err(format!("Min depth must be a dollar amount between 0 and {MAX_MIN_DEPTH_USD}.")),
+        _ => Err(format!("Depth ahead must be a dollar amount between 0 and {MAX_MIN_DEPTH_USD}.")),
     }
 }
 
@@ -92,7 +92,7 @@ pub fn volatility_cents(s: &str) -> Result<Option<Decimal>, String> {
     }
     match decimal(s) {
         Some(c) if c > dec!(0) && c <= MAX_VOLATILITY_CENTS => Ok(Some(c / dec!(100))),
-        _ => Err(format!("Auto-pause threshold must be between 0 and {MAX_VOLATILITY_CENTS} cents.")),
+        _ => Err(format!("Auto-pause must be between 0 and {MAX_VOLATILITY_CENTS} cents.")),
     }
 }
 
@@ -132,7 +132,7 @@ pub fn expiry(s: &str) -> Result<DateTime<Utc>, String> {
     Ok(Utc::now() + Duration::seconds(secs))
 }
 
-/// The "Stop quoting after" choice from a form: a preset handled by
+/// The "Expires" choice from a form: a preset handled by
 /// [`expiry`] (`1d`, `7d`, `never`, …), or `custom` with a whole number of
 /// hours or days the user typed (`custom_n`, `custom_unit` = `h` | `d`).
 pub fn expiry_choice(choice: &str, custom_n: &str, custom_unit: &str) -> Result<DateTime<Utc>, String> {

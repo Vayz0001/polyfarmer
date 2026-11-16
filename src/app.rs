@@ -745,7 +745,7 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                         .unwrap_or_else(|| config_id.clone());
                     let (title, msg) = match reason {
                         DeactivateReason::Paused => ("Paused", "Order cancelled — resume from Markets"),
-                        DeactivateReason::Expired => ("Expired", "Expiry reached — stopped quoting"),
+                        DeactivateReason::Expired => ("Expired", "Order cancelled — edit the leg to extend it"),
                         DeactivateReason::Volatility => unreachable!(),
                     };
                     alerter.info(format!("{} · {}\n{}", title, label, msg));
