@@ -9,6 +9,7 @@ mod assets;
 mod auth;
 pub mod book_hub;
 mod dashboard;
+mod defaults;
 pub mod events;
 mod input;
 pub mod limiter;

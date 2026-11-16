@@ -9,6 +9,10 @@ anything may change between releases.
 
 ### Added
 
+- **Defaults for new markets**: Settings has a panel to set the size and safeguards (Depth ahead, Auto-pause,
+  Expires) the new-order form starts with, and the form has a **Save as my defaults** button that saves what's in
+  it. Saved to `defaults.json` in the data directory; markets you already farm keep their own settings. A missing
+  or unusable file falls back to the built-in values ($100, $500, 5¢, 7 days), and **Reset to built-in** removes it.
 - A project website at [polyfarmer.xyz](https://polyfarmer.xyz), in `site/`: what Polyfarmer does, a simulated
   live dashboard, an interactive look at Polymarket's reward scoring, install steps and an FAQ. Static files only,
   no third-party scripts or tracking, and every animation turns off for people who prefer reduced motion.

@@ -194,6 +194,8 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .alert.info { background: var(--accent-bg); border-color: transparent; color: var(--accent-2); }
 .alert a { color: inherit; text-decoration: underline; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
+.defaults-form { max-width: 380px; }
+#defaults-note .err { color: var(--ask); }
 .stack-lg { display: flex; flex-direction: column; gap: 16px; }
 
 /* ── Panels / tables ─────────────────────────────────────────────────────── */

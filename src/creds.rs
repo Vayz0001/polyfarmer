@@ -12,7 +12,7 @@
 //! password-derived "unlock-on-login" mode can be layered on later.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
@@ -169,6 +169,11 @@ pub struct CredentialStore {
 }
 
 impl CredentialStore {
+    /// The data directory this store lives in.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     /// Open (creating if needed) the store at `dir`, ensuring a master key exists.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self> {
         let dir = dir.into();
