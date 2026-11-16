@@ -267,7 +267,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .gap.off { opacity: 0; }
 .gap.stretched { border-color: var(--warn); } .gap.stretched span { color: var(--warn); }
 .mid { display: flex; justify-content: space-between; align-items: center; height: 32px; margin: 5px 0; padding: 0 9px; border-block: 1px dashed var(--line-2); color: var(--muted); font: 12.5px/1 var(--mono); }
-.mid b { color: var(--fg); font-weight: 600; }
+/* Fixed width: "48.5¢" and "49¢" alternate as the spread changes. */
+.mid b { min-width: 5ch; text-align: center; color: var(--fg); font-weight: 600; }
 
 /* ── facts strip ──────────────────────────────────────────────────────── */
 /* Five equal cells, each word centred in its cell. Below 900px the cells
