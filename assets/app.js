@@ -621,10 +621,17 @@
   function initTips() {
     var tip = document.createElement("div");
     tip.id = "pf-tip"; tip.setAttribute("role", "tooltip");
+    // Empty until shown: kept out of the accessibility tree meanwhile.
+    tip.setAttribute("aria-hidden", "true");
     document.body.appendChild(tip);
+    var owner = null;
     function show(el) {
       var text = el.getAttribute("data-tip"); if (!text) return;
       tip.textContent = text;
+      tip.removeAttribute("aria-hidden");
+      if (owner && owner !== el) owner.removeAttribute("aria-describedby");
+      // Only link the bubble when the element has no description of its own.
+      if (!el.hasAttribute("aria-describedby")) { el.setAttribute("aria-describedby", "pf-tip"); owner = el; }
       tip.style.left = "0px"; tip.style.top = "0px";
       var r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
       var left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), innerWidth - w - 8);
@@ -633,7 +640,10 @@
       tip.style.left = left + "px"; tip.style.top = top + "px";
       tip.classList.add("show");
     }
-    function hide() { tip.classList.remove("show"); }
+    function hide() {
+      tip.classList.remove("show"); tip.setAttribute("aria-hidden", "true");
+      if (owner) { owner.removeAttribute("aria-describedby"); owner = null; }
+    }
     document.addEventListener("mouseover", function (e) { var el = e.target.closest && e.target.closest(".tip"); if (el) show(el); });
     document.addEventListener("mouseout", function (e) { if (e.target.closest && e.target.closest(".tip")) hide(); });
     document.addEventListener("focusin", function (e) { var el = e.target.closest && e.target.closest(".tip"); if (el) show(el); });

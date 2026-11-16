@@ -798,7 +798,10 @@ fn assert_hardened(res: &axum::response::Response, what: &str) {
     assert_eq!(header_str(res, "referrer-policy").as_deref(), Some("no-referrer"), "{what}");
     assert_eq!(header_str(res, "cross-origin-opener-policy").as_deref(), Some("same-origin"), "{what}");
     assert_eq!(header_str(res, "cross-origin-resource-policy").as_deref(), Some("same-origin"), "{what}");
-    assert!(header_str(res, "permissions-policy").unwrap().contains("camera=()"), "{what}");
+    let pp = header_str(res, "permissions-policy").unwrap();
+    assert!(pp.contains("camera=()"), "{what}");
+    // Chrome logs a console error for every feature name it doesn't know.
+    assert!(!pp.contains("bluetooth"), "{what}: unrecognised Permissions-Policy feature");
 }
 
 #[test]

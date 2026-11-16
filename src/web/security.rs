@@ -42,7 +42,7 @@ img-src 'self' https: data:; font-src 'self'; connect-src 'self'; frame-ancestor
 base-uri 'none'; form-action 'self'; object-src 'none'";
 
 const PERMISSIONS_POLICY: &str =
-    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), interest-cohort=()";
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), interest-cohort=()";
 
 /// Defence in depth against CSRF (the per-session tokens remain the primary
 /// control): browsers label every request with `Sec-Fetch-Site`
