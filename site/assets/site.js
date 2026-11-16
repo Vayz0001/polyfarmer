@@ -54,6 +54,15 @@
     var one = document.getElementById("sc-one");
     var dot = document.getElementById("sc-bid"), drop = document.getElementById("sc-drop");
     var dot2 = document.getElementById("sc-bid2"), drop2 = document.getElementById("sc-drop2");
+    var yes = document.getElementById("sc-yes"), no = document.getElementById("sc-no");
+    // Near the chart's edges a label flips to the inner side of its dot so it
+    // stays inside the card.
+    var label = function (t, inward, outward) {
+      if (!t) return;
+      var side = inward ? outward * -1 : outward;
+      t.setAttribute("x", String(14 * side));
+      t.setAttribute("text-anchor", side < 0 ? "end" : "start");
+    };
     var sides = document.getElementById("sc-sides");
     var outDist = document.getElementById("sc-dist-out"), outScore = document.getElementById("sc-score");
     var outScoreNote = document.getElementById("sc-score-note");
@@ -72,6 +81,8 @@
       drop.setAttribute("y2", (210 - y).toFixed(1));
       dot2.style.transform = "translate(" + x2.toFixed(1) + "px, " + y.toFixed(1) + "px)";
       drop2.setAttribute("y2", (210 - y).toFixed(1));
+      label(yes, x < 60, -1);  // Yes normally sits left of its dot
+      label(no, x2 > 500, 1);  // No normally sits right of its dot
       dot2.classList.toggle("off", one.checked);
       sides.textContent = one.checked
         ? "Yes bid only: a third of the score, and nothing below 10¢ or above 90¢."

@@ -182,7 +182,9 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
   .hero h1 { font-stretch: 112%; font-size: 9.6vw; }
   .hero .field { top: 600px; height: 460px; }
 }
-.hero h1 .line { display: block; overflow: hidden; padding-bottom: .06em; margin-bottom: -.06em; }
+/* The mask is deep enough for descenders ("y", "p"); the negative margin
+   keeps the line spacing. */
+.hero h1 .line { display: block; overflow: hidden; padding-bottom: .16em; margin-bottom: -.16em; }
 .hero h1 .line > span { display: inline-block; }
 .hero h1 .leaf { color: var(--leaf-text); }
 .hero .below { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px; align-items: end; margin-top: 40px; }
@@ -208,7 +210,10 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 
 .kpis { display: grid; grid-template-columns: 1fr 1fr; border-right: 1px solid var(--line); align-content: start; }
 @media (max-width: 900px) { .kpis { border-right: 0; border-bottom: 1px solid var(--line); } }
-.kpi { padding: 20px 22px; border-bottom: 1px solid var(--line); min-width: 0; }
+/* Label on top, value and note at the bottom: when one label wraps, the two
+   values in that row still line up. */
+.kpi { display: flex; flex-direction: column; padding: 20px 22px; border-bottom: 1px solid var(--line); min-width: 0; }
+.kpi .lbl { margin-bottom: auto; }
 .kpi:nth-child(odd) { border-right: 1px solid var(--line); }
 .lbl { color: var(--faint); font: 600 11px/1 var(--sans); letter-spacing: .09em; text-transform: uppercase; }
 .kpi .v { margin-top: 12px; font: 600 28px/1 var(--mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
@@ -330,6 +335,11 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .dg-curve.dim { stroke: var(--accent-line); stroke-width: 1.5; stroke-dasharray: 4 5; }
 .dg-mid { stroke: var(--fg-2); stroke-width: 1.25; }
 .dg-txt { fill: var(--muted); font: 14px var(--mono); }
+/* SVG text scales with the chart: bigger user units on small screens keep
+   the labels around 11-13px on screen. */
+@media (max-width: 640px) { .dg-txt { font-size: 18px; } }
+@media (max-width: 480px) { .dg-txt { font-size: 22px; } .plot { padding: 24px 16px 18px; } }
+@media (max-width: 360px) { .dg-txt { font-size: 26px; } }
 .dg-txt.strong { fill: var(--fg); font-weight: 600; }
 .dg-txt.accent { fill: var(--accent-2); }
 .dg-bid { fill: var(--bid); }
@@ -393,7 +403,9 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .mini > div { background: var(--panel-2); padding: 14px 16px; min-width: 0; }
 .mini dt { color: var(--faint); font: 600 11px/1 var(--sans); letter-spacing: .09em; text-transform: uppercase; }
 .mini dd { margin: 10px 0 0; font: 600 18px/1 var(--mono); letter-spacing: -.02em; white-space: nowrap; }
-.mini dd span { color: var(--accent-2); font-size: 12px; }
+/* "Top 1%" sits under the rank: on one line it doesn't fit the narrow cells. */
+.mini dd span { display: block; margin-top: 6px; color: var(--accent-2); font-size: 12px; }
+@media (max-width: 420px) { .mini > div { padding: 12px 10px; } .mini dd { font-size: 14px; } }
 
 /* security */
 .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; margin-top: 56px; align-items: start; }
@@ -499,7 +511,7 @@ footer .links a.ico svg { width: 18px; height: 18px; }
   .hero h1 .line:nth-child(3) > span { animation-delay: .28s; }
   .hero h1 .line:nth-child(4) > span { animation-delay: .37s; }
   .d0 { --d: 0s; } .d1 { --d: .55s; } .d2 { --d: .65s; } .d3 { --d: .8s; }
-  @keyframes line-rush { from { transform: translate(-4%, 108%) skewX(-8deg); filter: blur(4px); } 60% { filter: blur(0); } to { transform: none; filter: none; } }
+  @keyframes line-rush { from { transform: translate(-4%, 120%) skewX(-8deg); filter: blur(4px); } 60% { filter: blur(0); } to { transform: none; filter: none; } }
   .rise { animation: rise 1s var(--ease) both; animation-delay: var(--d, .5s); }
   @keyframes rise { from { opacity: 0; translate: 0 16px; } to { opacity: 1; translate: 0 0; } }
   .stage.rise { animation-duration: 1.4s; }
