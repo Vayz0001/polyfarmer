@@ -288,8 +288,11 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .feed.compact .feed-cat { display: none; }
 
 /* ── Overlays: toasts, alerts window, confirm modal, drawer ─────────────── */
-.toasts { position: fixed; top: calc(var(--strip-h) + 10px); right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; width: 340px; }
-.toast { position: relative; display: grid; grid-template-columns: 3px 1fr; gap: 10px; padding: 10px 30px 10px 10px; background: var(--panel-2); border-radius: var(--r); box-shadow: var(--pop); opacity: 0; transform: translateY(-6px); transition: opacity .2s var(--ease), transform .2s var(--ease); cursor: pointer; }
+/* Bottom-right: clear of the page's top-right buttons and the Alerts window;
+   above the drawer (1050/1060) and beside it while it's open. */
+.toasts { position: fixed; bottom: 16px; right: 16px; z-index: 1070; display: flex; flex-direction: column; gap: 8px; width: 340px; pointer-events: none; }
+body:has(#pf-drawer.open) .toasts { right: 436px; }
+.toast { position: relative; display: grid; grid-template-columns: 3px 1fr; gap: 10px; padding: 10px 30px 10px 10px; background: var(--panel-2); border-radius: var(--r); box-shadow: var(--pop); opacity: 0; transform: translateY(6px); pointer-events: auto; transition: opacity .2s var(--ease), transform .2s var(--ease); cursor: pointer; }
 .toast.show { opacity: 1; transform: none; }
 .toast .bar { border-radius: 2px; background: var(--bid); }
 .toast.tone-caution .bar { background: var(--warn); } .toast.tone-err .bar { background: var(--ask); } .toast.tone-info .bar { background: var(--accent); }
@@ -309,8 +312,10 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
 .drawer-scrim { position: fixed; inset: 0; z-index: 1050; background: rgba(4, 6, 9, .5); }
-.drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 1060; width: 420px; background: var(--panel); border-left: 1px solid var(--line-2); box-shadow: var(--pop); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .22s var(--ease); }
-.drawer.open { transform: none; }
+/* Closed: off-screen AND hidden once the slide-out ends (its shadow used to
+   show along the right edge, and its fields stayed reachable with Tab). */
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 1060; width: 420px; background: var(--panel); border-left: 1px solid var(--line-2); box-shadow: var(--pop); display: flex; flex-direction: column; transform: translateX(100%); visibility: hidden; transition: transform .22s var(--ease), visibility 0s linear .22s; }
+.drawer.open { transform: none; visibility: visible; transition: transform .22s var(--ease); }
 .drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 16px; border-bottom: 1px solid var(--line); }
 .drawer-head h3 { font-size: 14px; font-weight: 600; line-height: 1.35; }
 .drawer-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }

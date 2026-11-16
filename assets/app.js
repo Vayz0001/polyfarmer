@@ -197,13 +197,18 @@
   // ── confirm modal (replaces window.confirm for hx-confirm) ─────────────
   function initModal() {
     var m = $("#pf-modal"); if (!m) return;
-    var pending = null;
-    function close() { m.hidden = true; pending = null; }
+    var pending = null, ok = $("#pf-modal-ok");
+    // Back to the button that opened it (it's still on the page: swaps of its
+    // panel are held while the dialog is open).
+    function close() { var back = pending && pending.elt; m.hidden = true; pending = null; if (back && back.isConnected) back.focus(); }
     document.addEventListener("htmx:confirm", function (e) {
       if (!e.detail.question) return;
       e.preventDefault();
       $("#pf-modal-q").textContent = e.detail.question;
-      pending = e.detail; m.hidden = false; $("#pf-modal-ok").focus();
+      // The action's own name ("Remove") on the button; Cancel has focus, so
+      // Enter or Space never confirms by accident.
+      ok.textContent = (e.detail.elt && e.detail.elt.getAttribute("data-confirm-label")) || "Confirm";
+      pending = e.detail; m.hidden = false; $("#pf-modal-cancel").focus();
     });
     // While the dialog is open, don't let a background refresh replace the
     // panel holding the clicked button: htmx silently drops a request whose
@@ -211,19 +216,68 @@
     document.body.addEventListener("htmx:beforeSwap", function (e) {
       if (pending && e.detail.target && e.detail.target.contains(pending.elt)) e.detail.shouldSwap = false;
     });
-    $("#pf-modal-ok").onclick = function () { if (pending) { var d = pending; close(); d.issueRequest(true); } };
+    ok.onclick = function () {
+      if (!pending) return;
+      var d = pending; pending = null; m.hidden = true;
+      // The row may disappear with the response: park focus on its panel.
+      var home = d.elt && d.elt.closest("[tabindex='-1']");
+      if (home) home.focus({ preventScroll: true });
+      d.issueRequest(true);
+    };
     $("#pf-modal-cancel").onclick = close;
     m.addEventListener("click", function (e) { if (e.target === m) close(); });
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !m.hidden) close(); });
+    document.addEventListener("keydown", function (e) {
+      if (m.hidden) return;
+      if (e.key === "Escape") { close(); return; }
+      if (e.key === "Tab") trapTab(e, m);
+    });
+  }
+
+  // Keep Tab / Shift+Tab inside an open dialog or drawer.
+  function trapTab(e, box) {
+    var f = $$("a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])", box)
+      .filter(function (el) { return el.offsetParent !== null; });
+    if (!f.length) { e.preventDefault(); return; }
+    var first = f[0], last = f[f.length - 1];
+    if (!box.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }
 
   // ── drawer (edit leg) ───────────────────────────────────────────────────
-  function drawerOpen() { var d = $("#pf-drawer"); $("#pf-drawer-scrim").hidden = false; d.setAttribute("aria-hidden", "false"); requestAnimationFrame(function () { d.classList.add("open"); }); var f = $("input:not([type=hidden])", d); if (f) f.focus(); }
-  function drawerClose() { var d = $("#pf-drawer"); if (!d) return; d.classList.remove("open"); d.setAttribute("aria-hidden", "true"); $("#pf-drawer-scrim").hidden = true; }
+  // The closed drawer is inert (no Tab stops, no Enter-submit of its hidden
+  // form). Opening focuses its first field once it's visible; every way of
+  // closing it returns focus to the button that opened it (found by id, as
+  // the table may have refreshed meanwhile).
+  var drawerOpener = null;
+  function drawerIsOpen() { var d = $("#pf-drawer"); return !!d && d.classList.contains("open"); }
+  function drawerOpen() {
+    var d = $("#pf-drawer"); $("#pf-drawer-scrim").hidden = false;
+    d.removeAttribute("inert"); d.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(function () {
+      d.classList.add("open");
+      var f = $("input:not([type=hidden])", d); if (f) f.focus({ preventScroll: true });
+    });
+  }
+  function drawerClose() {
+    var d = $("#pf-drawer"); if (!d || !drawerIsOpen()) return;
+    d.classList.remove("open"); d.setAttribute("aria-hidden", "true"); d.setAttribute("inert", "");
+    $("#pf-drawer-scrim").hidden = true;
+    var back = drawerOpener && document.getElementById(drawerOpener); drawerOpener = null;
+    if (back) back.focus();
+  }
   function initDrawer() {
     if (!$("#pf-drawer")) return;
     $("#pf-drawer-scrim").addEventListener("click", drawerClose);
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape") drawerClose(); });
+    document.addEventListener("keydown", function (e) {
+      var modal = $("#pf-modal");
+      if (!drawerIsOpen() || (modal && !modal.hidden)) return;   // the dialog handles its own keys
+      if (e.key === "Escape") drawerClose();
+      else if (e.key === "Tab") trapTab(e, $("#pf-drawer"));
+    });
+    document.body.addEventListener("htmx:beforeRequest", function (e) {
+      if (e.detail.target && e.detail.target.id === "pf-drawer" && e.detail.elt && e.detail.elt.id && !$("#pf-drawer").contains(e.detail.elt)) drawerOpener = e.detail.elt.id;
+    });
     document.body.addEventListener("htmx:afterSwap", function (e) { if (e.target.id === "pf-drawer" && e.target.innerHTML.trim()) drawerOpen(); });
     // Errors from a row action (server sends HX-Trigger: {"pf-error": "…"}). A
     // toast, because the panel's own banner is replaced by the next refresh.

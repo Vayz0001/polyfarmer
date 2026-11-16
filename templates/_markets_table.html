@@ -67,7 +67,7 @@
           {% endif %}
           <button class="btn ghost icon" id="leg-{{ leg.id }}-edit" title="Edit" hx-get="/markets/{{ leg.id }}/edit" hx-target="#pf-drawer"><svg class="i sm"><use href="#i-edit"/></svg></button>
           <button class="btn ghost icon danger" id="leg-{{ leg.id }}-remove" title="Remove" hx-post="/markets/{{ leg.id }}/remove" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#markets-panel"
-                  hx-confirm="Remove the {{ leg.side_label }} leg of “{{ row.label }}”? Its resting order is cancelled."><svg class="i sm"><use href="#i-trash"/></svg></button>
+                  data-confirm-label="Remove" hx-confirm="Remove the {{ leg.side_label }} leg of “{{ row.label }}”? Its resting order is cancelled."><svg class="i sm"><use href="#i-trash"/></svg></button>
         </div>
       </td>
     </tr>

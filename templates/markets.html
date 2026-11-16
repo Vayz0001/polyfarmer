@@ -19,7 +19,7 @@
 <div class="alert warn" style="margin-bottom:14px"><svg class="i"><use href="#i-warn"/></svg><span>No wallet configured — nothing will be placed. <a href="/setup">Add it in Settings</a>.</span></div>
 {% endif %}
 
-<section class="panel" id="markets-panel" hx-get="/markets/table" hx-trigger="pf:state from:body, every 5s" hx-swap="innerHTML">
+<section class="panel" id="markets-panel" tabindex="-1" hx-get="/markets/table" hx-trigger="pf:state from:body, every 5s" hx-swap="innerHTML">
   {% include "_markets_table.html" %}
 </section>
 {% endblock %}
