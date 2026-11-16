@@ -413,7 +413,16 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .mini dd { margin: 10px 0 0; font: 600 18px/1 var(--mono); letter-spacing: -.02em; white-space: nowrap; }
 /* "Top 1%" sits under the rank: on one line it doesn't fit the narrow cells. */
 .mini dd span { display: block; margin-top: 6px; color: var(--accent-2); font-size: 12px; }
-@media (max-width: 420px) { .mini > div { padding: 12px 10px; } .mini dd { font-size: 14px; } }
+/* When the card is too narrow for three columns (narrow phones, and the
+   bento's 5/12 column just above 960px), "YESTERDAY" and "$41.41" don't fit:
+   the stats become rows, label on the left and value on the right. */
+.stat { container-type: inline-size; }
+@container (max-width: 339px) {
+  .mini { grid-template-columns: minmax(0, 1fr); }
+  .mini > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 14px; }
+  .mini dd { margin: 0; text-align: right; }
+  .mini dd span { display: inline; margin: 0 0 0 6px; }
+}
 
 /* security */
 .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; margin-top: 56px; align-items: start; }
