@@ -1474,6 +1474,18 @@ async fn defaults_for_new_markets_save_and_reset() {
     let (_, note) = post("/setup/defaults/from-order", format!("csrf={csrf}&order_size=abc&expires_in=7d"), true).await;
     assert!(note.contains(r#"class="err""#), "{note}");
 
+    // Bad CSRF on the other two routes changes nothing either.
+    let before = std::fs::read_to_string(dir.join("defaults.json")).unwrap();
+    let (_, note) = post("/setup/defaults/from-order", "csrf=wrong&order_size=9&expires_in=7d".into(), true).await;
+    assert!(note.contains("Invalid session"), "{note}");
+    let (_, panel) = post("/setup/defaults/reset", "csrf=wrong".into(), true).await;
+    assert!(panel.contains("Invalid session"), "{panel}");
+    assert_eq!(std::fs::read_to_string(dir.join("defaults.json")).unwrap(), before);
+    // A size the form's input would refuse (step 1) isn't saved.
+    let (_, note) =
+        post("/setup/defaults/from-order", format!("csrf={csrf}&order_size=37.50&expires_in=7d"), true).await;
+    assert!(note.contains("whole number of dollars"), "{note}");
+
     // Reset.
     let (_, panel) = post("/setup/defaults/reset", format!("csrf={csrf}"), true).await;
     assert!(panel.contains("Back to the built-in values") && panel.contains(r#"id="d-size" value="100""#));

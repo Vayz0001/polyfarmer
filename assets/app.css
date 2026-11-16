@@ -172,6 +172,7 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .exp-custom .input[type="number"] { flex: 1; min-width: 0; }
 .exp-custom select.input { flex: 0 0 104px; }
 .help { font-size: 11.5px; color: var(--faint); line-height: 1.45; }
+.help a { text-decoration: underline; text-underline-offset: 2px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 /* segmented control */

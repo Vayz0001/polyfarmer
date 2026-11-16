@@ -40,7 +40,6 @@ const NETWORK_TIMEOUT: Duration = Duration::from_secs(8);
 const TERMINAL_CURSOR: &str = "LTE=";
 /// Book levels per side on the ladder (the ladder area scrolls).
 const LADDER_LEVELS: usize = 50;
-/// Sensible starting order size ($) prefilled in the placement panel.
 /// Live-book pushes are coalesced to at most one per this interval.
 const BOOK_PUSH_MIN_INTERVAL: Duration = Duration::from_millis(250);
 

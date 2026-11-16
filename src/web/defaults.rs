@@ -60,12 +60,19 @@ impl Default for FormDefaults {
 }
 
 impl FormDefaults {
-    /// Parse the form fields with the same rules as starting a market, so a
-    /// saved default can always be submitted as is.
+    /// Parse the form fields with the same rules as starting a market, plus
+    /// the form inputs' own limits (whole dollars from $1, auto-pause from
+    /// 0.1¢), so a saved default can always be submitted as is.
     pub fn from_fields(f: &DefaultsForm) -> Result<Self, String> {
         let order_size = input::order_size_usd(&f.order_size)?;
+        if order_size < dec!(1) || !order_size.fract().is_zero() {
+            return Err("Size must be a whole number of dollars, at least $1.".into());
+        }
         let min_depth_usd = input::depth_usd(&f.min_depth_usd)?;
         let auto_pause_cents = input::volatility_cents(&f.max_volatility_cents)?.map(|v| (v * dec!(100)).normalize());
+        if auto_pause_cents.is_some_and(|c| c < dec!(0.1)) {
+            return Err("Auto-pause must be at least 0.1¢ (or blank for off).".into());
+        }
         let expires = f.expires_in.trim().to_string();
         if !PRESETS.contains(&expires.as_str()) {
             return Err("Choose when new markets expire.".into());
@@ -113,6 +120,7 @@ impl FormDefaults {
     pub fn custom(&self) -> String {
         self.expires_custom.map(|n| n.to_string()).unwrap_or_default()
     }
+    #[cfg(test)]
     pub fn is_builtin(&self) -> bool {
         *self == Self::default()
     }
@@ -126,13 +134,10 @@ fn path(dir: &Path) -> PathBuf {
 /// be used (unreadable, too big, not ours, or a value the form would refuse).
 pub fn load(dir: &Path) -> FormDefaults {
     let p = path(dir);
-    let Ok(meta) = std::fs::metadata(&p) else { return FormDefaults::default() };
-    if meta.len() > MAX_FILE_BYTES {
-        tracing::warn!("{} is too large; using the built-in order defaults", p.display());
+    if !saved(dir) {
         return FormDefaults::default();
     }
-    let parsed = std::fs::read_to_string(&p)
-        .map_err(|e| e.to_string())
+    let parsed = read_capped(&p)
         .and_then(|s| serde_json::from_str::<FormDefaults>(&s).map_err(|e| e.to_string()))
         // Round-trip through the form rules: only values the form accepts.
         .and_then(|d| FormDefaults::from_fields(&d.to_fields()));
@@ -143,6 +148,25 @@ pub fn load(dir: &Path) -> FormDefaults {
             FormDefaults::default()
         }
     }
+}
+
+/// Whether there are saved defaults (a regular file; not a pipe or device).
+pub fn saved(dir: &Path) -> bool {
+    std::fs::metadata(path(dir)).is_ok_and(|m| m.is_file())
+}
+
+/// The file's text, refusing anything larger than `MAX_FILE_BYTES` (checked
+/// while reading, not from metadata that could change in between).
+fn read_capped(p: &Path) -> Result<String, String> {
+    use std::io::Read;
+    let mut s = String::new();
+    std::fs::File::open(p)
+        .and_then(|f| f.take(MAX_FILE_BYTES + 1).read_to_string(&mut s))
+        .map_err(|e| e.to_string())?;
+    if s.len() as u64 > MAX_FILE_BYTES {
+        return Err("too large".into());
+    }
+    Ok(s)
 }
 
 fn save(dir: &Path, d: &FormDefaults) -> Result<(), String> {
@@ -184,6 +208,8 @@ pub struct DefaultsForm {
 pub struct DefaultsPanelTemplate {
     pub csrf_token: String,
     pub d: FormDefaults,
+    /// A defaults file exists ("your values", Reset offered).
+    pub d_saved: bool,
     pub d_notice: Option<String>,
     pub d_error: Option<String>,
 }
@@ -203,6 +229,7 @@ async fn panel(state: &WebState, session: &Session, notice: Option<String>, erro
     render_tpl(&DefaultsPanelTemplate {
         csrf_token: csrf_token(session).await,
         d: load(state.store.dir()),
+        d_saved: saved(state.store.dir()),
         d_notice: notice,
         d_error: error,
     })
@@ -225,20 +252,21 @@ pub async fn save_settings(
     let parsed = match FormDefaults::from_fields(&form) {
         Ok(d) => d,
         // Keep what was typed, so it can be fixed.
-        Err(e) => return typed_panel(&session, &form, e).await,
+        Err(e) => return typed_panel(&state, &session, &form, e).await,
     };
     match save(state.store.dir(), &parsed) {
         Ok(()) => panel(&state, &session, Some("Saved. New markets start with these values.".into()), None)
             .await
             .into_response(),
-        Err(e) => typed_panel(&session, &form, format!("Couldn't save: {e}")).await,
+        Err(e) => typed_panel(&state, &session, &form, format!("Couldn't save: {e}")).await,
     }
 }
 
-async fn typed_panel(session: &Session, form: &DefaultsForm, error: String) -> Response {
+async fn typed_panel(state: &WebState, session: &Session, form: &DefaultsForm, error: String) -> Response {
     render_tpl(&DefaultsPanelTemplate {
         csrf_token: csrf_token(session).await,
         d: typed(form),
+        d_saved: saved(state.store.dir()),
         d_notice: None,
         d_error: Some(error),
     })
@@ -342,6 +370,9 @@ mod tests {
         );
         for (bad, why) in [
             (form("0", "500", "5", "7d", "", ""), "size"),
+            (form("37.50", "500", "5", "7d", "", ""), "size the input's step=1 refuses"),
+            (form("0.5", "500", "5", "7d", "", ""), "size under the input's min=1"),
+            (form("100", "500", "0.05", "7d", "", ""), "auto-pause under the input's min=0.1"),
             (form("100", "-1", "5", "7d", "", ""), "depth"),
             (form("100", "500", "500", "7d", "", ""), "auto-pause"),
             (form("100", "500", "5", "2w", "", ""), "preset"),
@@ -359,6 +390,13 @@ mod tests {
         let d = FormDefaults::from_fields(&form("40", "250", "3", "custom", "2", "d")).unwrap();
         save(&dir, &d).unwrap();
         assert_eq!(load(&dir), d);
+        assert!(saved(&dir));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(path(&dir)).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "private like the other data files");
+        }
         reset(&dir).unwrap();
         assert!(load(&dir).is_builtin());
         reset(&dir).unwrap(); // nothing to remove is fine
@@ -381,8 +419,15 @@ mod tests {
         std::fs::write(path(&dir), r#"{"order_size": "250"}"#).unwrap();
         let d = load(&dir);
         assert_eq!((d.size(), d.depth()), ("250".into(), "500".into()));
+        // Values the form's inputs would refuse: ignored.
+        std::fs::write(path(&dir), r#"{"order_size": "37.5"}"#).unwrap();
+        assert!(load(&dir).is_builtin());
         // Oversized: ignored.
         std::fs::write(path(&dir), " ".repeat(MAX_FILE_BYTES as usize + 1)).unwrap();
         assert!(load(&dir).is_builtin());
+        // Not a regular file: ignored (and not read).
+        std::fs::remove_file(path(&dir)).unwrap();
+        std::fs::create_dir(path(&dir)).unwrap();
+        assert!(!saved(&dir) && load(&dir).is_builtin());
     }
 }

@@ -1,5 +1,5 @@
 <section class="panel" id="defaults-panel">
-  <div class="panel-head"><h2>Defaults for new markets</h2><span class="meta">{% if d.is_builtin() %}built-in values{% else %}your values{% endif %}</span></div>
+  <div class="panel-head"><h2>Defaults for new markets</h2><span class="meta">{% if d_saved %}your values{% else %}built-in values{% endif %}</span></div>
   <div class="panel-body">
     <form class="stack defaults-form" method="post" action="/setup/defaults" hx-post="/setup/defaults" hx-target="#defaults-panel" hx-swap="outerHTML">
       <input type="hidden" name="csrf" value="{{ csrf_token }}" />
@@ -38,8 +38,8 @@
         <p class="help exp-custom-help">Whole hours or days, from 1 hour to 1 year.</p>
       </div>
       <div class="actions">
-        <button class="btn" type="submit">Save defaults</button>
-        {% if !d.is_builtin() %}<button class="btn ghost" type="button" hx-post="/setup/defaults/reset" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#defaults-panel" hx-swap="outerHTML">Reset to built-in</button>{% endif %}
+        <button class="btn" type="submit" id="d-save">Save defaults</button>
+        {% if d_saved %}<button class="btn ghost" type="button" id="d-reset" hx-post="/setup/defaults/reset" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#defaults-panel" hx-swap="outerHTML">Reset to built-in</button>{% endif %}
       </div>
     </form>
   </div>
