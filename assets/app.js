@@ -319,7 +319,8 @@
   // reads the response the form already gets.)
   document.addEventListener("htmx:afterRequest", function (e) {
     var d = e.detail;
-    if (!d || !d.elt || d.elt.id !== "order-form" || !d.successful || !d.xhr || !d.xhr.getResponseHeader("HX-Redirect")) return;
+    // (htmx follows HX-Redirect before it sets d.successful, so check the status.)
+    if (!d || !d.elt || d.elt.id !== "order-form" || !d.xhr || d.xhr.status < 200 || d.xhr.status >= 300 || !d.xhr.getResponseHeader("HX-Redirect")) return;
     var h = $(".mv-head h1");
     try { sessionStorage.setItem("pf-started", ((h && h.textContent) || "").trim().slice(0, 200)); } catch (_) {}
   });

@@ -440,6 +440,8 @@ details.adv summary:hover { color: var(--fg); }
   .page { padding: 16px 16px 56px; }
   .grid.side-main { grid-template-columns: minmax(0, 1fr); }
   #markets-panel td.mkt > * { max-width: 180px; }
+  #browse-table td.mkt > * { max-width: 200px; }
+  #browse-table :is(th, td) { padding-left: 6px; padding-right: 6px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
