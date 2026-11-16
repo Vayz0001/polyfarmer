@@ -92,6 +92,10 @@
   BookWidget.prototype.setMode = function (mode) {
     if (mode === this.mode) return;
     this.mode = mode; this.ticks = 0; this.thin = 0;
+    // With reduced motion there is no clock, so each scene is shown at its
+    // point in a single frame: the book has just moved, or thinned out.
+    if (reduce && mode === "follow") this.lastBest = this.bestBid - this.o.step;
+    if (reduce && mode === "guard") this.thin = 1;
     this.render();
   };
 

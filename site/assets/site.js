@@ -31,19 +31,50 @@
     });
   }
 
-  // ── story: the step in the middle of the screen drives the window ────
+  // ── story: which step's scene the window plays ───────────────────────
+  // Wide screens: the window is pinned and the step in the middle of the
+  // screen drives it. Narrow screens: the window sits above the steps, so
+  // the steps can't be centred while it's visible; instead it cycles through
+  // the scenes while it's on screen (paused on hover or focus). Choosing a
+  // step, or tapping the window, takes manual control until it scrolls away.
   var steps = $$(".story .step");
+  var storyWin = document.querySelector(".story .window");
   if (steps.length && "IntersectionObserver" in window) {
-    var current = null;
+    var current = steps.filter(function (s) { return s.classList.contains("on"); })[0] || steps[0];
+    var narrow = window.matchMedia("(max-width: 960px)");
+    var show = function (step) {
+      if (!step || step === current) return;
+      current = step;
+      steps.forEach(function (s) { s.classList.toggle("on", s === step); });
+      document.dispatchEvent(new CustomEvent("pf:step", { detail: step.getAttribute("data-step") }));
+    };
     var stepIo = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (!e.isIntersecting || e.target === current) return;
-        current = e.target;
-        steps.forEach(function (s) { s.classList.toggle("on", s === current); });
-        document.dispatchEvent(new CustomEvent("pf:step", { detail: current.getAttribute("data-step") }));
-      });
+      if (narrow.matches) return;
+      entries.forEach(function (e) { if (e.isIntersecting) show(e.target); });
     }, { rootMargin: "-45% 0px -45% 0px" });
     steps.forEach(function (s) { stepIo.observe(s); });
+
+    var cycle = null, inView = false, hovered = false, held = false;
+    var syncCycle = function () {
+      var want = narrow.matches && !reduce && inView && !hovered && !held && !document.hidden;
+      if (want && cycle === null) cycle = setInterval(function () { show(steps[(steps.indexOf(current) + 1) % steps.length]); }, 6500);
+      if (!want && cycle !== null) { clearInterval(cycle); cycle = null; }
+    };
+    if (storyWin) {
+      new IntersectionObserver(function (e) {
+        inView = e[0].intersectionRatio >= 0.5;
+        if (!inView) held = false;
+        syncCycle();
+      }, { threshold: [0, 0.5, 1] }).observe(storyWin);
+      storyWin.addEventListener("pointerenter", function (e) { if (e.pointerType === "mouse") { hovered = true; syncCycle(); } });
+      storyWin.addEventListener("pointerleave", function (e) { if (e.pointerType === "mouse") { hovered = false; syncCycle(); } });
+      storyWin.addEventListener("focusin", function () { hovered = true; syncCycle(); });
+      storyWin.addEventListener("focusout", function () { hovered = false; syncCycle(); });
+      storyWin.addEventListener("click", function () { held = !held; syncCycle(); });
+    }
+    steps.forEach(function (s) { s.addEventListener("click", function () { held = true; syncCycle(); show(s); }); });
+    document.addEventListener("visibilitychange", syncCycle);
+    if (narrow.addEventListener) narrow.addEventListener("change", syncCycle);
   }
 
   // ── scoring explorer ─────────────────────────────────────────────────
