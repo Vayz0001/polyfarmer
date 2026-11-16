@@ -1517,16 +1517,12 @@ pub async fn edit_submit(
         }
     };
     let new_benchmark = if max_volatility.is_some() && max_volatility != old_vol {
-        let engine_bb = state.engine.read().await.books.get(&token).and_then(|b| b.best_bid);
-        match engine_bb {
+        match best_bid_now(&state, &token).await {
             Some(bb) => Some(bb),
-            None => match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(&token)).await {
-                Ok(Ok(b)) if b.best_bid.is_some() => b.best_bid,
-                _ => {
-                    return fail("Could not read the current best bid for the auto-pause benchmark — try again.".into())
-                        .await
-                }
-            },
+            None => {
+                return fail("Could not read the current best bid for the auto-pause benchmark — try again.".into())
+                    .await
+            }
         }
     } else {
         None
@@ -1729,16 +1725,49 @@ async fn persist_configs(state: &WebState) -> Result<(), String> {
     save_markets(&markets_file, &configs).map_err(|e| e.to_string())
 }
 
+/// The engine's (WS-fed) best bid for `token`, else a fresh REST read.
+async fn best_bid_now(state: &WebState, token: &str) -> Option<Decimal> {
+    let engine_bb = state.engine.read().await.books.get(token).and_then(|b| b.best_bid);
+    if engine_bb.is_some() {
+        return engine_bb;
+    }
+    match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(token)).await {
+        Ok(Ok(b)) => b.best_bid,
+        _ => None,
+    }
+}
+
 /// Pause/resume one leg (`pausing` picks the direction).
 async fn set_paused(state: &WebState, id: &str, pausing: bool) -> Result<(), String> {
-    let (configs_snapshot, order_to_cancel, markets_file) = {
+    // Resuming a paused leg with an auto-pause limit restarts that limit from
+    // today's best bid. Without this, a leg auto-paused after a move would
+    // stay over its limit and never quote again.
+    let restart_from = if pausing {
+        None
+    } else {
+        let leg = {
+            let s = state.engine.read().await;
+            s.configs.iter().find(|c| c.id == id).map(|c| (c.paused, c.max_volatility.is_some(), c.token_id.clone()))
+        };
+        match leg {
+            Some((true, true, token)) => match best_bid_now(state, &token).await {
+                Some(bb) => Some(bb),
+                None => return Err("Could not read the current best bid to restart auto-pause — try again.".into()),
+            },
+            _ => None,
+        }
+    };
+    let (configs_snapshot, order_to_cancel, markets_file, old_benchmark) = {
         let mut s = state.engine.write().await;
-        if !s.configs.iter().any(|c| c.id == id) {
+        let Some(c) = s.configs.iter_mut().find(|c| c.id == id) else {
             return Ok(()); // already gone
+        };
+        let old_benchmark = c.benchmark_bid;
+        // Only a leg still paused with a limit now: a concurrent resume or edit may have got here first.
+        if let Some(bb) = restart_from.filter(|_| c.paused && c.max_volatility.is_some()) {
+            c.benchmark_bid = Some(bb);
         }
-        for c in s.configs.iter_mut().filter(|c| c.id == id) {
-            c.paused = pausing;
-        }
+        c.paused = pausing;
         if !pausing {
             // Resuming is a fresh start: no leftover retry delay or failure count,
             // nor the two-sided rule's back-off (engine::pairing).
@@ -1756,13 +1785,14 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool) -> Result<(), Str
         } else {
             None
         };
-        (s.configs.clone(), order_to_cancel, s.markets_file.clone())
+        (s.configs.clone(), order_to_cancel, s.markets_file.clone(), old_benchmark)
     };
 
     if let Err(e) = save_markets(&markets_file, &configs_snapshot) {
         let mut s = state.engine.write().await;
         for c in s.configs.iter_mut().filter(|c| c.id == id) {
             c.paused = !pausing;
+            c.benchmark_bid = old_benchmark;
         }
         return Err(format!("Failed to save: {e}"));
     }

@@ -17,6 +17,11 @@ anything may change between releases.
 
 ### Fixed
 
+- Auto-pause: resuming a leg it had paused didn't restart the limit, so if the price hadn't come all the way back the
+  leg sat on "Waiting" with no order and no message. Resume now restarts the limit from the current best bid (as
+  changing the limit in Edit already did). A leg with no order yet whose best bid moves past its limit now pauses and
+  says so, instead of waiting silently, and an auto-pause raises one alert even when the timer and the price feed
+  see the move at the same moment.
 - Accessibility (Lighthouse 100 on every dashboard page): the payout charts, Find markets' sort menus and the
   market page's size boxes have names for screen readers, the hover tooltip stays out of the accessibility tree
   until it shows, KPI links are underlined rather than told apart by colour alone, and Overview no longer jumps as
