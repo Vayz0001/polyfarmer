@@ -17,6 +17,10 @@ anything may change between releases.
 
 ### Fixed
 
+- Accessibility (Lighthouse 100 on every dashboard page): the payout charts, Find markets' sort menus and the
+  market page's size boxes have names for screen readers, the hover tooltip stays out of the accessibility tree
+  until it shows, KPI links are underlined rather than told apart by colour alone, and Overview no longer jumps as
+  its panels load. The browser console no longer warns about an unrecognised `bluetooth` permission on every page.
 - The market page's order book drew each depth bar from that level's own size, while the Total column next to it is a
   running total, so a row could show a small bar beside a big total. Bars now draw the running total, growing away from
   the spread, on one scale for bids and asks (the deeper side is the full width), as on polyfarmer.xyz.

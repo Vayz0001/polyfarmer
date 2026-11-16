@@ -1,5 +1,5 @@
 {% if !engine_running %}
-<div class="empty"><h3>Engine not running</h3><div>Today's reward data needs your authenticated wallet. <a href="/setup">Configure it in Settings</a>.</div></div>
+<div class="empty"><p class="empty-title">Engine not running</p><div>Today's reward data needs your authenticated wallet. <a href="/setup">Configure it in Settings</a>.</div></div>
 {% else if let Some(e) = error %}
 <div class="panel-body"><div class="alert err"><svg class="i"><use href="#i-warn"/></svg>{{ e }}</div></div>
 {% else %}

@@ -14,15 +14,15 @@
     <form id="browse-form" class="toolbar" style="flex:1"
           hx-get="/markets/browse/results" hx-target="#browse-results" hx-swap="innerHTML"
           hx-trigger="input changed delay:300ms from:#browse-q, change from:#browse-sort, change from:#browse-dir">
-      <div class="affix" style="flex:1;max-width:420px"><input class="input" type="search" name="q" id="browse-q" placeholder="Search markets…" value="{{ q }}" style="height:30px" /></div>
-      <select class="input" name="sort" id="browse-sort" style="width:auto;height:30px">
+      <div class="affix" style="flex:1;max-width:420px"><input class="input" type="search" name="q" id="browse-q" aria-label="Search markets" placeholder="Search markets…" value="{{ q }}" style="height:30px" /></div>
+      <select class="input" name="sort" id="browse-sort" aria-label="Sort by" style="width:auto;height:30px">
         <option value="rate_per_day" {% if sort == "rate_per_day" %}selected{% endif %}>Daily pool</option>
         <option value="competitiveness" {% if sort == "competitiveness" %}selected{% endif %}>Competition</option>
         <option value="spread" {% if sort == "spread" %}selected{% endif %}>Spread</option>
         <option value="volume_24hr" {% if sort == "volume_24hr" %}selected{% endif %}>24h volume</option>
         <option value="end_date" {% if sort == "end_date" %}selected{% endif %}>End date</option>
       </select>
-      <select class="input" name="dir" id="browse-dir" style="width:auto;height:30px">
+      <select class="input" name="dir" id="browse-dir" aria-label="Sort order" style="width:auto;height:30px">
         <option value="DESC" {% if dir == "DESC" %}selected{% endif %}>High → low</option>
         <option value="ASC" {% if dir == "ASC" %}selected{% endif %}>Low → high</option>
       </select>

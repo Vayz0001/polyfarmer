@@ -240,7 +240,7 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .mkt-sub { color: var(--faint); font-size: 11.5px; margin-top: 2px; }
 .thumb { width: 26px; height: 26px; border-radius: 5px; object-fit: cover; flex: none; background: var(--panel-2); }
 .empty { padding: 40px 20px; text-align: center; color: var(--muted); }
-.empty h3 { color: var(--fg); font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.empty .empty-title { color: var(--fg); font-size: 14px; font-weight: 600; margin-bottom: 4px; }
 .empty .actions { justify-content: center; margin-top: 14px; }
 .cell-stack { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; }
 .cell-stack small { color: var(--faint); font-size: 11px; white-space: nowrap; }
@@ -253,12 +253,19 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .kpi .k { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 550; display: flex; align-items: center; gap: 6px; }
 .kpi .v { font: 600 21px/1.2 var(--mono); letter-spacing: -.02em; margin-top: 6px; white-space: nowrap; }
 .kpi .s { color: var(--muted); font-size: 11.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Links in KPI sub-lines are underlined, not told apart by colour alone. */
+.kpi .s a { text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
 
 /* skeletons */
 .skel { display: inline-block; height: 12px; border-radius: 3px; background: linear-gradient(90deg, var(--panel-2), var(--hover), var(--panel-2)); background-size: 200% 100%; animation: pf-shimmer 1.2s linear infinite; }
 .skel.v { height: 22px; width: 90px; margin-top: 8px; }
 .skel-rows { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .skel-rows .skel { width: 100%; }
+/* Placeholders as tall as what replaces them, so the page doesn't jump when
+   the fragments load (the charts have a fixed height). */
+:is(#kpis, #rewards-kpis) .kpis:has(.skel) .kpi { min-height: 95px; }
+.ov-rewards:has(> .skel-rows) { min-height: 228px; }
+.rw-history:has(> .skel-rows) { min-height: 234px; }
 @keyframes pf-shimmer { to { background-position: -200% 0; } }
 @keyframes pf-spin { to { transform: rotate(360deg); } }
 
@@ -334,6 +341,8 @@ body:has(#pf-drawer.open) .toasts { right: 436px; }
    "tooltips"), so no overflow:auto / sticky container can clip it. */
 #pf-tip { position: fixed; z-index: 2000; width: max-content; max-width: 260px; padding: 8px 10px; background: var(--panel-2); color: var(--fg-2); font: 400 11.5px/1.45 var(--sans); text-align: left; border-radius: var(--r-sm); box-shadow: var(--pop); pointer-events: none; opacity: 0; transition: opacity .1s; }
 #pf-tip.show { opacity: 1; }
+/* Hidden visually, still read by screen readers. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* ── Markets table extras ───────────────────────────────────────────────── */
 .zone { display: inline-flex; align-items: center; gap: 5px; font: 12px var(--mono); }

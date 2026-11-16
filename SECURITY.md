@@ -103,7 +103,7 @@ responses, including redirects and errors:
 | `Referrer-Policy` | `no-referrer` | Prevents the browser from sending the dashboard URL as a referrer. |
 | `Cross-Origin-Opener-Policy` | `same-origin` | Isolates the page's browsing context from cross-origin openers. |
 | `Cross-Origin-Resource-Policy` | `same-origin` | Prevents other origins from loading protected resources. |
-| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), interest-cohort=()` | Disables these browser capabilities for the dashboard. |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), interest-cohort=()` | Disables these browser capabilities for the dashboard. |
 | `Strict-Transport-Security` | `max-age=31536000` **only** when `DASHBOARD_SECURE_COOKIES` is enabled | Instructs browsers to use HTTPS on subsequent visits. It has no effect over plain HTTP; enable secure cookies only when HTTPS is actually provided. No `includeSubDomains` or `preload` directive is set. |
 | `Cache-Control` | `no-store` on non-`/assets/` responses unless a handler already set a cache policy | Prevents caching of account data in pages and fragments. Assets use their own cache validators; handler-specific policies (such as SSE) are preserved. |
 

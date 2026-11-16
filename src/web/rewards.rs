@@ -58,7 +58,7 @@ pub(super) fn rewards_chart_svg(series: &[(NaiveDate, Decimal)]) -> String {
     const H: f64 = 120.0;
     if series.iter().all(|(_, v)| *v <= dec!(0)) {
         return format!(
-            "<svg viewBox=\"0 0 {W} {H}\" class=\"bars-svg\" preserveAspectRatio=\"none\" role=\"img\">\
+            "<svg viewBox=\"0 0 {W} {H}\" class=\"bars-svg\" preserveAspectRatio=\"none\" role=\"img\" aria-label=\"Daily reward payouts, last 30 days: none yet\">\
              <text x=\"{}\" y=\"{}\" class=\"chart-empty\" text-anchor=\"middle\">No payouts in the last 30 days — each day is paid after midnight UTC</text></svg>",
             W / 2.0, H / 2.0
         );
@@ -82,7 +82,7 @@ pub(super) fn rewards_chart_svg(series: &[(NaiveDate, Decimal)]) -> String {
             )
         })
         .collect();
-    format!("<svg viewBox=\"0 0 {W} {H}\" class=\"bars-svg\" preserveAspectRatio=\"none\" role=\"img\">{bars}</svg>")
+    format!("<svg viewBox=\"0 0 {W} {H}\" class=\"bars-svg\" preserveAspectRatio=\"none\" role=\"img\" aria-label=\"Daily reward payouts, last 30 days\">{bars}</svg>")
 }
 
 // ── Today's earnings (shared) ───────────────────────────────────────────────
@@ -565,6 +565,10 @@ mod tests {
         assert_eq!(sum_last_days(&s, 7), dec!(2));
         assert_eq!(sum_last_days(&s, 30), dec!(7));
         assert!(rewards_chart_svg(&s).contains("<rect"));
+        // Screen readers get a name for the chart, with or without bars.
+        assert!(rewards_chart_svg(&s).contains("aria-label=\"Daily reward payouts, last 30 days\""));
+        let none = vec![(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(), dec!(0))];
+        assert!(rewards_chart_svg(&none).contains("aria-label=\"Daily reward payouts, last 30 days: none yet\""));
     }
 
     #[test]
