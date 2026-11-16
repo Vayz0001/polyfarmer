@@ -203,9 +203,13 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 
 .tbl-wrap { overflow-x: auto; }
 .tbl { width: 100%; border-collapse: collapse; }
-.tbl th { position: sticky; top: 0; height: 32px; padding: 0 12px; text-align: left; font-size: 10.5px; font-weight: 550; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); background: var(--panel); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tbl th { position: sticky; top: var(--strip-h); z-index: 1; height: 32px; padding: 0 12px; text-align: left; font-size: 10.5px; font-weight: 550; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); background: var(--panel); border-bottom: 1px solid var(--line); white-space: nowrap; }
 .tbl td { height: 36px; padding: 6px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: 12.5px; }
 .tbl tr:last-child td { border-bottom: 0; }
+/* Headers stick below the status bar when the page scrolls; inside their own
+   scroll box they stick to its top. */
+.tbl-wrap .tbl th, .tbl-scroll .tbl th { top: 0; }
+.tbl-scroll { max-height: 320px; overflow-y: auto; margin-top: 8px; }
 .tbl tbody tr:hover td { background: color-mix(in srgb, var(--hover) 55%, transparent); }
 .tbl tr.dim td { opacity: .55; }
 .tbl tr.dim:hover td { opacity: 1; }
@@ -269,7 +273,7 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .chip:hover { color: var(--fg); border-color: var(--faint); }
 .chip.selected { background: var(--fg); border-color: var(--fg); color: var(--bg); }
 .feed { display: flex; flex-direction: column; }
-.feed-day { position: sticky; top: 0; z-index: 1; padding: 10px 14px 6px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); background: var(--panel); border-bottom: 1px solid var(--line); }
+.feed-day { position: sticky; top: var(--strip-h); z-index: 1; padding: 10px 14px 6px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); background: var(--panel); border-bottom: 1px solid var(--line); }
 .feed-row { display: grid; grid-template-columns: 8px 92px 1fr auto; align-items: start; gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
 .feed-row:last-child { border-bottom: 0; }
 .feed-row .dot { margin-top: 5px; }
@@ -297,6 +301,7 @@ select.input { padding-right: 28px; appearance: none; background-image: url("dat
 .win-bar .t { font-weight: 600; font-size: 12px; }
 .win-bar a { margin-left: auto; font-size: 11.5px; color: var(--muted); }
 .win-body { flex: 1; overflow-y: auto; }
+.win-body .feed-day { top: 0; }
 
 .modal { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; background: rgba(4, 6, 9, .6); backdrop-filter: blur(2px); }
 .modal-card { width: 420px; max-width: 92vw; background: var(--panel); border-radius: 10px; box-shadow: var(--pop); padding: 18px; }

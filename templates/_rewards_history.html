@@ -6,7 +6,7 @@
   {{ chart_svg|safe }}
   <details class="adv" style="margin-top:12px">
     <summary><svg class="i sm"><use href="#i-chev"/></svg>Show as table ({{ rows.len() }} day{% if rows.len() != 1 %}s{% endif %})</summary>
-    <div style="max-height:320px;overflow-y:auto;margin-top:8px">
+    <div class="tbl-scroll">
       <table class="tbl">
         <thead><tr><th>Day earned (UTC)</th><th>Paid</th><th class="num">Amount</th></tr></thead>
         <tbody>
