@@ -305,32 +305,52 @@
         <button class="tab" role="tab" id="tab-macos" aria-controls="pane-macos" aria-selected="false" tabindex="-1">macOS</button>
         <button class="tab" role="tab" id="tab-windows" aria-controls="pane-windows" aria-selected="false" tabindex="-1">Windows</button>
       </div>
-      <div role="tabpanel" id="pane-linux" aria-labelledby="tab-linux" class="code">
-        <div class="label"><span>Debian or Ubuntu, in a terminal</span><button class="copy" type="button" data-copy="pre-linux" aria-label="Copy commands" title="Copy"><svg class="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><svg class="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>
-<pre id="pre-linux">sudo apt install build-essential cmake pkg-config libssl-dev git curl
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
-cd polyfarmer
-cargo run --release</pre>
-      </div>
-      <div role="tabpanel" id="pane-macos" aria-labelledby="tab-macos" class="code" hidden>
-        <div class="label"><span>In Terminal (skip the first two lines if Rust is installed)</span><button class="copy" type="button" data-copy="pre-macos" aria-label="Copy commands" title="Copy"><svg class="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><svg class="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>
-<pre id="pre-macos">xcode-select --install
+      <!-- Each block is copied whole; a pane splits into steps where a
+           command has to finish first (an installer window) or needs a new
+           shell. Panes stay visible without JavaScript; site.js shows one. -->
+      <div role="tabpanel" id="pane-linux" aria-labelledby="tab-linux" class="pane">
+        <div class="code">
+          <div class="label"><span>Linux (Debian or Ubuntu), in a terminal</span><button class="copy" type="button" data-copy="pre-linux" aria-label="Copy commands" title="Copy"><svg class="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><svg class="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>
+<pre id="pre-linux">sudo apt update &amp;&amp; sudo apt install -y build-essential cmake pkg-config libssl-dev git curl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+. "$HOME/.cargo/env"
 git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
 cd polyfarmer
 cargo run --release</pre>
+        </div>
+        <p class="after">Try it without a wallet first: <code>DEMO=1 cargo run --example serve</code></p>
       </div>
-      <div role="tabpanel" id="pane-windows" aria-labelledby="tab-windows" class="code" hidden>
-        <div class="label"><span>In PowerShell, then reopen it before the last three lines</span><button class="copy" type="button" data-copy="pre-windows" aria-label="Copy commands" title="Copy"><svg class="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><svg class="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>
-<pre id="pre-windows">winget install --id Git.Git -e
+      <div role="tabpanel" id="pane-macos" aria-labelledby="tab-macos" class="pane">
+        <div class="code">
+          <div class="label"><span>macOS, step 1 · Apple's developer tools (skip if installed)</span><button class="copy" type="button" data-copy="pre-macos-1" aria-label="Copy commands" title="Copy"><svg class="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><svg class="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>
+<pre id="pre-macos-1">xcode-select --install</pre>
+        </div>
+        <div class="code">
+          <div class="label"><span>Step 2 · once that installer finishes, in Terminal</span><button class="copy" type="button" data-copy="pre-macos-2" aria-label="Copy commands" title="Copy"><svg class="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><svg class="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>
+<pre id="pre-macos-2">curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+. "$HOME/.cargo/env"
+git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
+cd polyfarmer
+cargo run --release</pre>
+        </div>
+        <p class="after">Try it without a wallet first: <code>DEMO=1 cargo run --example serve</code></p>
+      </div>
+      <div role="tabpanel" id="pane-windows" aria-labelledby="tab-windows" class="pane">
+        <div class="code">
+          <div class="label"><span>Windows, step 1 · in PowerShell</span><button class="copy" type="button" data-copy="pre-windows-1" aria-label="Copy commands" title="Copy"><svg class="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><svg class="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>
+<pre id="pre-windows-1">winget install --id Git.Git -e
 winget install --id Rustlang.Rustup -e
-winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
-git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621"</pre>
+        </div>
+        <div class="code">
+          <div class="label"><span>Step 2 · close PowerShell, open a new one, then</span><button class="copy" type="button" data-copy="pre-windows-2" aria-label="Copy commands" title="Copy"><svg class="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><svg class="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></div>
+<pre id="pre-windows-2">git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
 cd polyfarmer
 cargo run --release</pre>
+        </div>
+        <p class="after">Try it without a wallet first: <code>$env:DEMO = "1"; cargo run --example serve</code></p>
       </div>
-      <p class="after">Try it without a wallet first: <code>DEMO=1 cargo run --example serve</code>. Other distributions, first-run steps and remote access are in the <a href="https://github.com/Vayz0001/polyfarmer#install" rel="noopener">README</a>.</p>
+      <p class="after">Other distributions, first-run steps and remote access are in the <a href="https://github.com/Vayz0001/polyfarmer#install" rel="noopener">README</a>.</p>
     </div>
   </div>
 </section>

@@ -111,6 +111,9 @@
       });
       if (focus) tab.focus();
     }
+    // Every pane is visible without JavaScript; show only the selected one.
+    var initial = tabs.filter(function (t) { return t.getAttribute("aria-selected") === "true"; })[0] || tabs[0];
+    if (initial) select(initial, false);
     tabs.forEach(function (t, i) {
       t.addEventListener("click", function () { select(t, false); });
       t.addEventListener("keydown", function (e) {
