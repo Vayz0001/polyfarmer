@@ -1,0 +1,46 @@
+<section class="panel" id="defaults-panel">
+  <div class="panel-head"><h2>Defaults for new markets</h2><span class="meta">{% if d_saved %}your values{% else %}built-in values{% endif %}</span></div>
+  <div class="panel-body">
+    <form class="stack defaults-form" method="post" action="/setup/defaults" hx-post="/setup/defaults" hx-target="#defaults-panel" hx-swap="outerHTML">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+      <p class="help">The new-order form starts with these. Markets you already farm keep their own settings.</p>
+      {% if let Some(n) = d_notice %}<div class="alert ok" role="status">{{ n }}</div>{% endif %}
+      {% if let Some(e) = d_error %}<div class="alert err" role="alert">{{ e }}</div>{% endif %}
+      <div class="field">
+        <label class="label" for="d-size">Size <span class="hint">split across both sides in Both sides mode</span></label>
+        <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="1" min="1" name="order_size" id="d-size" value="{{ d.size() }}" required /><span class="suf">USD</span></div>
+      </div>
+      <div class="field">
+        <label class="label" for="d-depth">Depth ahead <span class="hint">minimum, USD</span></label>
+        <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="any" min="0" name="min_depth_usd" id="d-depth" value="{{ d.depth() }}" /><span class="suf">USD</span></div>
+      </div>
+      <div class="field">
+        <label class="label" for="d-vol">Auto-pause <span class="hint">¢ either way, optional</span></label>
+        <div class="affix"><input class="input mono" type="number" step="any" min="0.1" name="max_volatility_cents" id="d-vol" value="{{ d.auto_pause() }}" placeholder="off" /><span class="suf">¢</span></div>
+      </div>
+      <div class="field exp-field">
+        <label class="label" for="d-exp">Expires</label>
+        <select class="input" name="expires_in" id="d-exp">
+          <option value="1d"{% if d.expires == "1d" %} selected{% endif %}>1 day</option>
+          <option value="3d"{% if d.expires == "3d" %} selected{% endif %}>3 days</option>
+          <option value="7d"{% if d.expires == "7d" %} selected{% endif %}>7 days</option>
+          <option value="30d"{% if d.expires == "30d" %} selected{% endif %}>30 days</option>
+          <option value="never"{% if d.expires == "never" %} selected{% endif %}>Never</option>
+          <option value="custom"{% if d.expires == "custom" %} selected{% endif %}>Custom…</option>
+        </select>
+        <div class="exp-custom">
+          <input class="input mono" type="number" name="expires_custom" id="d-exp-n" min="1" max="8784" step="1" inputmode="numeric" placeholder="e.g. 12" aria-label="Custom duration" value="{{ d.custom() }}" />
+          <select class="input" name="expires_custom_unit" id="d-exp-unit" aria-label="Custom duration unit">
+            <option value="h"{% if d.expires_custom_unit != "d" %} selected{% endif %}>hours</option>
+            <option value="d"{% if d.expires_custom_unit == "d" %} selected{% endif %}>days</option>
+          </select>
+        </div>
+        <p class="help exp-custom-help">Whole hours or days, from 1 hour to 1 year.</p>
+      </div>
+      <div class="actions">
+        <button class="btn" type="submit" id="d-save">Save defaults</button>
+        {% if d_saved %}<button class="btn ghost" type="button" id="d-reset" hx-post="/setup/defaults/reset" hx-vals='{"csrf":"{{ csrf_token }}"}' hx-target="#defaults-panel" hx-swap="outerHTML">Reset to built-in</button>{% endif %}
+      </div>
+    </form>
+  </div>
+</section>

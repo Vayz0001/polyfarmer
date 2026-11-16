@@ -12,7 +12,7 @@ use super::auth::ANONYMOUS_TIMEOUT;
 use super::security::harden;
 use super::session_store::SWEEP_INTERVAL;
 use super::state::WebState;
-use super::{activity, assets, auth, dashboard, events, markets, positions, rewards, setup, shell};
+use super::{activity, assets, auth, dashboard, defaults, events, markets, positions, rewards, setup, shell};
 
 /// Build the dashboard router with shared [`WebState`].
 pub fn router(state: WebState) -> Router {
@@ -75,6 +75,9 @@ pub fn router(state: WebState) -> Router {
         .route("/setup/wallet", post(setup::set_wallet))
         .route("/setup/wallet/detect", post(setup::detect_wallet))
         .route("/setup/engine-status", get(setup::engine_status))
+        .route("/setup/defaults", post(defaults::save_settings))
+        .route("/setup/defaults/reset", post(defaults::reset_settings))
+        .route("/setup/defaults/from-order", post(defaults::save_from_order))
         .route("/launching", get(setup::launching))
         .route("/logout", post(auth::logout))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::require_auth));

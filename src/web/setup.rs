@@ -35,6 +35,11 @@ struct SetupTemplate {
     error: Option<String>,
     pw_notice: Option<String>,
     pw_error: Option<String>,
+    /// "Defaults for new markets" (`_defaults_panel.html`).
+    d: super::defaults::FormDefaults,
+    d_saved: bool,
+    d_notice: Option<String>,
+    d_error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -340,5 +345,9 @@ async fn render_full(
         error,
         pw_notice,
         pw_error,
+        d: super::defaults::load(state.store.dir()),
+        d_saved: super::defaults::saved(state.store.dir()),
+        d_notice: None,
+        d_error: None,
     })
 }

@@ -1400,6 +1400,98 @@ async fn safeguards_use_the_same_names_everywhere() {
     assert!(drawer.contains("left</span>"), "time left shown");
 }
 
+/// Settings → Defaults for new markets: shows the built-in values, saves
+/// valid ones (and refuses others, keeping what was typed), resets; the
+/// new-order form's "Save as my defaults" saves its size and safeguards.
+#[tokio::test]
+async fn defaults_for_new_markets_save_and_reset() {
+    let dir = unique_dir();
+    let store = CredentialStore::open(&dir).unwrap();
+    let pw = "test-password-123".to_string();
+    store.set_password(&pw).unwrap();
+    let app = router(WebState::new(Arc::new(store), empty_engine()));
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let post = |uri: &'static str, body: String, htmx: bool| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        async move {
+            let mut req = Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+            if htmx {
+                req = req.header("HX-Request", "true");
+            }
+            let res = app.oneshot(req.body(Body::from(body)).unwrap()).await.unwrap();
+            (res.status(), body_string(res).await)
+        }
+    };
+
+    let (_, page, _) = get_authed(&app, &cookie, "/setup").await;
+    assert!(page.contains("Defaults for new markets") && page.contains("built-in values"), "{page}");
+    assert!(page.contains(r#"id="d-size" value="100""#) && page.contains(r#"id="d-depth" value="500""#));
+    assert!(page.contains(r#"id="d-vol" value="5""#) && page.contains(r#"<option value="7d" selected>"#));
+    assert!(!page.contains("Reset to built-in"), "nothing to reset yet");
+
+    // Save from Settings.
+    let form = |size: &str, vol: &str| {
+        format!(
+            "csrf={csrf}&order_size={size}&min_depth_usd=250&max_volatility_cents={vol}&expires_in=custom&expires_custom=12&expires_custom_unit=h"
+        )
+    };
+    let (status, panel) = post("/setup/defaults", form("40", ""), true).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(panel.contains("Saved.") && panel.contains("your values"), "{panel}");
+    assert!(panel.contains(r#"id="d-size" value="40""#) && panel.contains(r#"id="d-vol" value="""#), "{panel}");
+    assert!(panel.contains(r#"<option value="custom" selected>"#) && panel.contains(r#"value="12""#));
+    assert!(panel.contains("Reset to built-in"));
+    let saved = std::fs::read_to_string(dir.join("defaults.json")).unwrap();
+    assert!(saved.contains("\"order_size\": \"40\"") && saved.contains("\"auto_pause_cents\": null"), "{saved}");
+
+    // Refused: an error, what was typed kept, the file untouched.
+    let (_, panel) = post("/setup/defaults", form("0", "3"), true).await;
+    assert!(panel.contains("alert err") && panel.contains("Order size"), "{panel}");
+    assert!(panel.contains(r#"id="d-vol" value="3""#), "typed value kept");
+    assert_eq!(std::fs::read_to_string(dir.join("defaults.json")).unwrap(), saved);
+
+    // A bad CSRF token changes nothing; a non-htmx post just goes back to Settings.
+    let (_, panel) = post("/setup/defaults", form("77", "").replace(&csrf, "wrong"), true).await;
+    assert!(panel.contains("Invalid session"));
+    let (status, _) = post("/setup/defaults", form("77", ""), false).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(std::fs::read_to_string(dir.join("defaults.json")).unwrap(), saved);
+
+    // From the new-order form (its other fields are ignored).
+    let order = format!(
+        "csrf={csrf}&slug=x&side=0&sides=both&price_cents=12&order_size=150&min_depth_usd=1000&max_volatility_cents=2.5&expires_in=3d"
+    );
+    let (_, note) = post("/setup/defaults/from-order", order, true).await;
+    assert!(note.contains("Saved as your defaults"), "{note}");
+    let (_, page, _) = get_authed(&app, &cookie, "/setup").await;
+    assert!(page.contains(r#"id="d-size" value="150""#) && page.contains(r#"id="d-depth" value="1000""#));
+    assert!(page.contains(r#"id="d-vol" value="2.5""#) && page.contains(r#"<option value="3d" selected>"#));
+    let (_, note) = post("/setup/defaults/from-order", format!("csrf={csrf}&order_size=abc&expires_in=7d"), true).await;
+    assert!(note.contains(r#"class="err""#), "{note}");
+
+    // Bad CSRF on the other two routes changes nothing either.
+    let before = std::fs::read_to_string(dir.join("defaults.json")).unwrap();
+    let (_, note) = post("/setup/defaults/from-order", "csrf=wrong&order_size=9&expires_in=7d".into(), true).await;
+    assert!(note.contains("Invalid session"), "{note}");
+    let (_, panel) = post("/setup/defaults/reset", "csrf=wrong".into(), true).await;
+    assert!(panel.contains("Invalid session"), "{panel}");
+    assert_eq!(std::fs::read_to_string(dir.join("defaults.json")).unwrap(), before);
+    // A size the form's input would refuse (step 1) isn't saved.
+    let (_, note) =
+        post("/setup/defaults/from-order", format!("csrf={csrf}&order_size=37.50&expires_in=7d"), true).await;
+    assert!(note.contains("whole number of dollars"), "{note}");
+
+    // Reset.
+    let (_, panel) = post("/setup/defaults/reset", format!("csrf={csrf}"), true).await;
+    assert!(panel.contains("Back to the built-in values") && panel.contains(r#"id="d-size" value="100""#));
+    assert!(!dir.join("defaults.json").exists());
+}
+
 /// Resuming a leg with no auto-pause limit needs no price and changes nothing else.
 #[tokio::test]
 async fn resume_without_a_limit_leaves_the_reference_alone() {

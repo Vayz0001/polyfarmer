@@ -2,7 +2,7 @@
 {% block title %}Settings{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>Settings</h1><div class="sub">Wallet, access and display preferences.</div></div>
+  <div><h1>Settings</h1><div class="sub">Wallet, defaults for new markets, access and display preferences.</div></div>
 </div>
 <div class="settings">
   <section class="panel">
@@ -42,6 +42,8 @@
       </form>
     </div>
   </section>
+
+  {% include "_defaults_panel.html" %}
 
   <section class="panel">
     <div class="panel-head"><h2>Dashboard password</h2></div>

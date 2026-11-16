@@ -40,8 +40,6 @@ const NETWORK_TIMEOUT: Duration = Duration::from_secs(8);
 const TERMINAL_CURSOR: &str = "LTE=";
 /// Book levels per side on the ladder (the ladder area scrolls).
 const LADDER_LEVELS: usize = 50;
-/// Sensible starting order size ($) prefilled in the placement panel.
-const DEFAULT_ORDER_SIZE: &str = "100";
 /// Live-book pushes are coalesced to at most one per this interval.
 const BOOK_PUSH_MIN_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -293,6 +291,8 @@ struct MarketViewTemplate {
     sides_both: bool,
     ladder: market_data::Ladder,
     default_size: String,
+    /// The safeguards the form starts with (Settings → Defaults for new markets).
+    d: super::defaults::FormDefaults,
     /// Default price (¢) prefilled: the Balanced preset, else the first one.
     default_price_cents: String,
     /// Tick in cents (input step/min) and the highest valid price in cents.
@@ -326,6 +326,7 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
     };
     let side = p.side.min(mr.outcomes.len().saturating_sub(1));
     let max_spread = mr.rewards_max_spread.unwrap_or(dec!(0));
+    let defaults = super::defaults::load(state.store.dir());
     let book = current_book(&state, &mr, side).await;
     let mid = midpoint_for(&mr, side, book.as_ref()).await;
     let (bb, ba) = book.as_ref().map(|b| (b.best_bid, b.best_ask)).unwrap_or((None, None));
@@ -407,7 +408,8 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
         sides,
         selected_idx: side,
         ladder,
-        default_size: DEFAULT_ORDER_SIZE.to_string(),
+        default_size: defaults.size(),
+        d: defaults,
         default_price_cents,
         tick_cents: (mr.tick_size * dec!(100)).normalize().to_string(),
         price_max_cents: ((dec!(1) - mr.tick_size) * dec!(100)).normalize().to_string(),

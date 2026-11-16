@@ -112,34 +112,39 @@
             <p class="help">Cautious defaults that help keep you from being filled. Leave Depth ahead or Auto-pause blank to turn it off.</p>
             <div class="field">
               <label class="label" for="min_depth_usd">Depth ahead <span class="hint">minimum, USD</span></label>
-              <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="any" min="0" name="min_depth_usd" id="min_depth_usd" value="500" /><span class="suf">USD</span></div>
+              <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="any" min="0" name="min_depth_usd" id="min_depth_usd" value="{{ d.depth() }}" /><span class="suf">USD</span></div>
               <p class="help">Bids above yours, up to and including the best bid. With less than this ahead of you, your order is pulled or not placed.</p>
             </div>
             <div class="field">
               <label class="label" for="max_volatility_cents">Auto-pause <span class="hint">¢ either way, optional</span></label>
-              <div class="affix"><input class="input mono" type="number" step="any" min="0.1" name="max_volatility_cents" id="max_volatility_cents" value="5" placeholder="e.g. 5" /><span class="suf">¢</span></div>
+              <div class="affix"><input class="input mono" type="number" step="any" min="0.1" name="max_volatility_cents" id="max_volatility_cents" value="{{ d.auto_pause() }}" placeholder="e.g. 5" /><span class="suf">¢</span></div>
               <p class="help">If the best bid moves this far either way from where it is when you start, the leg pauses and cancels its order. Resuming restarts it from the price then.</p>
             </div>
             <div class="field exp-field">
               <label class="label" for="expires_in">Expires</label>
               <select class="input" name="expires_in" id="expires_in">
-                <option value="1d">1 day</option>
-                <option value="3d">3 days</option>
-                <option value="7d" selected>7 days</option>
-                <option value="30d">30 days</option>
-                <option value="never">Never</option>
-                <option value="custom">Custom…</option>
+                <option value="1d"{% if d.expires == "1d" %} selected{% endif %}>1 day</option>
+                <option value="3d"{% if d.expires == "3d" %} selected{% endif %}>3 days</option>
+                <option value="7d"{% if d.expires == "7d" %} selected{% endif %}>7 days</option>
+                <option value="30d"{% if d.expires == "30d" %} selected{% endif %}>30 days</option>
+                <option value="never"{% if d.expires == "never" %} selected{% endif %}>Never</option>
+                <option value="custom"{% if d.expires == "custom" %} selected{% endif %}>Custom…</option>
               </select>
               <div class="exp-custom">
-                <input class="input mono" type="number" name="expires_custom" id="expires_custom" min="1" max="8784" step="1" inputmode="numeric" placeholder="e.g. 12" aria-label="Custom duration" />
+                <input class="input mono" type="number" name="expires_custom" id="expires_custom" min="1" max="8784" step="1" inputmode="numeric" placeholder="e.g. 12" aria-label="Custom duration" value="{{ d.custom() }}" />
                 <select class="input" name="expires_custom_unit" id="expires_custom_unit" aria-label="Custom duration unit">
-                  <option value="h" selected>hours</option>
-                  <option value="d">days</option>
+                  <option value="h"{% if d.expires_custom_unit != "d" %} selected{% endif %}>hours</option>
+                  <option value="d"{% if d.expires_custom_unit == "d" %} selected{% endif %}>days</option>
                 </select>
               </div>
               <p class="help exp-custom-help">Whole hours or days, from 1 hour to 1 year.</p>
               <p class="help">Then the order is cancelled and the leg stops. Edit it to extend.</p>
             </div>
+            <div class="actions save-defaults">
+              <button type="button" class="btn sm" id="save-defaults" hx-post="/setup/defaults/from-order" hx-target="#defaults-note" hx-swap="innerHTML">Save as my defaults</button>
+              <span id="defaults-note" class="help" role="status" aria-live="polite"></span>
+            </div>
+            <p class="help">Saves the size and these safeguards for new markets. Change them any time in <a href="/setup#defaults-panel">Settings</a>.</p>
           </div>
         </details>
 
