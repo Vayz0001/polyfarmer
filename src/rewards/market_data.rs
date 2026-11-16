@@ -321,12 +321,11 @@ pub struct LadderRow {
     pub size: String,        // shares at this level, compact
     pub total: String,       // cumulative shares from the best level, compact
     pub total_usd: String,   // cumulative USD depth (Σ price × size) from the best level
-    pub depth_pct: u32,      // 0-100, cumulative-depth bar width
+    pub depth_pct: u32,      // 0-100: `total` as a share of the deeper side's total
     pub side: &'static str,  // "ask" | "bid"
     pub in_band: bool,       // within the reward-qualifying zone
     pub is_best: bool,
-    /// One of YOUR live engine orders rests at this level (solid marker; the
-    /// dashed placement preview is drawn client-side).
+    /// One of YOUR live engine orders rests at this level (the "YOU" badge).
     pub is_live_mine: bool,
 }
 
@@ -349,7 +348,8 @@ pub struct Ladder {
 }
 
 /// Build the display ladder: top `per_side` levels each side, cumulative-depth
-/// bars (shares, normalized across shown levels), reward band shaded. Reward band
+/// bars (running share totals from the best level, scaled to the deeper side's
+/// total so bids and asks compare), reward band shaded. Reward band
 /// = within `max_spread_cents` of the midpoint on either side. `live_mine` are
 /// the prices of your live engine orders on this token (marked on the ladder).
 /// `group` is the price-bucket size for the grouping control (== tick → raw).
@@ -395,11 +395,11 @@ pub fn build_ladder(
     let bid_levels: Vec<(Decimal, Decimal)> = bid_all.iter().take(per_side).copied().collect();
     let ask_levels: Vec<(Decimal, Decimal)> = ask_all.iter().take(per_side).copied().collect();
 
-    // "Total" column = cumulative shares from the best level outward. The depth
-    // bar shows each level's OWN size (normalized to the largest single level
-    // shown) — so big resting walls stand out and stay readable even when the
-    // book is deep and scrolled (a cumulative bar would shrink the near-spread
-    // levels to invisible slivers once many levels are shown).
+    // "Total" column = cumulative shares from the best level outward, and the
+    // depth bar draws that same running total, so bars grow away from the
+    // spread and always agree with the number beside them (each level's own
+    // size is still in the "Shares" column). Both sides share one scale: the
+    // deeper side's total is 100%.
     let cum = |levels: &[(Decimal, Decimal)]| -> Vec<Decimal> {
         let mut acc = dec!(0);
         levels
@@ -425,13 +425,13 @@ pub fn build_ladder(
     };
     let bid_usd = cum_usd(&bid_levels);
     let ask_usd = cum_usd(&ask_levels);
-    let max_level = bid_levels.iter().chain(ask_levels.iter()).map(|(_, s)| *s).fold(dec!(0), Decimal::max);
+    let deepest = bid_cum.last().copied().unwrap_or_default().max(ask_cum.last().copied().unwrap_or_default());
 
-    let pct = |s: Decimal| -> u32 {
-        if max_level <= dec!(0) {
+    let pct = |total: Decimal| -> u32 {
+        if deepest <= dec!(0) {
             0
         } else {
-            ((s / max_level) * dec!(100)).round().to_u32().unwrap_or(0).min(100)
+            ((total / deepest) * dec!(100)).round().to_u32().unwrap_or(0).min(100)
         }
     };
     let row = |p: Decimal, s: Decimal, cumv: Decimal, usd: Decimal, side: &'static str, is_best: bool| LadderRow {
@@ -440,7 +440,7 @@ pub fn build_ladder(
         size: fmt_shares(s),
         total: fmt_shares(cumv),
         total_usd: fmt_usd(usd),
-        depth_pct: pct(s),
+        depth_pct: pct(cumv),
         side,
         in_band: p > band_lo && p < band_hi,
         is_best,
@@ -742,6 +742,44 @@ mod tests {
         let marked: Vec<_> = l.bids.iter().filter(|r| r.is_live_mine).map(|r| r.price_raw.clone()).collect();
         assert_eq!(marked, vec!["0.38".to_string()]);
         assert!(l.asks.iter().all(|r| !r.is_live_mine));
+    }
+
+    #[test]
+    fn depth_bars_follow_the_running_total_on_one_scale_for_both_sides() {
+        // A big wall far out (300) after small near levels: per-level bars would
+        // draw the 100-share row bigger than the 150-total row next to it.
+        let mut b = book(dec!(0.40), &[(dec!(0.40), dec!(100)), (dec!(0.39), dec!(50)), (dec!(0.38), dec!(300))]);
+        b.asks = vec![(dec!(0.42), dec!(200)), (dec!(0.43), dec!(50))];
+        b.best_ask = Some(dec!(0.42));
+        let l = build_ladder(&b, dec!(0.41), dec!(3), 10, &[], dec!(0.01));
+        // Bids total 100 → 150 → 450; asks 200 → 250. The deeper side (450) is 100%.
+        let bid_pct: Vec<u32> = l.bids.iter().map(|r| r.depth_pct).collect();
+        assert_eq!(bid_pct, vec![22, 33, 100]);
+        let bid_tot: Vec<&str> = l.bids.iter().map(|r| r.total.as_str()).collect();
+        assert_eq!(bid_tot, vec!["100", "150", "450"]);
+        // Asks are listed high → low (best ask next to the spread), so their bars
+        // shrink toward the spread: 0.43 (total 250) then 0.42 (total 200).
+        let ask_pct: Vec<(String, u32)> = l.asks.iter().map(|r| (r.price_raw.clone(), r.depth_pct)).collect();
+        assert_eq!(ask_pct, vec![("0.43".to_string(), 56), ("0.42".to_string(), 44)]);
+        // Bars never shrink moving away from the spread.
+        assert!(l.bids.windows(2).all(|w| w[0].depth_pct <= w[1].depth_pct));
+        assert!(l.asks.windows(2).all(|w| w[0].depth_pct >= w[1].depth_pct));
+        // An empty book draws no bars (no division by zero).
+        let empty = BookSnapshot {
+            bids: vec![],
+            asks: vec![],
+            best_bid: None,
+            best_ask: None,
+            tick_size: dec!(0.01),
+            min_order_size: dec!(5),
+        };
+        let l = build_ladder(&empty, dec!(0.5), dec!(3), 10, &[], dec!(0.01));
+        assert!(l.bids.is_empty() && l.asks.is_empty());
+        // Grouping (5¢ buckets) keeps bars and totals in step.
+        let g = build_ladder(&b, dec!(0.41), dec!(3), 10, &[], dec!(0.05));
+        assert_eq!(g.bids.len(), 2, "0.40 | 0.39+0.38 → 0.35 bucket");
+        assert_eq!(g.bids.last().unwrap().depth_pct, 100);
+        assert_eq!(g.bids[0].total, "100");
     }
 
     #[test]
