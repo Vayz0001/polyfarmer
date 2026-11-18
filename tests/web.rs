@@ -1731,7 +1731,7 @@ async fn the_market_page_panel_pauses_resumes_and_removes_legs() {
     for id in ["pos-mar_leg-toggle", "pos-mar_leg-edit", "pos-mar_leg-remove"] {
         assert!(panel.contains(&format!(r#"id="{id}""#)), "{id}: {panel}");
     }
-    assert!(panel.contains(r#""view":"0xabc""#) && panel.contains(r##"hx-target="#your-position""##));
+    assert!(panel.contains(r#"&#34;view&#34;:&#34;0xabc&#34;"#) && panel.contains(r##"hx-target="#your-position""##));
     assert!(panel.contains(r#"data-confirm-label="Remove""#) && !panel.contains("pos-mar_leg-extend"));
     let (_, other, _) = get_authed(&app, &cookie, "/markets/view/position?cid=0xother").await;
     assert!(!other.contains("You're farming this"), "not farmed here: nothing shown");
@@ -1771,4 +1771,40 @@ async fn an_expired_leg_offers_extend_on_the_market_page() {
     assert!(drawer.contains(r#"id="e-exp" name="expires_in" data-autofocus"#), "{drawer}");
     let (_, drawer, _) = get_authed(&app, &cookie, "/markets/mar_leg/edit").await;
     assert!(!drawer.contains("data-autofocus"));
+}
+
+/// A two-leg market's panel pauses and resumes both legs together and stays
+/// the panel; the action values are JSON-encoded, whatever the stored id.
+#[tokio::test]
+async fn the_market_page_panel_pauses_and_resumes_both_legs() {
+    use polyfarmer::types::OrderStatus;
+    let (app, pw, engine, _) = app_with_leg(OrderStatus::Idle);
+    {
+        let mut s = engine.write().await;
+        let mut no = s.configs[0].clone();
+        (no.id, no.token_id, no.token_label) = ("mar_leg_no".into(), "456".into(), "No".into());
+        s.configs.push(no);
+        s.order_status.insert("mar_leg_no".into(), OrderStatus::Idle);
+    }
+    let cookie = login(&app, &pw).await;
+    let (_, page, rotated) = get_authed(&app, &cookie, "/markets").await;
+    let cookie = rotated.unwrap_or(cookie);
+    let csrf = extract_csrf(&page);
+    let (_, panel, _) = get_authed(&app, &cookie, "/markets/view/position?cid=0xabc").await;
+    assert!(panel.contains(r#"data-farmed="123,456""#) && panel.contains("Pause both"), "{panel}");
+    assert!(
+        panel.contains(r#"hx-vals="{&#34;csrf&#34;:"#) && panel.contains(r#"&#34;view&#34;:&#34;0xabc&#34;}""#),
+        "{panel}"
+    );
+
+    let (body, _) = post_as(&app, &cookie, "/markets/group/0xabc/pause", format!("csrf={csrf}&view=0xabc")).await;
+    assert!(body.contains("You're farming this") && body.contains("Resume both") && !body.contains("<table"));
+    assert!(engine.read().await.configs.iter().all(|c| c.paused));
+    let (body, _) = post_as(&app, &cookie, "/markets/group/0xabc/resume", format!("csrf={csrf}&view=0xabc")).await;
+    assert!(body.contains("Pause both") && engine.read().await.configs.iter().all(|c| !c.paused));
+
+    // A stored id with a quote can't break out of the JSON.
+    engine.write().await.configs.iter_mut().for_each(|c| c.condition_id = r#"0x"evil":"1"#.into());
+    let (_, panel, _) = get_authed(&app, &cookie, "/markets/view/position?cid=0x%22evil%22:%221").await;
+    assert!(panel.contains(r#"&#34;view&#34;:&#34;0x\&#34;evil\&#34;:\&#34;1&#34;"#), "{panel}");
 }

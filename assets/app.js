@@ -424,15 +424,29 @@
     mvConnect();
     if (MV.group) mvFetchBook();
     window.addEventListener("pagehide", function () { if (MV.es) MV.es.close(); });
+    // Keep keyboard focus when the panel is refreshed from under it (htmx
+    // restores focus by id, so only a vanished element needs help).
+    var posFocus = null;
+    document.body.addEventListener("htmx:beforeSwap", function (e) {
+      if (e.target.id !== "your-position") return;
+      var a = document.activeElement;
+      // Focus on the container itself (where Remove's confirm parks it) has no
+      // element to restore: "" means "find it a new home after the swap".
+      posFocus = e.target.firstElementChild && e.target.contains(a) ? (a !== e.target && a.id) || "" : null;
+    });
     document.body.addEventListener("htmx:afterSwap", function (e) {
       if (e.target.id !== "your-position") return;
       mvDupNote();
-      // Removing the last leg empties (and hides) the panel that held focus,
-      // which drops it on <body>: carry it on to the order form below instead.
-      var lost = document.activeElement === e.target || document.activeElement === document.body;
-      if (!e.target.firstElementChild && lost) {
+      var had = posFocus; posFocus = null;
+      if (had === null || (had && document.getElementById(had))) return;
+      if (!e.target.firstElementChild) {
+        // The last leg was removed: carry focus on to the order form below.
         var form = $("#order-form").closest("section");
         form.setAttribute("tabindex", "-1"); form.focus({ preventScroll: true });
+      } else {
+        // An extended leg loses its Extend button: land on its Edit button.
+        var alt = had && document.getElementById(had.replace(/-extend$/, "-edit"));
+        (alt || e.target).focus({ preventScroll: true });
       }
     });
   }

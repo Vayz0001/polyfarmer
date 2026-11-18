@@ -248,8 +248,10 @@ async fn seed_sample_rewards(state: &WebState) {
         if seen.contains(&c.condition_id) {
             continue;
         }
-        // Per demo market: farming, farming, waiting, paused (after earning earlier).
-        let (pct, earned) = [("4.12", "1.8312"), ("2.50", "0.9120"), ("0", "0"), ("0", "0.4400")][seen.len() % 4];
+        // Per demo market: farming, farming, waiting, paused and expired (both
+        // after earning earlier in the day).
+        let (pct, earned) =
+            [("4.12", "1.8312"), ("2.50", "0.9120"), ("0", "0"), ("0", "0.4400"), ("0", "0.1200")][seen.len() % 5];
         seen.push(c.condition_id.clone());
         let slug = c.url.rsplit('/').next().unwrap_or_default();
         entries.push(entry(&c.condition_id, &c.label, slug, pct, earned, "250"));

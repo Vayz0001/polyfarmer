@@ -1,5 +1,5 @@
 {% if let Some(row) = row %}
-<section class="panel pf-rise" id="position-panel" data-farmed="{{ farmed_tokens }}">
+<section class="panel" id="position-panel" data-farmed="{{ farmed_tokens }}">
   <div class="panel-head">
     <h2>You're farming this</h2>
     {% match scoring %}{% when Some(true) %}<span class="pill ok">Scoring</span>{% when Some(false) %}<span class="pill warn">Not scoring</span>{% when None %}{% endmatch %}
@@ -22,12 +22,12 @@
           <button class="btn sm" id="pos-{{ leg.id }}-extend" hx-get="/markets/{{ leg.id }}/edit?focus=expires" hx-target="#pf-drawer">Extend</button>
           {% endif %}
           {% if leg.paused %}
-          <button class="btn ghost icon" id="pos-{{ leg.id }}-toggle" title="Resume" hx-post="/markets/{{ leg.id }}/resume" hx-vals='{"csrf":"{{ csrf_token }}","view":"{{ row.condition_id }}"}' hx-target="#your-position"><svg class="i sm"><use href="#i-play"/></svg></button>
+          <button class="btn ghost icon" id="pos-{{ leg.id }}-toggle" title="Resume" hx-post="/markets/{{ leg.id }}/resume" hx-vals="{{ vals }}" hx-target="#your-position"><svg class="i sm"><use href="#i-play"/></svg></button>
           {% else %}
-          <button class="btn ghost icon" id="pos-{{ leg.id }}-toggle" title="Pause (cancels its order)" hx-post="/markets/{{ leg.id }}/pause" hx-vals='{"csrf":"{{ csrf_token }}","view":"{{ row.condition_id }}"}' hx-target="#your-position"><svg class="i sm"><use href="#i-pause"/></svg></button>
+          <button class="btn ghost icon" id="pos-{{ leg.id }}-toggle" title="Pause (cancels its order)" hx-post="/markets/{{ leg.id }}/pause" hx-vals="{{ vals }}" hx-target="#your-position"><svg class="i sm"><use href="#i-pause"/></svg></button>
           {% endif %}
           <button class="btn ghost icon" id="pos-{{ leg.id }}-edit" title="Edit" hx-get="/markets/{{ leg.id }}/edit" hx-target="#pf-drawer"><svg class="i sm"><use href="#i-edit"/></svg></button>
-          <button class="btn ghost icon danger" id="pos-{{ leg.id }}-remove" title="Remove" hx-post="/markets/{{ leg.id }}/remove" hx-vals='{"csrf":"{{ csrf_token }}","view":"{{ row.condition_id }}"}' hx-target="#your-position"
+          <button class="btn ghost icon danger" id="pos-{{ leg.id }}-remove" title="Remove" hx-post="/markets/{{ leg.id }}/remove" hx-vals="{{ vals }}" hx-target="#your-position"
                   data-confirm-label="Remove" hx-confirm="Remove the {{ leg.side_label }} leg ({{ leg.size }}, {{ leg.peg }}) of “{{ row.label }}”? Its resting order is cancelled."><svg class="i sm"><use href="#i-trash"/></svg></button>
         </span>
       </div>
@@ -37,9 +37,9 @@
   <div class="panel-foot pos-foot">
     {% if row.legs.len() > 1 %}
       {% if row.all_paused %}
-      <a href="#" id="pos-{{ row.condition_id }}-group" hx-post="/markets/group/{{ row.condition_id }}/resume" hx-vals='{"csrf":"{{ csrf_token }}","view":"{{ row.condition_id }}"}' hx-target="#your-position">Resume both</a>
+      <a href="#" id="pos-{{ row.condition_id }}-group" hx-post="/markets/group/{{ row.condition_id }}/resume" hx-vals="{{ vals }}" hx-target="#your-position">Resume both</a>
       {% else %}
-      <a href="#" id="pos-{{ row.condition_id }}-group" hx-post="/markets/group/{{ row.condition_id }}/pause" hx-vals='{"csrf":"{{ csrf_token }}","view":"{{ row.condition_id }}"}' hx-target="#your-position">Pause both</a>
+      <a href="#" id="pos-{{ row.condition_id }}-group" hx-post="/markets/group/{{ row.condition_id }}/pause" hx-vals="{{ vals }}" hx-target="#your-position">Pause both</a>
       {% endif %}
     {% else %}<span></span>{% endif %}
     <a href="/markets">All markets →</a>

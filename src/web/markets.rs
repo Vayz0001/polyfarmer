@@ -620,7 +620,9 @@ pub struct PositionParams {
 #[derive(Template)]
 #[template(path = "_your_position.html")]
 struct YourPositionTemplate {
-    csrf_token: String,
+    /// The actions' form values ({"csrf", "view"}) as JSON, built with a JSON
+    /// encoder so a stored condition id can never break out of it.
+    vals: String,
     /// `None`: you don't farm this market (nothing is shown).
     row: Option<super::dashboard::MarketRow>,
     /// Token ids with a leg here, for the order form's "already farming" note.
@@ -656,14 +658,9 @@ pub(super) async fn render_position(state: &WebState, session: &Session, cid: &s
             .unwrap_or((None, None)),
         _ => (None, None),
     };
-    let tpl = YourPositionTemplate {
-        csrf_token: csrf_token(session).await,
-        row,
-        farmed_tokens,
-        scoring,
-        reward_pct,
-        earnings_today,
-    };
+    let view = row.as_ref().map(|r| r.condition_id.as_str()).unwrap_or_default();
+    let vals = serde_json::json!({ "csrf": csrf_token(session).await, "view": view }).to_string();
+    let tpl = YourPositionTemplate { vals, row, farmed_tokens, scoring, reward_pct, earnings_today };
     super::dashboard::with_error_toast(render(&tpl).into_response(), flash.as_deref())
 }
 
