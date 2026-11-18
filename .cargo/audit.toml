@@ -12,6 +12,8 @@ ignore = [
     # variability, blocked on alloy 1.x via the Polymarket SDK. Reasons in deny.toml.
     "RUSTSEC-2026-0374",
     "RUSTSEC-2026-0387",
+    # chrono: unmaintained, not vulnerable; required by the Polymarket SDK. Reason in deny.toml.
+    "RUSTSEC-2026-0543",
     # pin-utils: unmaintained, not vulnerable. wasm32-only (alloy -> wasmtimer), never
     # compiled for our targets. Reason in deny.toml.
     "RUSTSEC-2026-0441",
