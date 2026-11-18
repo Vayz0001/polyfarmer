@@ -141,6 +141,13 @@ pub struct LegRow {
     raw_weight: Option<Decimal>,
 }
 
+impl LegRow {
+    /// The outcome token this leg bids on.
+    pub fn token_id(&self) -> &str {
+        &self.token_id
+    }
+}
+
 /// One market (grouped by `condition_id`) with its 1–2 legs.
 pub struct MarketRow {
     pub condition_id: String,
@@ -614,12 +621,24 @@ struct MarketsTableTemplate {
 /// action usually triggers within a second.
 pub(super) async fn render_markets_table(state: &WebState, session: &Session, flash: Option<String>) -> Response {
     let rows = build_rows(state).await;
-    let toast = flash.as_deref().map(|msg| format!(r#"{{"pf-error":{}}}"#, ascii_json_string(msg)));
-    let mut resp = render(&MarketsTableTemplate { csrf_token: csrf_token(session).await, rows, flash }).into_response();
+    let toast = flash.clone();
+    let resp = render(&MarketsTableTemplate { csrf_token: csrf_token(session).await, rows, flash }).into_response();
+    with_error_toast(resp, toast.as_deref())
+}
+
+/// Show `msg` as an error toast (HX-Trigger: {"pf-error": …}): a row action's
+/// panel is replaced by the next refresh, so a banner alone would vanish.
+pub(super) fn with_error_toast(mut resp: Response, msg: Option<&str>) -> Response {
+    let toast = msg.map(|m| format!(r#"{{"pf-error":{}}}"#, ascii_json_string(m)));
     if let Some(value) = toast.and_then(|t| HeaderValue::from_str(&t).ok()) {
         resp.headers_mut().insert("HX-Trigger", value);
     }
     resp
+}
+
+/// One market's row as the Markets table shows it (the market page's panel).
+pub(super) async fn market_row(state: &WebState, condition_id: &str) -> Option<MarketRow> {
+    build_rows(state).await.into_iter().find(|r| r.condition_id == condition_id)
 }
 
 /// A JSON string literal using only ASCII (anything else as `\uXXXX`), since an

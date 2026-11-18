@@ -369,6 +369,7 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .mv-meta > .mi + .mi::before { content: ""; width: 3px; height: 3px; margin-right: 4px; border-radius: 50%; background: var(--faint); }
 /* The "your position" box renders empty when you have none: no gap for it. */
 #your-position:not(:has(*)) { display: none; }
+.dup-note { color: var(--warn); }
 .book-panel .panel-head { position: relative; }
 .book-cols, .book-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; padding: 0 14px; }
 .book-cols { height: 28px; align-items: center; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); border-bottom: 1px solid var(--line); }
@@ -417,6 +418,14 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .score.warn .val { color: var(--warn); } .score.bad .val { color: var(--ask); } .score.ok .val { color: var(--bid); }
 .score .why { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
 .kv { display: flex; flex-direction: column; gap: 6px; }
+/* Market page: one row per leg you farm here, with the Markets table's actions. */
+.pos-leg { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; }
+.pos-leg-head, .pos-leg-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pos-leg-facts { margin-left: auto; font-family: var(--mono); color: var(--fg); white-space: nowrap; }
+.pos-leg-foot { justify-content: space-between; font-size: 11.5px; }
+.pos-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.pos-foot { display: flex; justify-content: space-between; align-items: center; }
+.pos-foot a { color: var(--accent-2); }
 .kv-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 12.5px; }
 .kv-row .k { color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
 .kv-row .v { font-family: var(--mono); color: var(--fg); text-align: right; }

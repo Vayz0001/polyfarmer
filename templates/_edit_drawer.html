@@ -37,7 +37,7 @@
 
     <div class="field exp-field">
       <label class="label" for="e-exp">Expires <span class="hint">{% if expires == "never" %}currently never{% else if expires == "expired" %}already expired{% else %}{{ expires }} left{% endif %}</span></label>
-      <select class="input" id="e-exp" name="expires_in">
+      <select class="input" id="e-exp" name="expires_in"{% if focus_expires %} data-autofocus{% endif %}>
         <option value="keep"{% if expires_choice == "keep" %} selected{% endif %}>Keep current</option>
         <option value="1d"{% if expires_choice == "1d" %} selected{% endif %}>1 day from now</option>
         <option value="3d"{% if expires_choice == "3d" %} selected{% endif %}>3 days from now</option>

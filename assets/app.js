@@ -260,7 +260,7 @@
     d.removeAttribute("inert"); d.setAttribute("aria-hidden", "false");
     requestAnimationFrame(function () {
       d.classList.add("open");
-      var f = $("input:not([type=hidden])", d); if (f) f.focus({ preventScroll: true });
+      var f = $("[data-autofocus]", d) || $("input:not([type=hidden])", d); if (f) f.focus({ preventScroll: true });
     });
   }
   function drawerClose() {
@@ -424,6 +424,17 @@
     mvConnect();
     if (MV.group) mvFetchBook();
     window.addEventListener("pagehide", function () { if (MV.es) MV.es.close(); });
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+      if (e.target.id !== "your-position") return;
+      mvDupNote();
+      // Removing the last leg empties (and hides) the panel that held focus,
+      // which drops it on <body>: carry it on to the order form below instead.
+      var lost = document.activeElement === e.target || document.activeElement === document.body;
+      if (!e.target.firstElementChild && lost) {
+        var form = $("#order-form").closest("section");
+        form.setAttribute("tabindex", "-1"); form.focus({ preventScroll: true });
+      }
+    });
   }
 
   function decimals(x) { var s = String(x); var i = s.indexOf("."); return i < 0 ? 0 : s.length - i - 1; }
@@ -510,7 +521,25 @@
     var hint = $("#peg-hint");
     if (hint) hint.textContent = b && b.bb > 0 && p > 0 && p < b.bb ? "follows " + ((b.bb - p) * 100).toFixed(1) + "¢ below best bid" : "";
     mvMarkBid();
+    mvDupNote();
     if (!skipPreview) { var pv = $("#placement-preview"); if (pv && window.htmx) htmx.trigger(pv, "pf:preview"); }
+  }
+
+  // "You already farm Yes here": starting again would add a second leg on the
+  // same outcome. Which outcomes you farm comes from the panel above the form
+  // (#position-panel, refreshed every 5s and after every change).
+  function mvDupNote() {
+    var note = $("#dup-note"); if (!note) return;
+    var panel = $("#position-panel");
+    var farmed = panel && panel.dataset.farmed ? panel.dataset.farmed.split(",") : [];
+    var picked = both() ? $$("#side-toggle button") : [$('#side-toggle button[data-side="' + MV.side + '"]')];
+    var dup = picked.filter(function (b) { return b && b.dataset.token && farmed.indexOf(b.dataset.token) >= 0; })
+      .map(function (b) { return b.dataset.label; });
+    note.hidden = !dup.length;
+    note.textContent = !dup.length ? "" :
+      "You already farm " + dup.join(" and ") + " here. Starting adds " +
+      (dup.length > 1 ? "a second leg on each" : "a second " + dup[0] + " leg") +
+      "; to change the one you have, use Edit above.";
   }
 
   // Show the price in the form on the bid ladder: its level is outlined, or a

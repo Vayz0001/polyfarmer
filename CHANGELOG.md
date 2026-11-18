@@ -18,6 +18,11 @@ anything may change between releases.
   no third-party scripts or tracking, and every animation turns off for people who prefer reduced motion.
 - "Stop quoting after" has a **Custom…** option, on the new-order form and in the edit drawer: type a whole number
   of hours or days, from 1 hour to 1 year (for example 12 hours before a game starts).
+- A market's page can pause, resume and remove the legs you farm there: its "You're farming this" panel has the
+  same statuses and buttons as the Markets table (Pause / Resume, Edit, Remove with a confirmation, Pause both /
+  Resume both), refreshes every 5 seconds and right after any change, and shows even while the bot isn't trading.
+  An expired leg says **Expired** (it used to read "waiting for conditions") and has an **Extend** button that opens
+  Edit on its expiry. The order form warns when starting would add a second leg on an outcome you already farm.
 - The order book on a market's page marks the price in the order form: clicking a bid level, typing a price or
   loading the page outlines that level with a **YOUR BID** tag, or draws a marker line where your bid would sit when
   nobody is bidding that price yet. It follows the book as it updates and the price grouping you pick.

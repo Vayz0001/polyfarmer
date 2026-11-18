@@ -105,7 +105,7 @@ async fn seed_demo(state: &WebState, dir: &str) {
     let mut configs: Vec<MarketConfig> = Vec::new();
     let mut statuses = Vec::new();
     let mut books = Vec::new();
-    for (n, m) in picks.iter().filter(|m| m.spread < dec!(0.05)).take(4).enumerate() {
+    for (n, m) in picks.iter().filter(|m| m.spread < dec!(0.05)).take(5).enumerate() {
         let Ok(mr) = gamma_resolve::market_by_slug(&m.market_slug).await else { continue };
         let legs: Vec<usize> = if n == 0 { vec![0, 1] } else { vec![0] };
         for side in legs {
@@ -125,13 +125,18 @@ async fn seed_demo(state: &WebState, dir: &str) {
                 distance,
                 min_depth_between: dec!(250),
                 order_size: if n == 0 { dec!(150) } else { dec!(100) },
-                expires_at: Utc::now() + Duration::days(if n == 2 { 36500 } else { 6 }),
+                // The fifth market's leg expired two hours ago (shows Expired / Extend).
+                expires_at: match n {
+                    2 => Utc::now() + Duration::days(36500),
+                    4 => Utc::now() - Duration::hours(2),
+                    _ => Utc::now() + Duration::days(6),
+                },
                 paused: n == 3,
                 benchmark_bid: Some(bb),
                 max_volatility: if n == 1 { Some(dec!(0.05)) } else { None },
             });
             let status = match n {
-                3 => OrderStatus::Idle,
+                3 | 4 => OrderStatus::Idle,
                 2 => OrderStatus::Placing { price: bb - distance },
                 _ => OrderStatus::Live { order_id: format!("0xdemo{n}{side}"), price: bb - distance },
             };
