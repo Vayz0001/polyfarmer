@@ -409,6 +409,9 @@
       scrolled: false,
       book: null
     };
+    // What the ladder on screen shows: the server renders the page's side at
+    // the raw tick; later swaps say which side and grouping they were asked for.
+    MV.shown = { side: MV.side, group: "" };
     var g = pref("pf-group", "");
     if (g && $('#group button[data-group="' + g + '"]')) { MV.group = g; mvSyncGroup(); }
     $("#price").addEventListener("input", function () { mvSyncShares(); mvUpdate(); });
@@ -434,7 +437,9 @@
   }
   function mvSyncUsd() {
     var p = priceP(), sh = num($("#order_shares").value);
-    if (p > 0 && sh > 0) $("#order_size").value = (sh * p).toFixed(2);
+    // Round up to the cent: rounding down would buy slightly fewer shares than
+    // typed (108 × 21.9¢ = $23.652 → $23.65 → 107.99), missing a share minimum.
+    if (p > 0 && sh > 0) $("#order_size").value = (Math.ceil(Math.round(sh * p * 1e6) / 1e4) / 100).toFixed(2);
   }
 
   function mvReadBook() {
@@ -504,7 +509,37 @@
     // peg hint
     var hint = $("#peg-hint");
     if (hint) hint.textContent = b && b.bb > 0 && p > 0 && p < b.bb ? "follows " + ((b.bb - p) * 100).toFixed(1) + "¢ below best bid" : "";
+    mvMarkBid();
     if (!skipPreview) { var pv = $("#placement-preview"); if (pv && window.htmx) htmx.trigger(pv, "pf:preview"); }
+  }
+
+  // Show the price in the form on the bid ladder: its level is outlined, or a
+  // marker line sits where the bid would go when nobody bids that price.
+  // The ladder is re-rendered on every book update, so this runs after each.
+  function mvMarkBid() {
+    var side = $("#book .book-side.bids"); if (!side) return;
+    $$(".book-row.picked", side).forEach(function (r) { r.classList.remove("picked"); });
+    var old = $(".pick-line", side); if (old) old.remove();
+    // Right after a Yes/No switch the other outcome's ladder is still on screen.
+    if (!MV.shown || MV.shown.side !== MV.side) return;
+    var p = priceP(), b = MV.book;
+    if (!(p > 0) || !b || (b.bb > 0 && p > b.bb)) return;   // only where a bid can rest
+    var rows = $$(".book-row.bid", side); if (!rows.length) return;
+    var tick = function (x) { return Math.round(x * 100 / MV.tickC); };
+    // With price grouping on, a bid's row is its bucket, floored like the
+    // server does it (market_data::build_ladder).
+    var per = Math.max(1, tick(num(MV.shown.group) || 0)), want = Math.floor(tick(p) / per) * per, before = null;
+    for (var i = 0; i < rows.length; i++) {
+      var t = tick(num(rows[i].dataset.price));
+      if (t === want) { rows[i].classList.add("picked"); return; }
+      if (t < want) { before = rows[i]; break; }   // bids run best (highest) first
+    }
+    var line = document.createElement("div");
+    line.className = "book-row pick-line";
+    var px = document.createElement("span"); px.className = "px"; px.textContent = fmtC(p * 100) + "¢";
+    var tag = document.createElement("span"); tag.className = "pick-tag"; tag.textContent = before ? "your bid · no orders here yet" : "your bid · below the levels shown";
+    line.appendChild(px); line.appendChild(tag);
+    side.insertBefore(line, before);
   }
 
   // Centre the ladder on the spread. The spread row is position:sticky, so its
@@ -514,8 +549,9 @@
     if (b && bids) b.scrollTop = Math.max(0, bids.offsetTop - b.clientHeight / 2);
   }
 
-  function mvSwapBook(html) {
+  function mvSwapBook(html, shown) {
     var b = $("#book"); if (!b) return;
+    MV.shown = shown;
     var top = b.scrollTop;
     b.innerHTML = html;
     if (MV.scrolled) b.scrollTop = top; else mvCenterBook();
@@ -531,8 +567,10 @@
   }
 
   function mvBookParams() { return "slug=" + encodeURIComponent(MV.slug) + "&side=" + MV.side + (MV.group ? "&group=" + encodeURIComponent(MV.group) : ""); }
+  function mvAsked() { return { side: MV.side, group: MV.group }; }
   function mvFetchBook() {
-    fetch("/markets/view/book?" + mvBookParams()).then(function (r) { return r.text(); }).then(mvSwapBook).catch(function () {});
+    var asked = mvAsked();
+    fetch("/markets/view/book?" + mvBookParams()).then(function (r) { return r.text(); }).then(function (h) { mvSwapBook(h, asked); }).catch(function () {});
   }
 
   // Live book over SSE; if no update arrives, fall back to REST polling until it does.
@@ -542,11 +580,11 @@
     MV.gotEvent = false;
     mvLive("connecting");
     if (!window.EventSource) { MV.fallbackTimer = setInterval(mvFetchBook, 3000); mvLive("polling"); return; }
-    var es = (MV.es = new EventSource("/markets/view/book/stream?" + mvBookParams()));
+    var asked = mvAsked(), es = (MV.es = new EventSource("/markets/view/book/stream?" + mvBookParams()));
     es.addEventListener("book", function (e) {
       if (!MV.gotEvent) { MV.gotEvent = true; clearInterval(MV.fallbackTimer); }
       mvLive("live");
-      mvSwapBook(e.data);
+      mvSwapBook(e.data, asked);
     });
     es.onerror = function () { mvLive("polling"); };
     setTimeout(function () {

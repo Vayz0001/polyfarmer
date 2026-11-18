@@ -8,7 +8,7 @@
       {% if let Some(e) = d_error %}<div class="alert err" role="alert">{{ e }}</div>{% endif %}
       <div class="field">
         <label class="label" for="d-size">Size <span class="hint">split across both sides in Both sides mode</span></label>
-        <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="1" min="1" name="order_size" id="d-size" value="{{ d.size() }}" required /><span class="suf">USD</span></div>
+        <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="0.01" min="1" name="order_size" id="d-size" value="{{ d.size() }}" required /><span class="suf">USD</span></div>
       </div>
       <div class="field">
         <label class="label" for="d-depth">Depth ahead <span class="hint">minimum, USD</span></label>

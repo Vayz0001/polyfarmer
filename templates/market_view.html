@@ -92,7 +92,7 @@
         <div class="field">
           <span class="label">Size <span class="hint" id="split-note"{% if !sides_both %} hidden{% endif %}>split across both sides</span></span>
           <div class="dual">
-            <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="1" min="1" name="order_size" id="order_size" value="{{ default_size }}" required aria-label="Size in USD" /><span class="suf">USD</span></div>
+            <div class="affix"><span class="pre">$</span><input class="input mono" type="number" step="0.01" min="1" name="order_size" id="order_size" value="{{ default_size }}" required aria-label="Size in USD" /><span class="suf">USD</span></div>
             <span class="eq">=</span>
             <div class="affix"><input class="input mono" type="number" step="1" min="1" id="order_shares" aria-label="Size in shares" /><span class="suf">shares</span></div>
           </div>

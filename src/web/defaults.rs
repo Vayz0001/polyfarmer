@@ -61,12 +61,12 @@ impl Default for FormDefaults {
 
 impl FormDefaults {
     /// Parse the form fields with the same rules as starting a market, plus
-    /// the form inputs' own limits (whole dollars from $1, auto-pause from
+    /// the form inputs' own limits (whole cents from $1, auto-pause from
     /// 0.1¢), so a saved default can always be submitted as is.
     pub fn from_fields(f: &DefaultsForm) -> Result<Self, String> {
         let order_size = input::order_size_usd(&f.order_size)?;
-        if order_size < dec!(1) || !order_size.fract().is_zero() {
-            return Err("Size must be a whole number of dollars, at least $1.".into());
+        if order_size < dec!(1) || order_size.round_dp(2) != order_size {
+            return Err("Size must be at least $1, in whole cents.".into());
         }
         let min_depth_usd = input::depth_usd(&f.min_depth_usd)?;
         let auto_pause_cents = input::volatility_cents(&f.max_volatility_cents)?.map(|v| (v * dec!(100)).normalize());
@@ -363,6 +363,8 @@ mod tests {
             (ok.size(), ok.depth(), ok.auto_pause(), ok.expires.as_str()),
             ("250".into(), "1000".into(), String::new(), "never")
         );
+        let cents = FormDefaults::from_fields(&form("39.96", "500", "5", "7d", "", "")).unwrap();
+        assert_eq!(cents.size(), "39.96", "a size typed as shares × price keeps its cents");
         let custom = FormDefaults::from_fields(&form("100", "0", "2.5", "custom", "12", "h")).unwrap();
         assert_eq!(
             (custom.auto_pause(), custom.custom(), custom.expires_custom_unit.as_str()),
@@ -370,7 +372,7 @@ mod tests {
         );
         for (bad, why) in [
             (form("0", "500", "5", "7d", "", ""), "size"),
-            (form("37.50", "500", "5", "7d", "", ""), "size the input's step=1 refuses"),
+            (form("37.555", "500", "5", "7d", "", ""), "size the input's step=0.01 refuses"),
             (form("0.5", "500", "5", "7d", "", ""), "size under the input's min=1"),
             (form("100", "500", "0.05", "7d", "", ""), "auto-pause under the input's min=0.1"),
             (form("100", "-1", "5", "7d", "", ""), "depth"),
@@ -420,7 +422,7 @@ mod tests {
         let d = load(&dir);
         assert_eq!((d.size(), d.depth()), ("250".into(), "500".into()));
         // Values the form's inputs would refuse: ignored.
-        std::fs::write(path(&dir), r#"{"order_size": "37.5"}"#).unwrap();
+        std::fs::write(path(&dir), r#"{"order_size": "37.555"}"#).unwrap();
         assert!(load(&dir).is_builtin());
         // Oversized: ignored.
         std::fs::write(path(&dir), " ".repeat(MAX_FILE_BYTES as usize + 1)).unwrap();

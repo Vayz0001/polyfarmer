@@ -1481,10 +1481,15 @@ async fn defaults_for_new_markets_save_and_reset() {
     let (_, panel) = post("/setup/defaults/reset", "csrf=wrong".into(), true).await;
     assert!(panel.contains("Invalid session"), "{panel}");
     assert_eq!(std::fs::read_to_string(dir.join("defaults.json")).unwrap(), before);
-    // A size the form's input would refuse (step 1) isn't saved.
+    // A size the form's input would refuse (step 0.01) isn't saved.
     let (_, note) =
-        post("/setup/defaults/from-order", format!("csrf={csrf}&order_size=37.50&expires_in=7d"), true).await;
-    assert!(note.contains("whole number of dollars"), "{note}");
+        post("/setup/defaults/from-order", format!("csrf={csrf}&order_size=37.555&expires_in=7d"), true).await;
+    assert!(note.contains("whole cents"), "{note}");
+    // A size worked out from shares (108 × 37¢) keeps its cents.
+    let (_, note) =
+        post("/setup/defaults/from-order", format!("csrf={csrf}&order_size=39.96&expires_in=7d"), true).await;
+    assert!(note.contains("Saved as your defaults"), "{note}");
+    assert!(std::fs::read_to_string(dir.join("defaults.json")).unwrap().contains("39.96"));
 
     // Reset.
     let (_, panel) = post("/setup/defaults/reset", format!("csrf={csrf}"), true).await;
