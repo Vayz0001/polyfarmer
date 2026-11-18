@@ -57,7 +57,7 @@
   </div>
 
   <div class="stack-lg">
-    <div id="your-position" hx-get="/markets/view/position?cid={{ condition_id }}" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>
+    <div id="your-position" tabindex="-1" hx-get="/markets/view/position?cid={{ condition_id }}" hx-trigger="load, every 5s, pf:state from:body" hx-swap="innerHTML"></div>
 
     <section class="panel">
       <div class="panel-head"><h2>New farming order</h2>{% if !has_rewards %}<span class="pill warn">no rewards</span>{% endif %}</div>
@@ -71,7 +71,7 @@
           <span class="label">Outcome</span>
           <div class="seg full" id="side-toggle">
             {% for s in sides %}
-            <button type="button" class="{% if s.selected %}selected{% endif %}" data-action="side" data-side="{{ s.idx }}" data-label="{{ s.label }}" data-default-price="{{ s.default_price_cents }}">{{ s.label }} <span class="num">{{ s.price_cents }}¢</span></button>
+            <button type="button" class="{% if s.selected %}selected{% endif %}" data-action="side" data-side="{{ s.idx }}" data-label="{{ s.label }}" data-default-price="{{ s.default_price_cents }}" data-token="{{ s.token }}">{{ s.label }} <span class="num">{{ s.price_cents }}¢</span></button>
             {% endfor %}
           </div>
         </div>
@@ -148,6 +148,7 @@
           </div>
         </details>
 
+        <p class="help dup-note" id="dup-note" role="status" hidden></p>
         <div id="start-result"><button class="btn primary block" type="submit">Start farming</button></div>
       </form>
     </section>

@@ -222,6 +222,8 @@ pub struct SideView {
     /// reward-weight vs fill-risk starting point, "" if no reward program.
     pub default_price_cents: String,
     pub selected: bool,
+    /// This outcome's token id (to tell which outcomes you already farm).
+    pub token: String,
 }
 
 /// An order-book price-grouping choice (raw tick + coarser cent buckets).
@@ -351,6 +353,7 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
                 price_cents: mr.outcome_prices.get(i).map(|p| cents(*p)).unwrap_or_else(|| "—".to_string()),
                 default_price_cents: default_price_cents(m, max_spread, mr.tick_size, b),
                 selected: i == side,
+                token: mr.token_ids.get(i).cloned().unwrap_or_default(),
             }
         })
         .collect();
@@ -612,94 +615,63 @@ pub struct PositionParams {
     pub cid: String,
 }
 
-pub struct PositionLeg {
-    pub id: String,
-    pub label: String,
-    pub status: String,
-    pub scoring: Option<bool>,
-}
-
+/// The market page's "You're farming this" panel: the same legs, statuses and
+/// actions as this market's row in the Markets table, so the two always agree.
 #[derive(Template)]
 #[template(path = "_your_position.html")]
 struct YourPositionTemplate {
-    show: bool,
-    scoring_any: bool,
+    /// The actions' form values ({"csrf", "view"}) as JSON, built with a JSON
+    /// encoder so a stored condition id can never break out of it.
+    vals: String,
+    /// `None`: you don't farm this market (nothing is shown).
+    row: Option<super::dashboard::MarketRow>,
+    /// Token ids with a leg here, for the order form's "already farming" note.
+    farmed_tokens: String,
+    /// Polymarket's verdict over the live orders: Some(true) if any scores,
+    /// Some(false) if none does, None when unknown (no live order / no engine).
+    scoring: Option<bool>,
     reward_pct: Option<String>,
     earnings_today: Option<String>,
-    legs: Vec<PositionLeg>,
 }
 
-impl YourPositionTemplate {
-    fn hidden() -> Self {
-        Self { show: false, scoring_any: false, reward_pct: None, earnings_today: None, legs: Vec::new() }
-    }
-}
-
-/// GET /markets/view/position?cid= — loaded async so the heavier
-/// authenticated reward call never blocks the market page. Renders only when
-/// the engine is running AND you're farming this market.
-pub async fn view_position(State(state): State<WebState>, Query(p): Query<PositionParams>) -> Html<String> {
-    let (legs_cfg, order_status) = {
-        let s = state.engine.read().await;
-        let legs: Vec<MarketConfig> = s.configs.iter().filter(|c| c.condition_id == p.cid).cloned().collect();
-        (legs, s.order_status.clone())
-    };
-    if legs_cfg.is_empty() {
-        return render(&YourPositionTemplate::hidden());
-    }
-    let Some((executor, _)) = state.engine_handle.get().await else {
-        return render(&YourPositionTemplate::hidden());
-    };
-
-    let live_ids: Vec<String> = legs_cfg
-        .iter()
-        .filter_map(|c| match order_status.get(&c.id) {
-            Some(OrderStatus::Live { order_id, .. }) => Some(order_id.clone()),
-            _ => None,
-        })
-        .collect();
-    let scoring_fut = async {
-        if live_ids.is_empty() {
-            std::collections::HashMap::new()
-        } else {
-            let refs: Vec<&str> = live_ids.iter().map(String::as_str).collect();
-            tokio::time::timeout(NETWORK_TIMEOUT, executor.are_orders_scoring(&refs))
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .unwrap_or_default()
+/// Render the panel for one market, with an error toast when `flash` is set.
+/// Never waits on Polymarket: scoring and today's rewards come from caches
+/// refreshed in the background, so the 5s refresh stays cheap.
+pub(super) async fn render_position(state: &WebState, session: &Session, cid: &str, flash: Option<String>) -> Response {
+    let row = super::dashboard::market_row(state, cid).await;
+    let (farmed_tokens, scoring) = match &row {
+        Some(r) => {
+            let mut tokens: Vec<&str> = r.legs.iter().map(|l| l.token_id()).collect();
+            tokens.sort_unstable();
+            tokens.dedup();
+            let verdicts: Vec<bool> = r.legs.iter().filter_map(|l| l.scoring).collect();
+            let scoring = if verdicts.is_empty() { None } else { Some(verdicts.contains(&true)) };
+            (tokens.join(","), scoring)
         }
+        None => (String::new(), None),
     };
-    let earn_fut = rewards::today_entries(&state);
-    let (scoring, earn_res) = tokio::join!(scoring_fut, earn_fut);
-
-    let (reward_pct, earnings_today) = match earn_res {
-        Some(Ok(entries)) => entries
+    let (reward_pct, earnings_today) = match (&row, rewards::today_entries_cached(state).await) {
+        (Some(_), Some(entries)) => entries
             .iter()
-            .find(|e| e.condition_id.to_string().eq_ignore_ascii_case(&p.cid))
+            .find(|e| e.condition_id.to_string().eq_ignore_ascii_case(cid))
             .map(|e| (Some(format!("{:.2}%", e.earning_percentage)), Some(format!("${:.2}", rewards::earned(e)))))
             .unwrap_or((None, None)),
         _ => (None, None),
     };
+    let view = row.as_ref().map(|r| r.condition_id.as_str()).unwrap_or_default();
+    let vals = serde_json::json!({ "csrf": csrf_token(session).await, "view": view }).to_string();
+    let tpl = YourPositionTemplate { vals, row, farmed_tokens, scoring, reward_pct, earnings_today };
+    super::dashboard::with_error_toast(render(&tpl).into_response(), flash.as_deref())
+}
 
-    let legs: Vec<PositionLeg> = legs_cfg
-        .iter()
-        .map(|c| {
-            let (status, scoring_leg) = match order_status.get(&c.id) {
-                _ if c.paused => ("paused".to_string(), None),
-                Some(OrderStatus::Live { order_id, price }) => {
-                    (format!("resting {}¢", cents(*price)), scoring.get(order_id).copied())
-                }
-                Some(OrderStatus::Placing { .. }) => ("placing…".to_string(), None),
-                Some(OrderStatus::Cancelling { .. }) => ("cancelling…".to_string(), None),
-                _ => ("waiting for conditions".to_string(), None),
-            };
-            PositionLeg { id: c.id.clone(), label: c.token_label.clone(), status, scoring: scoring_leg }
-        })
-        .collect();
-
-    let scoring_any = legs.iter().any(|l| l.scoring == Some(true));
-    render(&YourPositionTemplate { show: true, scoring_any, reward_pct, earnings_today, legs })
+/// GET /markets/view/position?cid= — the panel, loaded after the page and
+/// refreshed every 5s and after every change.
+pub async fn view_position(
+    State(state): State<WebState>,
+    session: Session,
+    Query(p): Query<PositionParams>,
+) -> Response {
+    render_position(&state, &session, &p.cid, None).await
 }
 
 // ── Live placement preview ──────────────────────────────────────────────────
@@ -1358,6 +1330,8 @@ struct EditTemplate {
     expires_custom_unit: String,
     live: bool,
     error: Option<String>,
+    /// Opened from an expired leg's Extend button: focus starts on Expires.
+    focus_expires: bool,
 }
 
 /// Longest typed value echoed back into the drawer after a rejected save.
@@ -1430,13 +1404,26 @@ async fn edit_template(
         expires_custom_unit: v.expires_custom_unit.clone(),
         live: matches!(s.order_status.get(&c.id), Some(OrderStatus::Live { .. })),
         error,
+        focus_expires: false,
     })
 }
 
+#[derive(Deserialize)]
+pub struct EditParams {
+    /// `expires`: start on the Expires field (an expired leg's Extend button).
+    #[serde(default)]
+    focus: String,
+}
+
 /// GET /markets/{id}/edit — the edit drawer for one leg.
-pub async fn edit_form(State(state): State<WebState>, session: Session, Path(id): Path<String>) -> Html<String> {
+pub async fn edit_form(
+    State(state): State<WebState>,
+    session: Session,
+    Path(id): Path<String>,
+    Query(p): Query<EditParams>,
+) -> Html<String> {
     match edit_template(&state, &session, &id, None, None).await {
-        Some(t) => render(&t),
+        Some(t) => render(&EditTemplate { focus_expires: p.focus == "expires", ..t }),
         None => Html(
             "<div class=\"drawer-body\"><div class=\"alert err\">This market leg no longer exists.</div></div>"
                 .to_string(),
@@ -1585,6 +1572,19 @@ pub async fn edit_submit(
 #[derive(Deserialize)]
 pub struct MarketActionForm {
     csrf: String,
+    /// Set by the market page's panel (its market's condition id): reply with
+    /// that panel instead of the Markets table. Only picks what to render.
+    #[serde(default)]
+    view: String,
+}
+
+/// The fragment a leg action answers with: the panel it was clicked in.
+async fn reply(state: &WebState, session: &Session, view: &str, flash: Option<String>) -> Response {
+    if view.is_empty() {
+        render_markets_table(state, session, flash).await
+    } else {
+        render_position(state, session, view, flash).await
+    }
 }
 
 /// Cancel one leg's live order and return it to Idle once confirmed off the
@@ -1624,9 +1624,7 @@ pub async fn remove_market(
     Form(form): Form<MarketActionForm>,
 ) -> Response {
     if !verify_csrf(&session, &form.csrf).await {
-        return render_markets_table(&state, &session, Some("Invalid session — reload the page.".into()))
-            .await
-            .into_response();
+        return reply(&state, &session, &form.view, Some("Invalid session — reload the page.".into())).await;
     }
 
     // 1. Pause in memory and take the leg's order, if any.
@@ -1634,7 +1632,7 @@ pub async fn remove_market(
         let mut s = state.engine.write().await;
         if !s.configs.iter().any(|c| c.id == id) {
             drop(s);
-            return render_markets_table(&state, &session, None).await;
+            return reply(&state, &session, &form.view, None).await;
         }
         for c in s.configs.iter_mut().filter(|c| c.id == id) {
             c.paused = true;
@@ -1668,7 +1666,7 @@ pub async fn remove_market(
                 ),
                 Err(e) => format!("Couldn't cancel its order on Polymarket ({why}), and saving failed: {e}"),
             };
-            return render_markets_table(&state, &session, Some(flash)).await;
+            return reply(&state, &session, &form.view, Some(flash)).await;
         }
         let mut s = state.engine.write().await;
         s.order_status.insert(id.clone(), OrderStatus::Idle);
@@ -1701,13 +1699,8 @@ pub async fn remove_market(
         s.configs.extend(removed);
         drop(s);
         tracing::error!("Failed to save markets.json after remove: {}", e);
-        return render_markets_table(
-            &state,
-            &session,
-            Some(format!("Its order was cancelled, but saving failed: {e}")),
-        )
-        .await
-        .into_response();
+        return reply(&state, &session, &form.view, Some(format!("Its order was cancelled, but saving failed: {e}")))
+            .await;
     }
 
     if !tokens_to_unsubscribe.is_empty() {
@@ -1715,7 +1708,7 @@ pub async fn remove_market(
             let _ = ws_cmd_tx.send(WsCommand::Unsubscribe(tokens_to_unsubscribe)).await;
         }
     }
-    render_markets_table(&state, &session, None).await
+    reply(&state, &session, &form.view, None).await
 }
 
 /// Write the current market list to markets.json.
@@ -1820,11 +1813,15 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool, restart_from: Opt
     Ok(())
 }
 
-async fn pause_resume(state: WebState, session: Session, ids: Vec<String>, csrf: &str, pausing: bool) -> Response {
-    if !verify_csrf(&session, csrf).await {
-        return render_markets_table(&state, &session, Some("Invalid session — reload the page.".into()))
-            .await
-            .into_response();
+async fn pause_resume(
+    state: WebState,
+    session: Session,
+    ids: Vec<String>,
+    form: &MarketActionForm,
+    pausing: bool,
+) -> Response {
+    if !verify_csrf(&session, &form.csrf).await {
+        return reply(&state, &session, &form.view, Some("Invalid session — reload the page.".into())).await;
     }
     // Read every restart price before resuming anything, so a group resume
     // resumes all its legs or none (a lone leg would only wait on the
@@ -1833,7 +1830,7 @@ async fn pause_resume(state: WebState, session: Session, ids: Vec<String>, csrf:
     for id in &ids {
         match if pausing { Ok(None) } else { restart_price(&state, id).await } {
             Ok(p) => restart.push(p),
-            Err(e) => return render_markets_table(&state, &session, Some(e)).await,
+            Err(e) => return reply(&state, &session, &form.view, Some(e)).await,
         }
     }
     let mut flash = None;
@@ -1843,7 +1840,7 @@ async fn pause_resume(state: WebState, session: Session, ids: Vec<String>, csrf:
             break;
         }
     }
-    render_markets_table(&state, &session, flash).await
+    reply(&state, &session, &form.view, flash).await
 }
 
 pub async fn pause_market(
@@ -1852,7 +1849,7 @@ pub async fn pause_market(
     Path(id): Path<String>,
     Form(form): Form<MarketActionForm>,
 ) -> Response {
-    pause_resume(state, session, vec![id], &form.csrf, true).await
+    pause_resume(state, session, vec![id], &form, true).await
 }
 
 pub async fn resume_market(
@@ -1861,7 +1858,7 @@ pub async fn resume_market(
     Path(id): Path<String>,
     Form(form): Form<MarketActionForm>,
 ) -> Response {
-    pause_resume(state, session, vec![id], &form.csrf, false).await
+    pause_resume(state, session, vec![id], &form, false).await
 }
 
 async fn group_ids(state: &WebState, cid: &str) -> Vec<String> {
@@ -1876,7 +1873,7 @@ pub async fn pause_group(
     Form(form): Form<MarketActionForm>,
 ) -> Response {
     let ids = group_ids(&state, &cid).await;
-    pause_resume(state, session, ids, &form.csrf, true).await
+    pause_resume(state, session, ids, &form, true).await
 }
 
 /// POST /markets/group/{cid}/resume
@@ -1887,7 +1884,7 @@ pub async fn resume_group(
     Form(form): Form<MarketActionForm>,
 ) -> Response {
     let ids = group_ids(&state, &cid).await;
-    pause_resume(state, session, ids, &form.csrf, false).await
+    pause_resume(state, session, ids, &form, false).await
 }
 
 #[cfg(test)]

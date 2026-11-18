@@ -113,6 +113,16 @@ pub(super) async fn today_entries(state: &WebState) -> Option<eyre::Result<Arc<V
     }
 }
 
+/// Today's per-market entries without waiting: the cached list, refreshed in
+/// the background when stale (for pages that refresh every few seconds).
+pub(super) async fn today_entries_cached(state: &WebState) -> Option<Arc<Vec<UserRewardsEarningResponse>>> {
+    let key = today_key();
+    match state.engine_handle.get().await {
+        Some((executor, _)) => state.caches.reward_markets.get_swr(&key, move || fetch_today_entries(executor)),
+        None => state.caches.reward_markets.peek(&key).map(|(v, _)| v),
+    }
+}
+
 /// What one market has paid so far today.
 pub(super) fn earned(e: &UserRewardsEarningResponse) -> Decimal {
     e.earnings.iter().map(|a| a.earnings).sum()
