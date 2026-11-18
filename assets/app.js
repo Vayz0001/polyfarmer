@@ -504,7 +504,35 @@
     // peg hint
     var hint = $("#peg-hint");
     if (hint) hint.textContent = b && b.bb > 0 && p > 0 && p < b.bb ? "follows " + ((b.bb - p) * 100).toFixed(1) + "¢ below best bid" : "";
+    mvMarkBid();
     if (!skipPreview) { var pv = $("#placement-preview"); if (pv && window.htmx) htmx.trigger(pv, "pf:preview"); }
+  }
+
+  // Show the price in the form on the bid ladder: its level is outlined, or a
+  // marker line sits where the bid would go when nobody bids that price.
+  // The ladder is re-rendered on every book update, so this runs after each.
+  function mvMarkBid() {
+    var side = $("#book .book-side.bids"); if (!side) return;
+    $$(".book-row.picked", side).forEach(function (r) { r.classList.remove("picked"); });
+    var old = $(".pick-line", side); if (old) old.remove();
+    var p = priceP(), b = MV.book;
+    if (!(p > 0) || !b || (b.bb > 0 && p > b.bb)) return;   // only where a bid can rest
+    var rows = $$(".book-row.bid", side); if (!rows.length) return;
+    var tick = function (x) { return Math.round(x * 100 / MV.tickC); };
+    // With price grouping on, a bid's row is its bucket, floored like the
+    // server does it (market_data::build_ladder).
+    var per = Math.max(1, tick(num(MV.group) || 0)), want = Math.floor(tick(p) / per) * per, before = null;
+    for (var i = 0; i < rows.length; i++) {
+      var t = tick(num(rows[i].dataset.price));
+      if (t === want) { rows[i].classList.add("picked"); return; }
+      if (t < want) { before = rows[i]; break; }   // bids run best (highest) first
+    }
+    var line = document.createElement("div");
+    line.className = "book-row pick-line";
+    var px = document.createElement("span"); px.className = "px"; px.textContent = fmtC(p * 100) + "¢";
+    var tag = document.createElement("span"); tag.className = "pick-tag"; tag.textContent = before ? "your bid · no orders here yet" : "your bid · below the levels shown";
+    line.appendChild(px); line.appendChild(tag);
+    side.insertBefore(line, before);
   }
 
   // Centre the ladder on the spread. The spread row is position:sticky, so its

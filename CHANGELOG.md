@@ -18,6 +18,9 @@ anything may change between releases.
   no third-party scripts or tracking, and every animation turns off for people who prefer reduced motion.
 - "Stop quoting after" has a **Custom…** option, on the new-order form and in the edit drawer: type a whole number
   of hours or days, from 1 hour to 1 year (for example 12 hours before a game starts).
+- The order book on a market's page marks the price in the order form: clicking a bid level, typing a price or
+  loading the page outlines that level with a **YOUR BID** tag, or draws a marker line where your bid would sit when
+  nobody is bidding that price yet. It follows the book as it updates and the price grouping you pick.
 
 ### Changed
 
@@ -31,6 +34,9 @@ anything may change between releases.
 
 ### Fixed
 
+- The new-order form's size accepts cents. Typing a share count fills in shares × price (108 × 21.9¢ = $23.65),
+  which the box used to refuse on **Start farming** because it only took whole dollars. Saved defaults take whole
+  cents too.
 - Auto-pause: resuming a leg it had paused didn't restart the limit, so if the price hadn't come all the way back the
   leg sat on "Waiting" with no order and no message. Resume now restarts the limit from the current best bid (as
   changing the limit in Edit already did), after an auto-pause or a pause of your own; "Resume both" resumes both
