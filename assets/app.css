@@ -493,3 +493,25 @@ details.adv summary:hover { color: var(--fg); }
   .holders-grid { grid-template-columns: minmax(0, 1fr); }
   .holders-col + .holders-col { border-left: 0; border-top: 1px solid var(--line); }
 }
+
+/* Minimizable panels: <html data-collapsed="trades holders"> (theme.js, app.js) */
+.collapse-btn { width: 24px; height: 24px; margin: -4px 0 -4px -6px; }
+.collapse-btn svg { transform: rotate(90deg); transition: transform .15s; }
+.collapse-btn[aria-expanded="false"] svg { transform: none; }
+html[data-collapsed~="trades"] #trades-panel > :not(.panel-head),
+html[data-collapsed~="holders"] #holders-panel > :not(.panel-head),
+html[data-collapsed~="trades"] #trades-panel .panel-head > :not(h2),
+html[data-collapsed~="holders"] #holders-panel .panel-head > :not(h2),
+html[data-collapsed~="trades"] #trades-sub { display: none; }
+html[data-collapsed~="trades"] #trades-panel .panel-head,
+html[data-collapsed~="holders"] #holders-panel .panel-head { border-bottom: 0; }
+html[data-collapsed~="trades"] .collapse-btn[data-key="trades"] svg,
+html[data-collapsed~="holders"] .collapse-btn[data-key="holders"] svg { transform: none; }
+
+/* Price chart hover readout */
+.chart-svg[data-pts] { cursor: crosshair; touch-action: pan-y; }
+.chart-svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.chart-vline { position: absolute; width: 0; border-left: 1px dashed var(--line-2); pointer-events: none; }
+.chart-dot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--panel); pointer-events: none; }
+.chart-tip { position: absolute; padding: 3px 8px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--fg); font: 600 11.5px var(--mono); white-space: nowrap; pointer-events: none; box-shadow: 0 4px 14px rgb(0 0 0 / .18); }
+.chart-vline[hidden], .chart-dot[hidden], .chart-tip[hidden] { display: none; }

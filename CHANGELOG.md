@@ -9,6 +9,12 @@ anything may change between releases.
 
 ### Added
 
+- On a market's page, **Trades** and **Top holders** can be minimized to their title bar (the chevron next to the
+  title). The choice is remembered across markets and reloads, and a minimized panel loads nothing until it is
+  opened again.
+- The market page's price chart shows the price and time under the pointer: a line, a dot on the price and a
+  label in your local time (dates only on "All"). It also works with the keyboard: focus the chart and use ← →,
+  Home and End.
 - A market's page shows, below the order book, the market's **Trades** and **Top holders** from Polymarket's
   public data. Trades lists the last 10 of at least $100, $1k, $10k or $100k (buttons; either side), fetched only
   when the page opens or a button is clicked. Top holders shows the 10 biggest holders of each outcome in one

@@ -5,3 +5,9 @@ try {
   var t = localStorage.getItem("pf-theme");
   if (t) document.documentElement.dataset.theme = t;
 } catch (e) {}
+
+/* Minimized market-page panels (Trades, Top holders), so they don't flash open. */
+try {
+  var c = localStorage.getItem("pf-collapsed");
+  if (c) document.documentElement.dataset.collapsed = c;
+} catch (e) {}
