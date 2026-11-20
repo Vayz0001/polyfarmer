@@ -129,3 +129,30 @@ fn install_blocks_run_in_one_paste() {
     assert!(html.contains("<code>DEMO=1 cargo run --example serve</code>"));
     assert!(html.contains("<code>$env:DEMO = \"1\"; cargo run --example serve</code>"));
 }
+
+/// Link previews (X, Discord, Slack…) need an absolute image URL that exists in
+/// `site/`, at the size the tags announce; `summary_large_image` without one
+/// shows no card at all.
+#[test]
+fn share_preview_has_an_image() {
+    let html = read("index.html");
+    let meta = |key: &str| -> String {
+        let tag = html
+            .lines()
+            .find(|l| l.contains(&format!("=\"{key}\"")) && l.trim_start().starts_with("<meta"))
+            .unwrap_or_else(|| panic!("missing <meta {key}>"));
+        attr_values(tag, "content").first().unwrap_or_else(|| panic!("{key} has no content")).to_string()
+    };
+    assert_eq!(meta("twitter:card"), "summary_large_image");
+    let image = meta("og:image");
+    assert_eq!(meta("twitter:image"), image);
+    let path = image.strip_prefix("https://polyfarmer.xyz/").expect("absolute URL on the site's own domain");
+    let png =
+        std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("site").join(path)).expect("image is in site/");
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "PNG file");
+    let dim = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap()).to_string();
+    assert_eq!((dim(16), dim(20)), (meta("og:image:width"), meta("og:image:height")));
+    assert!(png.len() < 5 << 20, "X refuses preview images over 5 MB");
+    assert!(meta("og:url").starts_with("https://polyfarmer.xyz/"));
+    assert!(!meta("og:image:alt").is_empty() && !meta("twitter:image:alt").is_empty());
+}

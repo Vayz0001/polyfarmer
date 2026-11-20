@@ -41,6 +41,8 @@ anything may change between releases.
 
 ### Fixed
 
+- Links to polyfarmer.xyz now show a preview card on X, Discord and other apps: the site announced a large image
+  card but never said which image, so none appeared. It now has a 1200×630 preview image and the matching tags.
 - The Rewards page's rank card retries a failed lookup after 5 minutes instead of showing "rank unavailable" for
   an hour, and a failed check no longer blanks a rank it already found: it keeps showing it with "last check failed,
   retrying". While the first lookup runs it says it can take a minute.
