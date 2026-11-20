@@ -29,6 +29,8 @@ anything may change between releases.
 
 ### Changed
 
+- The Rewards page's **LP rank** card is now **Rewards rank** ("of N wallets"): PolyRewards ranks every wallet that
+  has earned liquidity rewards by rewards earned, which isn't the same as a ranking of liquidity providers.
 - Shorter, consistent names for the order safeguards, the same in the forms, the Markets table, alerts, the README and
   the website: **Safeguards** (was "Safety & expiry"), **Depth ahead** (was "Min depth ahead" / "Min depth" /
   "Minimum depth"), **Auto-pause** (was "Auto-pause if best bid moves" / "volatility limit") and **Expires** (was
@@ -39,6 +41,9 @@ anything may change between releases.
 
 ### Fixed
 
+- The Rewards page's rank card no longer says "rank unavailable": PolyRewards' leaderboard has grown to ~27 MB and
+  took over two minutes to download, past the 90-second limit. It is now fetched gzipped (~6.5 MB, a few seconds),
+  unpacked with a size cap, with a 3-minute limit.
 - The new-order form's size accepts cents. Typing a share count fills in shares × price (108 × 21.9¢ = $23.65),
   which the box used to refuse on **Start farming** because it only took whole dollars. Saved defaults take whole
   cents too.

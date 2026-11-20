@@ -7,8 +7,8 @@
   </div>
   {% endfor %}
   <div class="kpi">
-    <div class="k">LP rank{% if let Some(t) = rank.tier %} <span class="tag accent">{{ t }}</span>{% endif %}</div>
+    <div class="k">Rewards rank{% if let Some(t) = rank.tier %} <span class="tag accent">{{ t }}</span>{% endif %}</div>
     <div class="v">{{ rank.value }}</div>
-    <div class="s">{{ rank.sub }} · <a href="{{ rank.link }}" target="_blank" rel="noopener noreferrer" title="Community leaderboard; your address is never sent to it">PolyRewards ↗</a></div>
+    <div class="s">{{ rank.sub }} · <a href="{{ rank.link }}" target="_blank" rel="noopener noreferrer" title="PolyRewards ranks every wallet that has earned Polymarket liquidity rewards by rewards earned. Your address is never sent to it.">PolyRewards ↗</a></div>
   </div>
 </div>

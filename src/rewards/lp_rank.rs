@@ -1,5 +1,6 @@
-//! Your rank among Polymarket liquidity providers, from PolyRewards
-//! (polyrewards.fun), an independent community leaderboard. It has no official
+//! Your rank among every wallet that has earned Polymarket liquidity rewards,
+//! by rewards earned, from PolyRewards (polyrewards.fun), an independent
+//! community leaderboard. It has no official
 //! API, so this reads the public data files its own page loads and finds your
 //! wallet locally: your address is never sent anywhere.
 //!
@@ -24,8 +25,11 @@ pub const SITE_URL: &str = "https://polyrewards.fun/";
 const META_TIMEOUT: Duration = Duration::from_secs(10);
 /// meta.json is a few hundred bytes (Oct 2026).
 const MAX_META_BYTES: usize = 64 << 10;
-/// The full list is ~26 MB (Oct 2026).
-const LIST_TIMEOUT: Duration = Duration::from_secs(90);
+/// The full list is ~27 MB, ~6.5 MB gzipped (Nov 2026). Uncompressed it took
+/// over two minutes to arrive, hence gzip and a generous timeout.
+const LIST_TIMEOUT: Duration = Duration::from_secs(180);
+/// Cap on the list, both as sent and once decompressed (so a small "zip bomb"
+/// can't fill memory).
 const MAX_LIST_BYTES: usize = 64 << 20;
 
 static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
@@ -97,7 +101,7 @@ pub async fn fetch(address: &str) -> LpRank {
     match lookup(address).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!("LP rank unavailable: {e:#}");
+            tracing::warn!("Rewards rank unavailable: {e:#}");
             LpRank::Unavailable
         }
     }
@@ -105,7 +109,7 @@ pub async fn fetch(address: &str) -> LpRank {
 
 async fn lookup(address: &str) -> Result<LpRank> {
     let address = address.to_ascii_lowercase();
-    let meta = parse_meta(&download(&format!("{BASE}meta.json"), META_TIMEOUT, MAX_META_BYTES).await?)?;
+    let meta = parse_meta(&download(&format!("{BASE}meta.json"), META_TIMEOUT, MAX_META_BYTES, false).await?.0)?;
 
     let cached = {
         let last = LAST.lock().unwrap_or_else(|e| e.into_inner());
@@ -114,10 +118,15 @@ async fn lookup(address: &str) -> Result<LpRank> {
     let rank = match cached {
         Some(rank) => rank,
         None => {
-            let body = download(&format!("{BASE}{}all.json", meta.data_path), LIST_TIMEOUT, MAX_LIST_BYTES).await?;
-            // ~26 MB of JSON: parse off the async runtime so the dashboard stays responsive.
+            let url = format!("{BASE}{}all.json", meta.data_path);
+            let (body, gzipped) = download(&url, LIST_TIMEOUT, MAX_LIST_BYTES, true).await?;
+            // ~27 MB of JSON: unpack and parse off the async runtime so the dashboard stays responsive.
             let needle = address.clone();
-            let rank = tokio::task::spawn_blocking(move || find_rank(&body, &needle)).await??;
+            let rank = tokio::task::spawn_blocking(move || {
+                let json = if gzipped { gunzip(&body, MAX_LIST_BYTES)? } else { body };
+                find_rank(&json, &needle)
+            })
+            .await??;
             *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some(Memo { data_path: meta.data_path, address, rank });
             rank
         }
@@ -137,12 +146,22 @@ fn valid_data_path(p: &str) -> bool {
 
 /// GET `url` (always ours: `BASE` plus a validated path), refusing anything but
 /// a 2xx and stopping as soon as the body passes `max` bytes, whatever the
-/// server claims about its size.
-async fn download(url: &str, timeout: Duration, max: usize) -> Result<Vec<u8>> {
-    let mut resp = HTTP.get(url).timeout(timeout).send().await?;
+/// server claims about its size. With `gzip`, asks for a gzipped body; the
+/// bool says whether it came back gzipped (plain is fine too).
+async fn download(url: &str, timeout: Duration, max: usize, gzip: bool) -> Result<(Vec<u8>, bool)> {
+    let mut req = HTTP.get(url).timeout(timeout);
+    if gzip {
+        req = req.header(reqwest::header::ACCEPT_ENCODING, "gzip");
+    }
+    let mut resp = req.send().await?;
     if !resp.status().is_success() {
         return Err(eyre!("PolyRewards answered HTTP {}", resp.status().as_u16()));
     }
+    let gzipped = match resp.headers().get(reqwest::header::CONTENT_ENCODING) {
+        None => false,
+        Some(v) if gzip && v.as_bytes().eq_ignore_ascii_case(b"gzip") => true,
+        Some(_) => return Err(eyre!("PolyRewards sent an unexpected content encoding")),
+    };
     if resp.content_length().is_some_and(|n| n > max as u64) {
         return Err(eyre!("PolyRewards file is larger than {max} bytes"));
     }
@@ -153,7 +172,21 @@ async fn download(url: &str, timeout: Duration, max: usize) -> Result<Vec<u8>> {
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(body)
+    Ok((body, gzipped))
+}
+
+/// Unpack a gzip body, refusing to grow past `max` bytes.
+fn gunzip(body: &[u8], max: usize) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    flate2::read::GzDecoder::new(body)
+        .take(max as u64 + 1)
+        .read_to_end(&mut out)
+        .map_err(|_| eyre!("PolyRewards sent a broken gzip file"))?;
+    if out.len() > max {
+        return Err(eyre!("PolyRewards file is larger than {max} bytes once unpacked"));
+    }
+    Ok(out)
 }
 
 /// Parse errors only say *where* the data was wrong: serde's message quotes the
@@ -266,6 +299,33 @@ mod tests {
         let ok =
             parse_meta(br#"{"total":171709,"data_path":"_data/e673eb18cd384e62a37ff0e50e22603e/","x":"<b>"}"#).unwrap();
         assert_eq!(ok.total, 171_709);
+    }
+
+    #[test]
+    fn gunzip_round_trips_and_refuses_bombs_and_junk() {
+        use std::io::Write;
+        let gz = |data: &[u8]| {
+            let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            e.write_all(data).unwrap();
+            e.finish().unwrap()
+        };
+        let me = "0xc8ab97a9089a9ff7e6ef0688e6e591a066946418";
+        let list = format!(r#"[{{"rank":4,"name":"x","address":"{me}","rewards":1}}]"#);
+        assert_eq!(find_rank(&gunzip(&gz(list.as_bytes()), 1 << 20).unwrap(), me).unwrap(), Some(4));
+
+        // 10 MB of zeros squeezes into ~10 KB: refused at the cap, not unpacked whole.
+        let bomb = gz(&vec![0u8; 10 << 20]);
+        assert!(bomb.len() < 64 << 10);
+        let err = gunzip(&bomb, 1 << 20).unwrap_err();
+        assert!(format!("{err:#}").contains("larger than"));
+        // Exactly at the cap is fine.
+        assert_eq!(gunzip(&gz(&[b' '; 1000]), 1000).unwrap().len(), 1000);
+
+        // Not gzip, or cut short: an error that doesn't quote the data.
+        for junk in [b"<script>alert(1)</script>".to_vec(), gz(list.as_bytes())[..20].to_vec()] {
+            let msg = format!("{:#}", gunzip(&junk, 1 << 20).unwrap_err());
+            assert!(!msg.contains("script") && !msg.contains('<'), "{msg}");
+        }
     }
 
     #[test]

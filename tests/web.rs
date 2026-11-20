@@ -71,7 +71,7 @@ async fn reward_fragments_without_a_wallet_say_so_and_skip_the_network() {
     let cookie = login(&app, &pw).await;
     let (status, kpis, _) = get_authed(&app, &cookie, "/rewards/kpis").await;
     assert_eq!(status, StatusCode::OK);
-    for card in ["Today so far", "Yesterday", "Last 7 days", "All time", "LP rank"] {
+    for card in ["Today so far", "Yesterday", "Last 7 days", "All time", "Rewards rank"] {
         assert!(kpis.contains(card), "missing {card}");
     }
     assert!(kpis.contains("engine not running") && kpis.contains("configure your wallet"));
