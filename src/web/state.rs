@@ -14,7 +14,7 @@ use crate::cache::TtlCache;
 use crate::creds::CredentialStore;
 use crate::engine::executor::Executor;
 use crate::engine::ws_manager::AppState;
-use crate::rewards::lp_rank::LpRank;
+use crate::rewards::lp_rank::{self, LpRank};
 use crate::rewards::portfolio::{Activity, Position};
 use crate::types::{Alert, WsCommand};
 
@@ -28,9 +28,6 @@ const BALANCE_TTL: Duration = Duration::from_secs(15);
 const PORTFOLIO_TTL: Duration = Duration::from_secs(15);
 const REWARDS_TTL: Duration = Duration::from_secs(30);
 const PAYOUTS_TTL: Duration = Duration::from_secs(300);
-/// PolyRewards publishes about twice a day; the list itself is only downloaded
-/// again when it changes (see `rewards::lp_rank`).
-const LP_RANK_TTL: Duration = Duration::from_secs(3600);
 
 #[derive(Clone)]
 pub struct WebState {
@@ -104,7 +101,8 @@ impl Default for Caches {
             activity: Arc::new(TtlCache::new(PORTFOLIO_TTL)),
             reward_markets: Arc::new(TtlCache::new(REWARDS_TTL)),
             reward_payouts: Arc::new(TtlCache::new(PAYOUTS_TTL)),
-            lp_rank: Arc::new(TtlCache::new(LP_RANK_TTL)),
+            // An hour after a success, five minutes after a failure (see `LpRank::ttl`).
+            lp_rank: Arc::new(TtlCache::new(lp_rank::REFRESH_EVERY).with_ttl_for(LpRank::ttl)),
         }
     }
 }
