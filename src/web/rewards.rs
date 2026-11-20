@@ -355,10 +355,12 @@ fn rank_view(state: &WebState) -> RankView {
         return RankView { value: "—".into(), tier: None, sub: "configure your wallet".into(), link };
     };
     let fetch_user = user.clone();
-    let cached = state
-        .caches
-        .lp_rank
-        .get_swr(&user, move || async move { Ok::<_, std::convert::Infallible>(lp_rank::fetch(&fetch_user).await) });
+    let cache = Arc::clone(&state.caches.lp_rank);
+    let cached = state.caches.lp_rank.get_swr(&user, move || async move {
+        let now = lp_rank::fetch(&fetch_user).await;
+        let previous = cache.peek(&fetch_user).map(|(v, _)| v);
+        Ok::<_, std::convert::Infallible>(now.after(previous.as_ref()))
+    });
     match cached {
         Some(r @ LpRank::Ranked { rank, total }) => RankView {
             value: format!("#{}", thousands(rank)),
@@ -371,8 +373,20 @@ fn rank_view(state: &WebState) -> RankView {
                 value: "—".into(), tier: None, sub: format!("not among {} wallets yet", thousands(total)), link
             }
         }
-        Some(LpRank::Unavailable) => RankView { value: "—".into(), tier: None, sub: "rank unavailable".into(), link },
-        None => RankView { value: "…".into(), tier: None, sub: "checking PolyRewards".into(), link },
+        Some(r @ LpRank::Outdated { rank, total }) => RankView {
+            value: format!("#{}", thousands(rank)),
+            tier: r.tier(),
+            sub: format!("of {} wallets · last check failed, retrying", thousands(total)),
+            link,
+        },
+        Some(LpRank::Unavailable) => {
+            RankView {
+                value: "—".into(), tier: None, sub: "rank unavailable, retrying in a few minutes".into(), link
+            }
+        }
+        None => {
+            RankView { value: "…".into(), tier: None, sub: "checking PolyRewards (can take a minute)".into(), link }
+        }
     }
 }
 

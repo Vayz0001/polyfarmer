@@ -8,7 +8,9 @@
 //! time-capped with redirects refused, only two integers (`rank`, `total`) and
 //! a strictly validated folder name are kept, every other field (names, HTML,
 //! scripts…) is skipped without being stored, nothing from it is ever rendered
-//! or logged, and any surprise just makes the card say "rank unavailable".
+//! or logged, and any surprise just makes the card say "rank unavailable" (or
+//! keep the last rank it found, marked as not current) and try again in a few
+//! minutes.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -51,13 +53,46 @@ pub enum LpRank {
     NotRanked {
         total: u64,
     },
+    /// The last check failed, but an earlier one found this rank: keep showing
+    /// it (marked as not current) rather than blanking the card.
+    Outdated {
+        rank: u64,
+        total: u64,
+    },
     Unavailable,
 }
 
+/// How long a successful lookup is reused. PolyRewards publishes about twice a
+/// day, and the big list is only downloaded again when it changed, so an hourly
+/// check costs one tiny meta.json request.
+pub const REFRESH_EVERY: Duration = Duration::from_secs(3600);
+/// After a failed lookup, try again this soon (one attempt at a time, so a
+/// dashboard left open never hammers the site).
+pub const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(300);
+
 impl LpRank {
+    /// How long this result stays fresh in the dashboard's cache.
+    pub fn ttl(&self) -> Duration {
+        match self {
+            LpRank::Ranked { .. } | LpRank::NotRanked { .. } => REFRESH_EVERY,
+            LpRank::Outdated { .. } | LpRank::Unavailable => RETRY_AFTER_FAILURE,
+        }
+    }
+
+    /// The result of a new lookup, given what the card showed before: a failure
+    /// keeps the last known rank (as `Outdated`) instead of replacing it.
+    pub fn after(self, previous: Option<&LpRank>) -> LpRank {
+        match (self, previous) {
+            (LpRank::Unavailable, Some(&(LpRank::Ranked { rank, total } | LpRank::Outdated { rank, total }))) => {
+                LpRank::Outdated { rank, total }
+            }
+            (now, _) => now,
+        }
+    }
+
     /// "Top 1000", or the percentile bucket, e.g. "Top 1%", "Top 10%", "Top 37%".
     pub fn tier(&self) -> Option<String> {
-        let LpRank::Ranked { rank, total } = *self else { return None };
+        let (LpRank::Ranked { rank, total } | LpRank::Outdated { rank, total }) = *self else { return None };
         if rank <= 1000 {
             return Some("Top 1000".into());
         }
@@ -326,6 +361,28 @@ mod tests {
             let msg = format!("{:#}", gunzip(&junk, 1 << 20).unwrap_err());
             assert!(!msg.contains("script") && !msg.contains('<'), "{msg}");
         }
+    }
+
+    #[test]
+    fn a_failed_check_keeps_the_last_rank_and_retries_sooner() {
+        let ranked = LpRank::Ranked { rank: 1_482, total: 171_709 };
+        let outdated = LpRank::Outdated { rank: 1_482, total: 171_709 };
+        // Failure after a rank: keep it, marked outdated; again: still kept.
+        assert_eq!(LpRank::Unavailable.after(Some(&ranked)), outdated);
+        assert_eq!(LpRank::Unavailable.after(Some(&outdated)), outdated);
+        // Failure with nothing (or nothing useful) before: unavailable.
+        assert_eq!(LpRank::Unavailable.after(None), LpRank::Unavailable);
+        assert_eq!(LpRank::Unavailable.after(Some(&LpRank::NotRanked { total: 5 })), LpRank::Unavailable);
+        // Any success replaces whatever was there.
+        let fresh = LpRank::Ranked { rank: 900, total: 171_800 };
+        assert_eq!(fresh.clone().after(Some(&outdated)), fresh);
+        assert_eq!(LpRank::NotRanked { total: 9 }.after(Some(&ranked)), LpRank::NotRanked { total: 9 });
+        // Failures retry in minutes, successes are reused for an hour.
+        assert_eq!(LpRank::Unavailable.ttl(), RETRY_AFTER_FAILURE);
+        assert_eq!(outdated.ttl(), RETRY_AFTER_FAILURE);
+        assert_eq!(ranked.ttl(), REFRESH_EVERY);
+        assert!(RETRY_AFTER_FAILURE < REFRESH_EVERY);
+        assert_eq!(outdated.tier().as_deref(), Some("Top 1%"));
     }
 
     #[test]

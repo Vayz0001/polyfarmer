@@ -24,8 +24,11 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 pub struct TtlCache<V> {
     ttl: Duration,
+    /// Optional per-value freshness (e.g. a failed lookup retries sooner).
+    ttl_for: Option<fn(&V) -> Duration>,
     capacity: usize,
-    entries: Mutex<HashMap<String, (Instant, V)>>,
+    /// key → (stored at, fresh for, value)
+    entries: Mutex<HashMap<String, (Instant, Duration, V)>>,
     /// Keys with a background refresh in flight (dedupes `get_swr` refreshes).
     refreshing: Mutex<HashSet<String>>,
 }
@@ -51,10 +54,17 @@ impl<V: Clone + Send + 'static> TtlCache<V> {
     pub fn with_capacity(ttl: Duration, capacity: usize) -> Self {
         Self {
             ttl,
+            ttl_for: None,
             capacity: capacity.max(1),
             entries: Mutex::new(HashMap::new()),
             refreshing: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Let each value choose how long it stays fresh, instead of the cache-wide TTL.
+    pub fn with_ttl_for(mut self, ttl_for: fn(&V) -> Duration) -> Self {
+        self.ttl_for = Some(ttl_for);
+        self
     }
 
     /// Number of cached entries (fresh or stale).
@@ -69,7 +79,7 @@ impl<V: Clone + Send + 'static> TtlCache<V> {
     /// Cached value and whether it is still fresh.
     pub fn peek(&self, key: &str) -> Option<(V, bool)> {
         let entries = lock(&self.entries);
-        entries.get(key).map(|(at, v)| (v.clone(), at.elapsed() < self.ttl))
+        entries.get(key).map(|(at, ttl, v)| (v.clone(), at.elapsed() < *ttl))
     }
 
     /// Insert, keeping the cache within capacity: a new key into a full cache first
@@ -79,13 +89,16 @@ impl<V: Clone + Send + 'static> TtlCache<V> {
         let mut entries = lock(&self.entries);
         if !entries.contains_key(key) && entries.len() >= self.capacity {
             let horizon = self.ttl.saturating_mul(4);
-            entries.retain(|_, (at, _)| at.elapsed() < horizon);
+            entries.retain(|_, (at, _, _)| at.elapsed() < horizon);
             while entries.len() >= self.capacity {
-                let Some(oldest) = entries.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone()) else { break };
+                let Some(oldest) = entries.iter().min_by_key(|(_, (at, _, _))| *at).map(|(k, _)| k.clone()) else {
+                    break;
+                };
                 entries.remove(&oldest);
             }
         }
-        entries.insert(key.to_string(), (Instant::now(), value));
+        let ttl = self.ttl_for.map_or(self.ttl, |f| f(&value));
+        entries.insert(key.to_string(), (Instant::now(), ttl, value));
     }
 
     /// Fresh cached value, or await `fetch` and cache its success. Errors are
@@ -189,6 +202,22 @@ mod tests {
         c.put("new", 3); // full: "old" is expired and goes, "live" survives
         assert!(c.peek("old").is_none());
         assert!(c.peek("live").is_some() && c.peek("new").is_some());
+    }
+
+    #[test]
+    fn values_can_choose_their_own_freshness() {
+        let c: TtlCache<u32> = TtlCache::new(Duration::from_secs(60)).with_ttl_for(|v| {
+            if *v == 0 {
+                Duration::from_millis(5)
+            } else {
+                Duration::from_secs(60)
+            }
+        });
+        c.put("ok", 1);
+        c.put("failed", 0);
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(c.peek("ok"), Some((1, true)));
+        assert_eq!(c.peek("failed"), Some((0, false)), "short-lived value is stale already");
     }
 
     #[tokio::test]
