@@ -38,6 +38,8 @@ manage everything from a local web dashboard.
   something looks wrong.
 - **See what you earn.** Live order book, reward score for each order, positions, today's rewards by market, daily
   payouts, and your rank by rewards earned (from PolyRewards).
+- **See who's in a market.** Each market's page shows its biggest holders on both sides and its latest large trades
+  ($100+ to $100k+), from Polymarket's public data.
 
 ### Protection for every order
 

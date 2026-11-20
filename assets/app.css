@@ -474,3 +474,22 @@ details.adv summary:hover { color: var(--fg); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+
+/* Market page: trades and top holders (below the order book) */
+#trades-panel h2 .faint, #holders-panel h2 .faint { font-weight: 450; font-size: 12px; margin-left: 6px; }
+.holders-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.holders-col { min-width: 0; }
+.holders-col + .holders-col { border-left: 1px solid var(--line); }
+.holders-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.holders-tbl, .trades-tbl { table-layout: auto; }
+.holders-tbl th, .holders-tbl td { padding-inline: 10px; }
+.holders-tbl td.num:first-child { width: 28px; }
+:is(.holders-tbl, .trades-tbl) td.who { max-width: 0; width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trades-tbl td.who { width: 30%; }
+:is(.holders-tbl, .trades-tbl) td.who a { color: var(--fg); text-decoration: none; }
+:is(.holders-tbl, .trades-tbl) td.who a:hover { color: var(--accent); text-decoration: underline; }
+#mv-trades.htmx-request, #mv-holders.htmx-request { opacity: .55; transition: opacity .15s; }
+@media (max-width: 1279px) {
+  .holders-grid { grid-template-columns: minmax(0, 1fr); }
+  .holders-col + .holders-col { border-left: 0; border-top: 1px solid var(--line); }
+}
