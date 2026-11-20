@@ -662,6 +662,95 @@
     mvUpdate();
   }
 
+
+  // ── minimizable panels (market page: Trades, Top holders) ───────────────
+  // The set lives in localStorage ("pf-collapsed", space-separated keys) and on
+  // <html data-collapsed>, which theme.js restores before first paint and the
+  // CSS reads. A minimized panel's first fetch is held until it is opened.
+  function collapsedKeys() { return (document.documentElement.dataset.collapsed || "").split(" ").filter(Boolean); }
+  function isCollapsed(key) { return collapsedKeys().indexOf(key) >= 0; }
+  function syncCollapseButtons() {
+    $$(".collapse-btn[data-key]").forEach(function (b) {
+      var shut = isCollapsed(b.dataset.key), name = b.getAttribute("aria-label").replace(/^(Minimize|Expand) /, "");
+      b.setAttribute("aria-expanded", String(!shut));
+      b.title = (shut ? "Expand " : "Minimize ") + name;
+      b.setAttribute("aria-label", b.title);
+    });
+  }
+  function setCollapsed(key, shut) {
+    var keys = collapsedKeys().filter(function (k) { return k !== key; });
+    if (shut) keys.push(key);
+    var v = keys.join(" ");
+    if (v) document.documentElement.dataset.collapsed = v; else delete document.documentElement.dataset.collapsed;
+    try { if (v) localStorage.setItem("pf-collapsed", v); else localStorage.removeItem("pf-collapsed"); } catch (e) {}
+    syncCollapseButtons();
+    if (!shut) {
+      var panel = $('.collapsible[data-key="' + key + '"]');
+      var body = panel && $("[data-pending]", panel);
+      if (body && window.htmx) { body.removeAttribute("data-pending"); htmx.trigger(body, "pf-load"); }
+    }
+  }
+  document.addEventListener("htmx:beforeRequest", function (e) {
+    var panel = e.target.closest && e.target.closest(".collapsible[data-key]");
+    if (panel && isCollapsed(panel.dataset.key)) { e.preventDefault(); e.target.setAttribute("data-pending", ""); }
+  });
+
+  // ── price chart hover readout ─────────────────────────────────────────────
+  // The server embeds each plotted point ("unix,cents") on the SVG; pointer or
+  // arrow keys pick the nearest one and show a line, a dot and its price/time.
+  function chartHover(root) {
+    $$(".chart-svg[data-pts]", root).forEach(function (svg) {
+      if (svg._pfHover) return;
+      svg._pfHover = true;
+      var pts = svg.getAttribute("data-pts").split(";").map(function (s) { var a = s.split(","); return { t: +a[0], c: +a[1] }; })
+        .filter(function (p) { return isFinite(p.t) && isFinite(p.c); });
+      if (pts.length < 2) return;
+      var lo = num(svg.dataset.lo), hi = num(svg.dataset.hi), H = num(svg.dataset.h), pad = num(svg.dataset.pad);
+      var wrap = svg.parentElement, idx = -1;
+      var vline = document.createElement("div"); vline.className = "chart-vline"; vline.hidden = true;
+      var dot = document.createElement("div"); dot.className = "chart-dot"; dot.hidden = true;
+      var tip = document.createElement("div"); tip.className = "chart-tip"; tip.hidden = true; tip.setAttribute("role", "status");
+      wrap.append(vline, dot, tip);
+      var allTime = MV && MV.range === "all";
+      function show(i) {
+        idx = Math.max(0, Math.min(pts.length - 1, i));
+        var p = pts[idx], r = svg.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+        var x = r.left - w.left + idx / (pts.length - 1) * r.width;
+        var yv = pad + (1 - (p.c / 100 - lo) / (hi - lo)) * (H - 2 * pad);
+        var y = r.top - w.top + yv / H * r.height;
+        var when = new Date(p.t * 1000).toLocaleString(undefined, allTime
+          ? { year: "numeric", month: "short", day: "numeric" }
+          : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+        tip.textContent = p.c.toFixed(1) + "¢ · " + when;
+        vline.style.left = x + "px"; vline.style.top = (r.top - w.top) + "px"; vline.style.height = r.height + "px";
+        dot.style.left = x + "px"; dot.style.top = y + "px";
+        vline.hidden = dot.hidden = tip.hidden = false;
+        // Keep the label inside the chart: flip to the left of the line near the right edge.
+        var tw = tip.offsetWidth, left = x + 10;
+        if (left + tw > w.width) left = x - 10 - tw;
+        tip.style.left = Math.max(0, left) + "px";
+        tip.style.top = Math.max(0, Math.min(y - 30, r.height - 24)) + "px";
+      }
+      function hide() { vline.hidden = dot.hidden = tip.hidden = true; }
+      svg.addEventListener("pointermove", function (e) {
+        var r = svg.getBoundingClientRect();
+        show(Math.round((e.clientX - r.left) / r.width * (pts.length - 1)));
+      });
+      svg.addEventListener("pointerleave", hide);
+      svg.addEventListener("blur", hide);
+      svg.addEventListener("keydown", function (e) {
+        var last = pts.length - 1, next;
+        if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = last;
+        else if (e.key === "ArrowLeft") next = idx < 0 ? last : idx - 1;
+        else if (e.key === "ArrowRight") next = idx < 0 ? 0 : idx + 1;
+        else { if (e.key === "Escape") hide(); return; }
+        e.preventDefault();
+        show(next);
+      });
+    });
+  }
+
   // ── click router (data-action) ──────────────────────────────────────────
   document.addEventListener("click", function (e) {
     var el = e.target.closest("[data-action]"); if (!el) return;
@@ -689,6 +778,7 @@
       case "mode": if (MV) mvSetMode(el.dataset.mode); break;
       case "book-price": if (MV) { $("#price").value = fmtC(num(el.dataset.price) * 100); mvSyncShares(); mvUpdate(); } break;
       case "group": if (MV) mvSetGroup(el.dataset.group); break;
+      case "collapse": setCollapsed(el.dataset.key, el.getAttribute("aria-expanded") === "true"); break;
       case "range": if (MV) { MV.range = el.dataset.range; $$("#ranges button").forEach(function (b) { b.classList.toggle("selected", b === el); }); mvLoadChart(); } break;
     }
   });
@@ -769,7 +859,8 @@
     PF.relTime();
     PF.localTimes();
     setInterval(function () { PF.relTime(); }, 30000);
-    document.body.addEventListener("htmx:afterSwap", function (e) { PF.relTime(e.target); PF.localTimes(e.target); applyActivityFilter(); syncExpiry(e.target); });
+    document.body.addEventListener("htmx:afterSwap", function (e) { PF.relTime(e.target); PF.localTimes(e.target); applyActivityFilter(); syncExpiry(e.target); chartHover(e.target); });
+    syncCollapseButtons(); chartHover(document);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
 })();

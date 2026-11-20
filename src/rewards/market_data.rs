@@ -575,13 +575,19 @@ pub fn price_chart_svg(points: &[(i64, Decimal)]) -> String {
     // wide range like "Max" stays a small, smooth SVG regardless of API density.
     const MAX_POINTS: usize = 120;
     let to_f = |d: Decimal| d.to_string().parse::<f64>().unwrap_or(0.0);
-    let prices: Vec<f64> = if points.len() > MAX_POINTS {
+    let kept: Vec<(i64, f64)> = if points.len() > MAX_POINTS {
         let stride = points.len().div_ceil(MAX_POINTS);
         let last = points.len() - 1;
-        points.iter().enumerate().filter(|(i, _)| i % stride == 0 || *i == last).map(|(_, (_, p))| to_f(*p)).collect()
+        points
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % stride == 0 || *i == last)
+            .map(|(_, (t, p))| (*t, to_f(*p)))
+            .collect()
     } else {
-        points.iter().map(|(_, p)| to_f(*p)).collect()
+        points.iter().map(|(t, p)| (*t, to_f(*p))).collect()
     };
+    let prices: Vec<f64> = kept.iter().map(|(_, p)| *p).collect();
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for &p in &prices {
         lo = lo.min(p);
@@ -617,8 +623,14 @@ pub fn price_chart_svg(points: &[(i64, Decimal)]) -> String {
     // Unique gradient id per SVG (several charts share the page → no dup ids).
     let gid = format!("pf-area-{:x}", points.first().map(|(t, _)| *t).unwrap_or(0) as u64 ^ (prices.len() as u64));
 
+    // For the hover readout (app.js): each plotted point as "unix-seconds,cents"
+    // and the padded value range the y axis maps.
+    let pts: String =
+        kept.iter().map(|(t, p)| format!("{t},{:.1}", (p * 1000.0).round() / 10.0)).collect::<Vec<_>>().join(";");
     format!(
-        "<svg viewBox=\"0 0 {W} {H}\" class=\"chart-svg\" preserveAspectRatio=\"none\">\
+        "<svg viewBox=\"0 0 {W} {H}\" class=\"chart-svg\" preserveAspectRatio=\"none\" \
+         data-pts=\"{pts}\" data-lo=\"{lo:.6}\" data-hi=\"{hi:.6}\" data-h=\"{H}\" data-pad=\"{PAD_Y}\" \
+         tabindex=\"0\" role=\"img\" aria-label=\"Price history. Hover, or use the arrow keys, to read a point.\">\
          <defs><linearGradient id=\"{gid}\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">\
          <stop offset=\"0\" stop-color=\"rgb(108,140,255)\" stop-opacity=\"0.22\"/>\
          <stop offset=\"1\" stop-color=\"rgb(108,140,255)\" stop-opacity=\"0\"/></linearGradient></defs>\
@@ -631,6 +643,32 @@ pub fn price_chart_svg(points: &[(i64, Decimal)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The chart carries each plotted point for the hover readout: the
+    /// timestamps survive downsampling, the last point is always kept, and
+    /// prices are in cents, rounded.
+    #[test]
+    fn price_chart_embeds_points_for_hover() {
+        let pts: Vec<(i64, Decimal)> =
+            (0..500).map(|i| (1_700_000_000 + i * 60, dec!(0.3) + Decimal::new(i, 5))).collect();
+        let svg = price_chart_svg(&pts);
+        let data = svg.split("data-pts=\"").nth(1).unwrap().split('"').next().unwrap();
+        let parsed: Vec<(i64, f64)> = data
+            .split(';')
+            .map(|p| {
+                let (t, c) = p.split_once(',').unwrap();
+                (t.parse().unwrap(), c.parse().unwrap())
+            })
+            .collect();
+        assert!(parsed.len() <= 120 && parsed.len() > 100, "{}", parsed.len());
+        assert_eq!(parsed[0], (1_700_000_000, 30.0));
+        assert_eq!(parsed.last().unwrap().0, 1_700_000_000 + 499 * 60, "last point kept");
+        assert!((parsed.last().unwrap().1 - 30.5).abs() < 1e-9, "0.30499 → 30.5¢");
+        assert!(parsed.windows(2).all(|w| w[0].0 < w[1].0), "in time order");
+        assert!(svg.contains("data-lo=\"") && svg.contains("data-hi=\"") && svg.contains("tabindex=\"0\""));
+        // Too little history: the plain placeholder, no hover data.
+        assert!(!price_chart_svg(&pts[..1]).contains("data-pts"));
+    }
 
     fn book(best_bid: Decimal, levels: &[(Decimal, Decimal)]) -> BookSnapshot {
         BookSnapshot {
