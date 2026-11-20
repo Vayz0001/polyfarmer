@@ -37,7 +37,7 @@ manage everything from a local web dashboard.
 - **Safety first.** Every order is protected by settings you control, and everything is cancelled when
   something looks wrong.
 - **See what you earn.** Live order book, reward score for each order, positions, today's rewards by market, daily
-  payouts, and your rank among liquidity providers.
+  payouts, and your rank by rewards earned (from PolyRewards).
 
 ### Protection for every order
 
@@ -58,7 +58,7 @@ manage everything from a local web dashboard.
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/markets.png" alt="Markets page listing every leg with status, distance, score, size and expiry"><br><sub><b>Markets</b>: every leg with its status, distance from the midpoint, reward score, size and expiry. Pause, resume, edit in place or remove.</sub></td>
-    <td width="50%"><img src="docs/screenshots/rewards.png" alt="Rewards page with today's earnings by market, daily payouts and LP rank"><br><sub><b>Rewards</b>: today's earnings for each market you farm, yesterday's payout, a 30-day payout chart, the all-time total and your LP rank.</sub></td>
+    <td width="50%"><img src="docs/screenshots/rewards.png" alt="Rewards page with today's earnings by market, daily payouts and rewards rank"><br><sub><b>Rewards</b>: today's earnings for each market you farm, yesterday's payout, a 30-day payout chart, the all-time total and your rewards rank.</sub></td>
   </tr>
 </table>
 

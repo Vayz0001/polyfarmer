@@ -1,6 +1,6 @@
 //! Rewards: today's live per-market share and earnings (authenticated, slow
 //! call, cached), daily payouts from Polymarket's public activity feed, and
-//! your LP rank from PolyRewards. Every panel is a lazy fragment.
+//! your rewards rank from PolyRewards. Every panel is a lazy fragment.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -273,7 +273,7 @@ pub struct RankView {
     pub link: &'static str,
 }
 
-/// GET /rewards/kpis — today so far, yesterday, last 7 days, all time, LP rank.
+/// GET /rewards/kpis — today so far, yesterday, last 7 days, all time, rewards rank.
 pub async fn kpis(State(state): State<WebState>) -> Html<String> {
     let (today, payouts) = tokio::join!(today_entries(&state), load_payouts(&state));
 
@@ -363,11 +363,13 @@ fn rank_view(state: &WebState) -> RankView {
         Some(r @ LpRank::Ranked { rank, total }) => RankView {
             value: format!("#{}", thousands(rank)),
             tier: r.tier(),
-            sub: format!("of {} LPs", thousands(total)),
+            sub: format!("of {} wallets", thousands(total)),
             link,
         },
         Some(LpRank::NotRanked { total }) => {
-            RankView { value: "—".into(), tier: None, sub: format!("not among {} LPs yet", thousands(total)), link }
+            RankView {
+                value: "—".into(), tier: None, sub: format!("not among {} wallets yet", thousands(total)), link
+            }
         }
         Some(LpRank::Unavailable) => RankView { value: "—".into(), tier: None, sub: "rank unavailable".into(), link },
         None => RankView { value: "…".into(), tier: None, sub: "checking PolyRewards".into(), link },

@@ -55,6 +55,7 @@ eyre = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+flate2 = "1"             # unpack the gzipped PolyRewards leaderboard (rewards rank)
 
 [target.'cfg(unix)'.dependencies]
 # process hardening (no core dumps / ptrace) and umask in tests; already a transitive dependency
