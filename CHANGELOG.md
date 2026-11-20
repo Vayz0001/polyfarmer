@@ -9,6 +9,11 @@ anything may change between releases.
 
 ### Added
 
+- A market's page shows, below the order book, the market's **Trades** and **Top holders** from Polymarket's
+  public data. Trades lists the last 10 of at least $100, $1k, $10k or $100k (buttons; either side), fetched only
+  when the page opens or a button is clicked. Top holders shows the 10 biggest holders of each outcome in one
+  request, with shares and their value at the current mid, each linking to the trader's Polymarket profile.
+  Read-only: nothing here changes what the bot trades.
 - **Defaults for new markets**: Settings has a panel to set the size and safeguards (Depth ahead, Auto-pause,
   Expires) the new-order form starts with, and the form has a **Save as my defaults** button that saves what's in
   it. Saved to `defaults.json` in the data directory; markets you already farm keep their own settings. A missing

@@ -1808,3 +1808,30 @@ async fn the_market_page_panel_pauses_and_resumes_both_legs() {
     let (_, panel, _) = get_authed(&app, &cookie, "/markets/view/position?cid=0x%22evil%22:%221").await;
     assert!(panel.contains(r#"&#34;view&#34;:&#34;0x\&#34;evil\&#34;:\&#34;1&#34;"#), "{panel}");
 }
+
+/// The market page's Trades and Top holders panels are login-only fragments,
+/// and a bad market link answers with a message, not an error page, without
+/// any request to Polymarket.
+#[tokio::test]
+async fn market_trades_and_holders_need_a_login_and_handle_bad_links() {
+    let (app, pw) = test_app();
+    for path in ["/markets/view/trades?slug=x&min=1000", "/markets/view/holders?slug=x"] {
+        let res = app.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap();
+        assert!(res.status().is_redirection(), "{path}: got {}", res.status());
+        assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login", "{path}");
+    }
+    let cookie = login(&app, &pw).await;
+    // Empty slug: refused before any network call. An unknown size filter
+    // falls back to the default, so it can't be passed through to the API.
+    let (status, trades, _) = get_authed(&app, &cookie, "/markets/view/trades?slug=&min=7").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        trades.contains("doesn&#39;t look like a Polymarket market link") || trades.contains("doesn't look like"),
+        "{trades}"
+    );
+    let (status, holders, _) = get_authed(&app, &cookie, "/markets/view/holders?slug=").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(holders.contains("look like a Polymarket market link"), "{holders}");
+    let (status, _, _) = get_authed(&app, &cookie, "/markets/view/trades?slug=&min=notanumber").await;
+    assert!(status.is_client_error(), "a non-numeric filter is rejected: {status}");
+}

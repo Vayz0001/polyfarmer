@@ -1,0 +1,24 @@
+{% if let Some(e) = error %}
+<div class="panel-body"><p class="muted">{{ e }}</p></div>
+{% else if rows.is_empty() %}
+<p class="feed-empty">No {{ filter }} trades in this market recently.</p>
+{% else %}
+<div class="tbl-wrap">
+<table class="tbl trades-tbl">
+  <thead><tr><th>Time</th><th>Side</th><th>Outcome</th><th class="num">Shares</th><th class="num">Price</th><th class="num">Value</th><th>Trader</th></tr></thead>
+  <tbody>
+    {% for t in rows %}
+    <tr>
+      <td class="nowrap"><span class="feed-time" data-ts="{{ t.ts_iso }}">{{ t.time }}</span></td>
+      <td><span class="{% if t.buy %}pos{% else %}neg{% endif %}">{% if t.buy %}BUY{% else %}SELL{% endif %}</span></td>
+      <td>{{ t.outcome }}</td>
+      <td class="num">{{ t.shares }}</td>
+      <td class="num">{{ t.price }}¢</td>
+      <td class="num">{{ t.usd }}</td>
+      <td class="who">{% if t.wallet.is_empty() %}<span title="{{ t.name }}">{{ t.name }}</span>{% else %}<a href="https://polymarket.com/profile/{{ t.wallet }}" target="_blank" rel="noopener noreferrer" title="{{ t.name }} · {{ t.wallet }}">{{ t.name }}</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}

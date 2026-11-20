@@ -6,5 +6,6 @@
 pub mod gamma_resolve;
 pub mod lp_rank;
 pub mod market_data;
+pub mod market_flow;
 pub mod markets_browse;
 pub mod portfolio;

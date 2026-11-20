@@ -52,6 +52,8 @@ pub fn router(state: WebState) -> Router {
         .route("/markets/view/book", get(markets::view_book))
         .route("/markets/view/book/stream", get(markets::view_book_stream))
         .route("/markets/view/chart", get(markets::view_chart))
+        .route("/markets/view/holders", get(markets::view_holders))
+        .route("/markets/view/trades", get(markets::view_trades))
         .route("/markets/view/position", get(markets::view_position))
         .route("/markets/view/preview", post(markets::view_preview))
         .route("/markets/start", post(markets::start_farming))

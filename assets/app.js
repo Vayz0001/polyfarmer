@@ -684,7 +684,7 @@
         applyActivityFilter(); break;
       }
       case "picker-toggle": setPickerDim(!!el.dataset.shown); break;
-      case "tab": $$("button", el.parentElement).forEach(function (b) { b.classList.toggle("selected", b === el); }); break;
+      case "tab": $$("button", el.parentElement).forEach(function (b) { b.classList.toggle("selected", b === el); if (b.hasAttribute("aria-pressed")) b.setAttribute("aria-pressed", String(b === el)); }); break;
       case "side": if (MV) mvSelectSide(parseInt(el.dataset.side, 10)); break;
       case "mode": if (MV) mvSetMode(el.dataset.mode); break;
       case "book-price": if (MV) { $("#price").value = fmtC(num(el.dataset.price) * 100); mvSyncShares(); mvUpdate(); } break;

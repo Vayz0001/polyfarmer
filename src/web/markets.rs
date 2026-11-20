@@ -22,7 +22,7 @@ use tower_sessions::Session;
 
 use crate::cache::TtlCache;
 use crate::rewards::gamma_resolve::{self, MarketRef};
-use crate::rewards::{market_data, markets_browse};
+use crate::rewards::{market_data, market_flow, markets_browse};
 use crate::storage::save_markets;
 use crate::types::{MarketConfig, OrderStatus, WsCommand};
 
@@ -304,6 +304,9 @@ struct MarketViewTemplate {
     /// ("0" if none) — feed the instant client-side score calc.
     reward_min_shares: String,
     reward_max_spread_cents: String,
+    /// Trade-size filter buttons and the one the panel loads with.
+    trade_filters: Vec<GroupOpt>,
+    default_trade_filter: u32,
 }
 
 #[derive(Template)]
@@ -421,6 +424,15 @@ pub async fn market_view(State(state): State<WebState>, session: Session, Query(
             .rewards_max_spread
             .map(|s| s.normalize().to_string())
             .unwrap_or_else(|| "0".to_string()),
+        trade_filters: market_flow::TRADE_FILTERS
+            .iter()
+            .map(|&v| GroupOpt {
+                value: v.to_string(),
+                label: market_flow::filter_label(v),
+                selected: v == market_flow::DEFAULT_TRADE_FILTER,
+            })
+            .collect(),
+        default_trade_filter: market_flow::DEFAULT_TRADE_FILTER,
     };
     render(&tpl).into_response()
 }
@@ -497,6 +509,175 @@ pub async fn view_chart(Query(p): Query<ChartParams>) -> Html<String> {
         hi,
         lo,
     })
+}
+
+// ── Top holders and recent trades (public Data API, read-only) ──────────────
+
+/// Holders move slowly; trades are fetched when asked for, cached only long
+/// enough to absorb double clicks.
+static HOLDERS: LazyLock<Arc<TtlCache<Arc<Vec<market_flow::OutcomeHolders>>>>> =
+    LazyLock::new(|| Arc::new(TtlCache::new(Duration::from_secs(30))));
+static TRADES: LazyLock<Arc<TtlCache<Arc<Vec<market_flow::Trade>>>>> =
+    LazyLock::new(|| Arc::new(TtlCache::new(Duration::from_secs(5))));
+
+#[derive(Deserialize)]
+pub struct FlowParams {
+    pub slug: String,
+    /// Trade-size filter in dollars (one of `market_flow::TRADE_FILTERS`).
+    pub min: Option<u32>,
+}
+
+pub struct HolderRow {
+    pub rank: usize,
+    pub name: String,
+    /// Lower-case address, or empty (then the name isn't linked).
+    pub wallet: String,
+    pub shares: String,
+    pub value: String,
+}
+
+pub struct HolderColumn {
+    pub label: String,
+    pub mid_cents: String,
+    pub rows: Vec<HolderRow>,
+}
+
+#[derive(Template)]
+#[template(path = "_market_holders.html")]
+struct HoldersTemplate {
+    error: Option<String>,
+    columns: Vec<HolderColumn>,
+}
+
+pub struct TradeRow {
+    pub ts_iso: String,
+    pub time: String,
+    pub buy: bool,
+    pub outcome: String,
+    pub shares: String,
+    pub price: String,
+    pub usd: String,
+    pub name: String,
+    pub wallet: String,
+}
+
+#[derive(Template)]
+#[template(path = "_market_trades.html")]
+struct TradesTemplate {
+    error: Option<String>,
+    filter: String,
+    rows: Vec<TradeRow>,
+}
+
+/// The midpoint of each outcome: outcome 0 from its book, outcome 1 mirrors it.
+async fn outcome_mids(state: &WebState, mr: &MarketRef) -> [Decimal; 2] {
+    let book = current_book(state, mr, 0).await;
+    let mid = midpoint_for(mr, 0, book.as_ref()).await.clamp(dec!(0), dec!(1));
+    [mid, dec!(1) - mid]
+}
+
+fn holder_columns(mr: &MarketRef, mids: [Decimal; 2], data: &[market_flow::OutcomeHolders]) -> Vec<HolderColumn> {
+    (0..2)
+        .map(|i| HolderColumn {
+            label: mr.outcomes.get(i).cloned().unwrap_or_default(),
+            mid_cents: cents(mids[i].round_dp_with_strategy(3, rust_decimal::RoundingStrategy::MidpointAwayFromZero)),
+            rows: data
+                .iter()
+                .find(|o| o.outcome_index == i)
+                .map(|o| {
+                    o.holders
+                        .iter()
+                        .enumerate()
+                        .map(|(n, h)| HolderRow {
+                            rank: n + 1,
+                            name: h.name.clone(),
+                            wallet: h.wallet.clone(),
+                            shares: market_flow::fmt_shares(h.shares),
+                            value: market_data::fmt_usd(h.shares * mids[i]),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+        .collect()
+}
+
+/// GET /markets/view/holders?slug= — the top holders of both outcomes, valued
+/// at the current midpoint.
+pub async fn view_holders(State(state): State<WebState>, Query(p): Query<FlowParams>) -> Html<String> {
+    let fail = |e: &str| render(&HoldersTemplate { error: Some(e.to_string()), columns: Vec::new() });
+    let mr = match load_market(&p.slug).await {
+        Ok(m) => m,
+        Err(e) => return fail(&e),
+    };
+    let cid = mr.condition_id.clone();
+    let data = HOLDERS
+        .get_or_fetch(&cid, || async {
+            tokio::time::timeout(NETWORK_TIMEOUT, market_flow::top_holders(&cid))
+                .await
+                .map_err(|_| eyre::eyre!("timed out"))?
+                .map(Arc::new)
+        })
+        .await;
+    match data {
+        Ok(d) => {
+            let mids = outcome_mids(&state, &mr).await;
+            render(&HoldersTemplate { error: None, columns: holder_columns(&mr, mids, &d) })
+        }
+        Err(e) => {
+            tracing::debug!("holders unavailable: {e:#}");
+            fail("Couldn't load holders from Polymarket. Try again in a moment.")
+        }
+    }
+}
+
+fn trade_rows(mr: &MarketRef, trades: &[market_flow::Trade]) -> Vec<TradeRow> {
+    trades
+        .iter()
+        .map(|t| {
+            let at = chrono::DateTime::from_timestamp(t.timestamp, 0).unwrap_or_default();
+            TradeRow {
+                ts_iso: at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                time: at.format("%b %-d, %H:%M UTC").to_string(),
+                buy: t.side == market_flow::Side::Buy,
+                outcome: mr.outcomes.get(t.outcome_index).cloned().unwrap_or_default(),
+                shares: market_flow::fmt_shares(t.shares),
+                price: cents(t.price.round_dp_with_strategy(3, rust_decimal::RoundingStrategy::MidpointAwayFromZero)),
+                usd: super::dashboard::usd(t.usd()),
+                name: t.name.clone(),
+                wallet: t.wallet.clone(),
+            }
+        })
+        .collect()
+}
+
+/// GET /markets/view/trades?slug=&min= — the latest trades of at least `min`
+/// dollars, either side. Only fetched when the panel loads or a filter is clicked.
+pub async fn view_trades(Query(p): Query<FlowParams>) -> Html<String> {
+    let min = market_flow::trade_filter(p.min);
+    let filter = market_flow::filter_label(min);
+    let fail =
+        |e: &str| render(&TradesTemplate { error: Some(e.to_string()), filter: filter.clone(), rows: Vec::new() });
+    let mr = match load_market(&p.slug).await {
+        Ok(m) => m,
+        Err(e) => return fail(&e),
+    };
+    let cid = mr.condition_id.clone();
+    let data = TRADES
+        .get_or_fetch(&format!("{cid}:{min}"), || async {
+            tokio::time::timeout(NETWORK_TIMEOUT, market_flow::recent_trades(&cid, min))
+                .await
+                .map_err(|_| eyre::eyre!("timed out"))?
+                .map(Arc::new)
+        })
+        .await;
+    match data {
+        Ok(d) => render(&TradesTemplate { error: None, filter: filter.clone(), rows: trade_rows(&mr, &d) }),
+        Err(e) => {
+            tracing::debug!("trades unavailable: {e:#}");
+            fail("Couldn't load trades from Polymarket. Try again in a moment.")
+        }
+    }
 }
 
 // ── Order book: REST fragment (fallback) + live SSE stream ──────────────────
@@ -1890,6 +2071,77 @@ pub async fn resume_group(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn two_outcome_market() -> MarketRef {
+        MarketRef {
+            condition_id: format!("0x{}", "ab".repeat(32)),
+            question: "Q?".into(),
+            group_item_title: None,
+            market_slug: "q".into(),
+            event_slug: "q".into(),
+            image: None,
+            outcomes: vec!["Yes".into(), "No".into()],
+            token_ids: vec!["1".into(), "2".into()],
+            outcome_prices: vec![dec!(0.4), dec!(0.6)],
+            tick_size: dec!(0.01),
+            rewards_min_size: None,
+            rewards_max_spread: None,
+            reward_pool: dec!(0),
+            volume_24hr: None,
+            liquidity: None,
+            last_trade_price: None,
+            one_day_price_change: None,
+            end_date: None,
+        }
+    }
+
+    /// Holders are valued at their own outcome's mid; names from Polymarket are
+    /// escaped, and only a well-formed wallet becomes a profile link.
+    #[test]
+    fn holders_and_trades_render_safely() {
+        let mr = two_outcome_market();
+        let wallet = "0x25ff40795e25bb5f2a8dcc26f134ea81e224e0cf".to_string();
+        let data = vec![
+            market_flow::OutcomeHolders {
+                outcome_index: 1,
+                holders: vec![market_flow::Holder {
+                    wallet: String::new(),
+                    name: "<img src=x>".into(),
+                    shares: dec!(1000),
+                }],
+            },
+            market_flow::OutcomeHolders {
+                outcome_index: 0,
+                holders: vec![market_flow::Holder { wallet: wallet.clone(), name: "bob".into(), shares: dec!(2500) }],
+            },
+        ];
+        let cols = holder_columns(&mr, [dec!(0.4), dec!(0.6)], &data);
+        assert_eq!((cols[0].label.as_str(), cols[1].label.as_str()), ("Yes", "No"));
+        assert_eq!((cols[0].rows[0].value.as_str(), cols[1].rows[0].value.as_str()), ("$1.0k", "$600"));
+        assert_eq!(cols[0].mid_cents, "40.0");
+        let html = HoldersTemplate { error: None, columns: cols }.render().unwrap();
+        assert!(!html.contains("<img"), "{html}");
+        assert!(html.contains("&#60;img src=x&#62;") || html.contains("&lt;img src=x&gt;"), "{html}");
+        assert_eq!(html.matches("https://polymarket.com/profile/").count(), 1);
+        assert!(html.contains(&format!("https://polymarket.com/profile/{wallet}")));
+
+        let trades = vec![market_flow::Trade {
+            wallet: String::new(),
+            name: "\"><script>".into(),
+            side: market_flow::Side::Sell,
+            outcome_index: 1,
+            shares: dec!(7197.01),
+            price: dec!(0.96374),
+            timestamp: 1_795_170_038,
+        }];
+        let rows = trade_rows(&mr, &trades);
+        assert_eq!((rows[0].outcome.as_str(), rows[0].price.as_str(), rows[0].usd.as_str()), ("No", "96.4", "$6.9k"));
+        assert!(!rows[0].buy && rows[0].ts_iso.starts_with("2026-11-"));
+        let html = TradesTemplate { error: None, filter: "$1k+".into(), rows }.render().unwrap();
+        assert!(!html.contains("<script>") && html.contains("SELL"), "{html}");
+        let empty = TradesTemplate { error: None, filter: "$100k+".into(), rows: vec![] }.render().unwrap();
+        assert!(empty.contains("No $100k+ trades"), "{empty}");
+    }
 
     #[test]
     fn min_depth_is_parsed_as_usd_not_cents() {

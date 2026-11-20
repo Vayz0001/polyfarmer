@@ -1,0 +1,28 @@
+{% if let Some(e) = error %}
+<div class="panel-body"><p class="muted">{{ e }}</p></div>
+{% else %}
+<div class="holders-grid">
+  {% for c in columns %}
+  <div class="holders-col">
+    <div class="holders-head"><span class="leg-label side-{% if loop.index0 == 0 %}a{% else %}b{% endif %}">{{ c.label }}</span><span class="faint">valued at {{ c.mid_cents }}¢ mid</span></div>
+    {% if c.rows.is_empty() %}
+    <p class="feed-empty">No holders yet.</p>
+    {% else %}
+    <table class="tbl holders-tbl">
+      <thead><tr><th class="num">#</th><th>Trader</th><th class="num">Shares</th><th class="num">Value</th></tr></thead>
+      <tbody>
+        {% for h in c.rows %}
+        <tr>
+          <td class="num faint">{{ h.rank }}</td>
+          <td class="who">{% if h.wallet.is_empty() %}<span title="{{ h.name }}">{{ h.name }}</span>{% else %}<a href="https://polymarket.com/profile/{{ h.wallet }}" target="_blank" rel="noopener noreferrer" title="{{ h.name }} · {{ h.wallet }}">{{ h.name }}</a>{% endif %}</td>
+          <td class="num">{{ h.shares }}</td>
+          <td class="num">{{ h.value }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
