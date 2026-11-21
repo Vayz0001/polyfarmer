@@ -8,7 +8,7 @@
   <div style="min-width:0;flex:1">
     <h1>{{ question }}</h1>
     <div class="mv-meta">
-      {% if has_rewards %}<span class="mi"><span class="pill ok">Rewards on</span><span>pool <b class="num">{{ reward_pool }}</b></span></span><span class="mi">zone <b class="num">{{ reward_max_spread }}</b> of mid</span><span class="mi">min <b class="num">{{ reward_min }}</b></span>
+      {% if has_rewards %}<span class="mi"><span class="pill ok">Rewards on</span><span title="What Polymarket pays this market's liquidity providers each day, shared by score"><b class="num">{{ reward_pool }}</b> a day</span></span><span class="mi">zone <b class="num">{{ reward_max_spread }}</b> of mid</span><span class="mi">min <b class="num">{{ reward_min }}</b></span>
       {% else %}<span class="mi"><span class="pill">No reward program</span></span>{% endif %}
       {% if let Some(g) = group_item_title %}{% if !question.contains(g.as_str()) %}<span class="mi">{{ g }}</span>{% endif %}{% endif %}
       {% if let Some(r) = resolves %}<span class="mi">Resolves {{ r }}{% if let Some(c) = countdown %} · {{ c }}{% endif %}</span>{% endif %}
@@ -33,7 +33,7 @@
       </div>
       <div class="book-info">
         <span><span class="key-zone"></span> Reward zone <span class="num" id="zone-bounds">{{ ladder.band_lo_cents }}–{{ ladder.band_hi_cents }}¢</span></span>
-        <span>In zone <span class="num" id="zone-liq">{{ ladder.in_zone_usdc }}</span> <span class="tip" tabindex="0" data-tip="Liquidity already resting inside the reward zone (both sides). More here = more competition for the same daily pool.">i</span></span>
+        <span>In zone <span class="num" id="zone-liq">{{ ladder.in_zone_usdc }}</span> <span class="tip" tabindex="0" data-tip="Liquidity already resting inside the reward zone (both sides). More here = more competition for the same daily rewards.">i</span></span>
         <span class="spacer"></span>
         <span class="faint">Click a bid to price your order</span>
       </div>

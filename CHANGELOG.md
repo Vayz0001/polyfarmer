@@ -40,6 +40,10 @@ anything may change between releases.
 
 ### Changed
 
+- Plainer wording for what a market pays: the market page says "Rewards on · **$314** a day" (was "pool $314/day"),
+  and Find markets, the market picker and the Rewards page call the column **Daily rewards** (was "Daily pool",
+  "Reward pool", "Pool"), in whole dollars with thousands separators ($1,905). "Your share of today's pool" now
+  reads "Your share of today's rewards".
 - The Rewards page's **LP rank** card is now **Rewards rank** ("of N wallets"): PolyRewards ranks every wallet that
   has earned liquidity rewards by rewards earned, which isn't the same as a ranking of liquidity providers.
 - Shorter, consistent names for the order safeguards, the same in the forms, the Markets table, alerts, the README and

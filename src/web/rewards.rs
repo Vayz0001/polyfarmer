@@ -541,7 +541,10 @@ fn build_table(
                 share: format!("{:.2}%", e.earning_percentage),
                 earned_today: money_fine(paid),
                 earned_exact: money_exact(paid),
-                pool_per_day: if pool > Decimal::ZERO { format!("${:.0}/day", pool) } else { "—".into() },
+                pool_per_day: match super::dashboard::daily_rewards(pool) {
+                    s if s.is_empty() => "—".into(),
+                    s => s,
+                },
                 earned: paid,
                 share_pct: e.earning_percentage,
             })
