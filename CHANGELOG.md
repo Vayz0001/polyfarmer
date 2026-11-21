@@ -56,6 +56,10 @@ anything may change between releases.
 
 ### Fixed
 
+- **Depth ahead no longer counts your own orders.** When the best bid moved onto a resting order, the re-peg check
+  added up the bids between the new price and the best bid, which included that order itself (and any other leg of
+  yours on the same outcome). So an order could move with less of other people's money ahead of it than the "Depth
+  ahead" you set. Every depth check in the engine now leaves your own resting orders out.
 - Links to polyfarmer.xyz now show a preview card on X, Discord and other apps: the site announced a large image
   card but never said which image, so none appeared. It now has a 1200×630 preview image and the matching tags.
 - The Rewards page's rank card retries a failed lookup after 5 minutes instead of showing "rank unavailable" for

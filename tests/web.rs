@@ -1314,7 +1314,7 @@ async fn resume_restarts_auto_pause_from_the_current_best_bid() {
     // The quoter no longer sees the old move: the resumed leg is free to quote.
     let s = engine.read().await;
     let book = s.books.get("123").unwrap();
-    let action = polyfarmer::engine::quoter::evaluate(leg_of(&s, "mar_leg"), book, &OrderStatus::Idle);
+    let action = polyfarmer::engine::quoter::evaluate(leg_of(&s, "mar_leg"), book, &OrderStatus::Idle, &[]);
     assert!(!matches!(action, polyfarmer::engine::quoter::QuoteAction::Deactivate { .. }), "not re-paused: {action:?}");
 }
 

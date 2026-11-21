@@ -472,7 +472,8 @@ async fn handle_message(text: &str, state: &Arc<RwLock<AppState>>, executor: &Ar
                     let best_bid = book.and_then(|b| b.best_bid).unwrap_or_default();
                     let lower =
                         if let OrderStatus::Live { price, .. } = &status { *price } else { best_bid - c.distance };
-                    let depth = book.map(|b| b.bid_depth_between(lower, best_bid)).unwrap_or_default();
+                    let own = crate::engine::pairing::own_orders(&s, token_id);
+                    let depth = book.map(|b| b.others_depth_between(lower, best_bid, &own)).unwrap_or_default();
                     if matches!(action, QuoteAction::Hold) {
                         debug!("[{}] best_bid={:?} depth={} status={:?} → Hold", &c.label, best_bid, depth, status);
                     } else {
