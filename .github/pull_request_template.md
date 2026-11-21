@@ -49,7 +49,6 @@ cargo test --test e2e --locked
 - [ ] Clippy reports zero warnings (`cargo clippy --all-targets --locked -- -D warnings` passes).
 - [ ] All unit and integration tests pass (`cargo test --locked` passes).
 - [ ] Full end-to-end suite passes (`cargo test --test e2e --locked` passes).
-- [ ] Frontend code duplication gate passes (`npx fallow dupes assets` passes).
 - [ ] Dependency policies pass (`cargo deny check` passes).
 - [ ] New functionality or bug fixes include automated tests.
 - [ ] Documentation updated if environment variables, CLI flags, or user flows changed.

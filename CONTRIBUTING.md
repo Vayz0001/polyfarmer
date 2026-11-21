@@ -57,10 +57,7 @@ cargo test --locked
 # 4. End-to-end live TCP server & quoter tests
 cargo test --test e2e --locked
 
-# 5. Frontend code quality and token duplication gate (fallow)
-npx fallow dupes assets
-
-# 6. Dependency policy & license audit
+# 5. Dependency policy & license audit
 cargo deny check
 ```
 
