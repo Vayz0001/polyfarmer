@@ -10,7 +10,11 @@
   <div class="kv-row {% if !per_side_meets_min %}bad{% endif %}"><span class="k">Resting per side</span><span class="v">{{ per_side_shares }} sh · {{ per_side_size }}{% if !per_side_meets_min %} · under {{ min_size }} min{% endif %}</span></div>
   <div class="kv-row"><span class="k">Fill risk <span class="tip left" tabindex="0" data-tip="How much bid depth sits ahead of you (it fills first). If you're filled you hold the position instead of farming.">i</span></span><span class="v risk-{{ fill_risk }}">{{ fill_risk }}</span></div>
   {% if let Some(o) = other_leg %}
+  {% if o.no_room %}
+  <div class="kv-row bad"><span class="k">Other leg · {{ o.label }}</span><span class="v">no room below its best bid at this distance</span></div>
+  {% else %}
   <div class="kv-row {% if !o.meets_min %}bad{% endif %}"><span class="k">Other leg · {{ o.label }}</span><span class="v">{{ o.price_cents }}¢ · {{ o.weight_pct }}{% if !o.meets_min %} · {{ o.shares }} sh under min{% endif %}</span></div>
+  {% endif %}
   {% endif %}
   <div class="help">{{ sided_note }}</div>
 </div>

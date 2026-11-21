@@ -784,7 +784,9 @@ async fn execute_actions(
                                     shares,
                                     token_label,
                                     fresh_price * rust_decimal_macros::dec!(100),
-                                    order_size
+                                    // The size this order was placed with (an edit during
+                                    // the cancel is picked up), not the one decided earlier.
+                                    fresh_size
                                 ));
                             } else {
                                 drop(s);

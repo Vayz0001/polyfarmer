@@ -456,15 +456,28 @@
   function priceP() { return num($("#price").value) / 100; }   // price units
   function both() { return $("#f-sides").value === "both"; }
 
+  // Shares as the engine places them: 2 decimals, half to even (Rust's round_dp).
+  function shares2(x) {
+    var y = x * 100, f = Math.floor(y);
+    if (Math.abs(y - f - 0.5) < 1e-9) return (f % 2 === 0 ? f : f + 1) / 100;
+    return Math.round(y) / 100;
+  }
+  // The shares box is this side's order: in Both sides mode that's half the
+  // size (the other half goes to the other outcome), so it says whose shares.
+  function mvSharesLabel() {
+    var suf = $("#shares-suf"), label = ($("#book-title") || {}).textContent || "";
+    if (suf) suf.textContent = both() && label ? label + " shares" : "shares";
+  }
   function mvSyncShares() {
-    var p = priceP(), usd = num($("#order_size").value);
-    $("#order_shares").value = p > 0 && usd > 0 ? Math.round(usd / p) : "";
+    var p = priceP(), usd = num($("#order_size").value), per = both() ? usd / 2 : usd;
+    $("#order_shares").value = p > 0 && usd > 0 ? Math.round(per / p) : "";
+    mvSharesLabel();
   }
   function mvSyncUsd() {
-    var p = priceP(), sh = num($("#order_shares").value);
+    var p = priceP(), sh = num($("#order_shares").value), k = both() ? 2 : 1;
     // Round up to the cent: rounding down would buy slightly fewer shares than
     // typed (108 × 21.9¢ = $23.652 → $23.65 → 107.99), missing a share minimum.
-    if (p > 0 && sh > 0) $("#order_size").value = (Math.ceil(Math.round(sh * p * 1e6) / 1e4) / 100).toFixed(2);
+    if (p > 0 && sh > 0) $("#order_size").value = (k * Math.ceil(Math.round(sh * p * 1e6) / 1e4) / 100).toFixed(2);
   }
 
   function mvReadBook() {
@@ -502,7 +515,7 @@
       box.className = "score"; val.textContent = "—"; bar.style.width = "0"; why.textContent = "";
     } else {
       var perUsd = both() ? usd / 2 : usd;
-      var shares = perUsd / p;
+      var shares = shares2(perUsd / p);
       var meets = shares >= MV.minShares;
       var w = weight(b.mid, p), thisW = meets ? w : 0, otherW = null;
       // The other leg's price (Both sides): same distance below its own best bid.
@@ -510,15 +523,16 @@
       if (!meets) {
         // What it would take: the minimum in shares at the dearer leg's price.
         var needPer = MV.minShares * Math.max(p, op > 0 ? op : 0);
-        reasons.push("needs ≥ " + MV.minShares + " shares per side (have " + Math.floor(shares) + "): about $" + Math.ceil(needPer * (both() ? 2 : 1)) + " in total");
+        reasons.push("needs ≥ " + MV.minShares + " shares" + (both() ? " per side" : "") + " (have " + shares + "): about $" + Math.ceil(needPer * (both() ? 2 : 1)) + (both() ? " in total" : ""));
       }
       if (w === 0) reasons.push(p >= b.mid ? "at or above the midpoint" : "outside the reward zone (±" + MV.maxSpread + "¢)");
       if (b.bb > 0 && p >= b.bb) reasons.push("must sit below the best bid (" + (b.bb * 100).toFixed(1) + "¢)");
       if (both()) {
         if (b.bb > 0 && b.ba > 0) {
-          var om = 1 - b.mid, osh = op > 0 ? perUsd / op : 0;
+          var om = 1 - b.mid, osh = op > 0 ? shares2(perUsd / op) : 0;
           otherW = op > 0 && osh >= MV.minShares ? weight(om, op) : 0;
-          if (otherW === 0) reasons.push("other leg (" + (op * 100).toFixed(1) + "¢) doesn't score");
+          if (!(op > 0)) reasons.push("no room below the other side's best bid at this distance");
+          else if (otherW === 0) reasons.push("other leg (" + (op * 100).toFixed(1) + "¢) doesn't score");
         } else otherW = 0;
       }
       eff = effective(b.mid, thisW, otherW);
@@ -657,6 +671,7 @@
 
   function mvSetMode(m) {
     $("#f-sides").value = m;
+    mvSyncShares();
     $$("#mode-toggle button").forEach(function (b) { b.classList.toggle("selected", b.dataset.mode === m); });
     $("#split-note").hidden = m !== "both";
     mvUpdate();
