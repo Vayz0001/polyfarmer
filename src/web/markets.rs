@@ -1943,6 +1943,9 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool, restart_from: Opt
             c.benchmark_bid = Some(bb);
         }
         c.paused = pausing;
+        // A manual pause or resume replaces the "No balance" pause and its retry clock.
+        s.low_balance_paused.remove(id);
+        s.low_balance_since.remove(id);
         if !pausing {
             // Resuming is a fresh start: no leftover retry delay or failure count,
             // nor the two-sided rule's back-off (engine::pairing).

@@ -77,6 +77,8 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
     s.pair_pulls.retain(|id, _| ids.contains(id));
     s.pair_retry_at.retain(|id, _| ids.contains(id));
     s.pair_wait.retain(|id, _| ids.contains(id));
+    s.low_balance_since.retain(|id, _| ids.contains(id));
+    s.low_balance_paused.retain(|id| ids.contains(id));
 
     let mut out = Vec::new();
     for i in 0..s.configs.len() {
