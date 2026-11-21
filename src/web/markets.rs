@@ -1718,10 +1718,6 @@ pub async fn edit_submit(
 
     let (old, requote_order, snapshot, markets_file) = {
         let mut s = state.engine.write().await;
-        let live_order = s.configs.iter().find(|c| c.id == id).and_then(|c| match s.order_status.get(&c.id) {
-            Some(OrderStatus::Live { order_id, .. }) => Some(order_id.clone()),
-            _ => None,
-        });
         let Some(cfg) = s.configs.iter_mut().find(|c| c.id == id) else {
             drop(s);
             return fail("This market leg no longer exists.".into()).await;
@@ -1743,7 +1739,9 @@ pub async fn edit_submit(
             return fail(e).await;
         }
         let quote_changed = old.order_size != order_size || old.distance != distance;
-        let requote = if quote_changed { live_order } else { None };
+        // Size or distance changed: settle whatever the leg holds once saved — a
+        // live order, or one still being placed with the old settings.
+        let requote = quote_changed.then_some(());
         (old, requote, s.configs.clone(), s.markets_file.clone())
     };
 
@@ -1756,8 +1754,8 @@ pub async fn edit_submit(
         return fail(format!("Failed to save markets.json: {e}")).await;
     }
 
-    if let Some(order_id) = requote_order {
-        cancel_leg_order(&state, &id, &order_id).await;
+    if requote_order.is_some() {
+        cancel_leg_order(&state, &id).await;
     }
     state.quote_nudge.notify_one();
 
@@ -1786,22 +1784,22 @@ async fn reply(state: &WebState, session: &Session, view: &str, flash: Option<St
     }
 }
 
-/// Cancel one leg's live order and return it to Idle once confirmed off the
-/// book. Unconfirmed cancels stay `Cancelling`; the engine's 30s timer retries
-/// them until Polymarket confirms (`placer::confirm_stuck_cancel`).
-async fn cancel_leg_order(state: &WebState, id: &str, order_id: &str) {
-    {
-        let mut s = state.engine.write().await;
-        s.order_status.insert(
-            id.to_string(),
-            OrderStatus::Cancelling { order_id: order_id.to_string(), since: std::time::Instant::now() },
-        );
-    }
+/// Cancel whatever order the leg holds *now* and return it to Idle once
+/// confirmed off the book. Read under the lock at this moment, not earlier: the
+/// caller saved `markets.json` in between, and the engine may have replaced the
+/// order meanwhile — that newer order is the one to cancel, and overwriting it
+/// would leave it resting untracked. A placement still in flight is freed (it
+/// cancels its own order when it lands). Unconfirmed cancels stay `Cancelling`;
+/// the engine's 30s timer retries them (`placer::confirm_stuck_cancel`).
+async fn cancel_leg_order(state: &WebState, id: &str) {
+    let Some(order_id) = crate::engine::placer::settle_unplaced(&mut *state.engine.write().await, id) else {
+        return;
+    };
     if let Some((executor, _)) = state.engine_handle.get().await {
-        let confirmed = executor.cancel_order_verified(order_id).await.unwrap_or(false);
+        let confirmed = executor.cancel_order_verified(&order_id).await.unwrap_or(false);
         if confirmed {
             let mut s = state.engine.write().await;
-            if matches!(s.order_status.get(id), Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == order_id)
+            if matches!(s.order_status.get(id), Some(OrderStatus::Cancelling { order_id: oid, .. }) if *oid == order_id)
             {
                 s.order_status.insert(id.to_string(), OrderStatus::Idle);
             }
@@ -1979,14 +1977,9 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool, restart_from: Opt
             s.pair_pulls.remove(id);
             s.pair_alone_since.remove(id);
         }
-        let order_to_cancel = if pausing {
-            match s.order_status.get(id) {
-                Some(OrderStatus::Live { order_id, .. }) => Some(order_id.clone()),
-                _ => None,
-            }
-        } else {
-            None
-        };
+        // Pausing settles whatever the leg holds once saved (cancel_leg_order):
+        // a live order, or a placement still in flight.
+        let order_to_cancel = pausing.then_some(());
         (s.configs.clone(), order_to_cancel, s.markets_file.clone(), old, restarted)
     };
 
@@ -2005,8 +1998,8 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool, restart_from: Opt
         return Err(format!("Failed to save: {e}"));
     }
 
-    if let Some(order_id) = order_to_cancel {
-        cancel_leg_order(state, id, &order_id).await;
+    if order_to_cancel.is_some() {
+        cancel_leg_order(state, id).await;
     }
     // On resume, poke the quote loop so it re-quotes right away.
     if !pausing {

@@ -68,18 +68,34 @@ pub fn spawn(
                                 };
 
                                 match executor.cancel_orders(&live_order_ids).await {
-                                    Ok(_) => {
-                                        // Reset Live statuses to Idle and pause new placements.
-                                        // Orders are cancelled on exchange; state must reflect that.
+                                    Ok(still_open) => {
+                                        // Confirmed gone → Idle. Still open → Cancelling, so the
+                                        // bot never places over it and the 30s timer keeps
+                                        // cancelling it (placer::confirm_stuck_cancel).
                                         let mut s = state.write().await;
                                         for status in s.order_status.values_mut() {
-                                            if matches!(status, OrderStatus::Live { .. }) {
-                                                *status = OrderStatus::Idle;
+                                            if let OrderStatus::Live { order_id, .. } = status {
+                                                *status = if still_open.contains(order_id) {
+                                                    OrderStatus::Cancelling {
+                                                        order_id: order_id.clone(),
+                                                        since: std::time::Instant::now(),
+                                                    }
+                                                } else {
+                                                    OrderStatus::Idle
+                                                };
                                             }
                                         }
                                         s.heartbeat_paused = true;
                                         drop(s);
-                                        alerter.warn("Orders cancelled — placement paused until heartbeat recovers");
+                                        if still_open.is_empty() {
+                                            alerter.warn("Orders cancelled — placement paused until heartbeat recovers");
+                                        } else {
+                                            alerter.error(format!(
+                                                "Heartbeat lost: {} order(s) could not be confirmed cancelled and are \
+                                                 being retried. Placement paused until the heartbeat recovers.",
+                                                still_open.len()
+                                            ));
+                                        }
                                     }
                                     Err(e) => {
                                         error!("Heartbeat cancel_orders failed: {}", e);

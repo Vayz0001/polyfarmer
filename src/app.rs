@@ -331,8 +331,16 @@ pub async fn run() -> Result<()> {
             })
             .collect()
     };
-    if let Err(e) = executor.cancel_orders(&live_order_ids).await {
-        error!("Shutdown cancel failed: {}", e);
+    match executor.cancel_orders(&live_order_ids).await {
+        Ok(open) if open.is_empty() => {}
+        Ok(open) => {
+            error!("Shutdown: {} order(s) could not be cancelled: {:?}", open.len(), open);
+            alerter.error(format!(
+                "Shutting down with {} order(s) not confirmed cancelled — check your open orders on Polymarket.",
+                open.len()
+            ));
+        }
+        Err(e) => error!("Shutdown cancel failed: {}", e),
     }
 
     info!("Shutdown complete");
@@ -514,10 +522,10 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                 let alert2 = Arc::clone(alerter);
                 {
                     let mut s = state.write().await;
-                    s.order_status.insert(
-                        config_id.clone(),
-                        OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
-                    );
+                    // Only if the leg still holds this order (placer::begin_cancel).
+                    if !placer::begin_cancel(&mut s, &config_id, &order_id) {
+                        continue;
+                    }
                 }
                 tokio::spawn(async move {
                     let confirmed = match exec2.cancel_order_verified(&order_id).await {
@@ -568,10 +576,10 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                         continue;
                     }
                     let prev_status = s.order_status.get(&config_id).cloned();
-                    s.order_status.insert(
-                        config_id.clone(),
-                        OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
-                    );
+                    // Only if the leg still holds this order (placer::begin_cancel).
+                    if !placer::begin_cancel(&mut s, &config_id, &order_id) {
+                        continue;
+                    }
                     prev_status
                 };
                 let exec2 = Arc::clone(executor);
@@ -766,27 +774,22 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                     alerter.info(format!("{} · {}\n{}", title, label, msg));
                 }
 
-                match order_id {
-                    Some(oid) => {
-                        {
-                            let mut s = state.write().await;
-                            s.order_status.insert(
-                                config_id.clone(),
-                                OrderStatus::Cancelling { order_id: oid.clone(), since: std::time::Instant::now() },
-                            );
-                        }
-                        let exec2 = Arc::clone(executor);
-                        let state2 = Arc::clone(state);
-                        tokio::spawn(async move {
-                            placer::cancel_deactivated(&*exec2, &state2, &config_id, &oid).await;
-                        });
+                // Claim the decided order if the leg still holds it; otherwise settle
+                // whatever it holds now (placer::settle_unplaced): an in-flight
+                // placement is freed, one that landed meanwhile is cancelled.
+                let target = {
+                    let mut s = state.write().await;
+                    match &order_id {
+                        Some(oid) if placer::begin_cancel(&mut s, &config_id, oid) => Some(oid.clone()),
+                        _ => placer::settle_unplaced(&mut s, &config_id),
                     }
-                    None => {
-                        // No real order exists yet (Idle or Placing).
-                        // Reset to Idle — if Placing, the in-flight task will cancel the orphan.
-                        let mut s = state.write().await;
-                        s.order_status.insert(config_id, OrderStatus::Idle);
-                    }
+                };
+                if let Some(oid) = target {
+                    let exec2 = Arc::clone(executor);
+                    let state2 = Arc::clone(state);
+                    tokio::spawn(async move {
+                        placer::cancel_deactivated(&*exec2, &state2, &config_id, &oid).await;
+                    });
                 }
             }
         }

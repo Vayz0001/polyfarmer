@@ -1862,3 +1862,30 @@ async fn a_leg_paused_for_low_balance_says_so_until_resumed() {
     let s = engine.read().await;
     assert!(!s.configs[0].paused && s.low_balance_paused.is_empty() && s.low_balance_since.is_empty());
 }
+
+/// Pausing from the dashboard cancels whatever the leg holds at that moment:
+/// a live order is claimed for cancelling, and a placement still in flight is
+/// freed (the placing task then cancels what it gets back), never left as is.
+#[tokio::test]
+async fn pausing_claims_the_order_the_leg_holds_now() {
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    for (start, expect_cancelling) in [
+        (OrderStatus::Live { order_id: "ord-now".into(), price: dec!(0.3) }, true),
+        (OrderStatus::Placing { price: dec!(0.3) }, false),
+    ] {
+        let (app, pw, engine, _) = app_with_leg(start);
+        let cookie = login(&app, &pw).await;
+        let (_, page, rotated) = get_authed(&app, &cookie, "/markets").await;
+        let cookie = rotated.unwrap_or(cookie);
+        let csrf = extract_csrf(&page);
+        post_as(&app, &cookie, "/markets/mar_leg/pause", format!("csrf={csrf}")).await;
+        let s = engine.read().await;
+        assert!(s.configs[0].paused);
+        match s.order_status.get("mar_leg") {
+            Some(OrderStatus::Cancelling { order_id, .. }) => assert!(expect_cancelling && order_id == "ord-now"),
+            Some(OrderStatus::Idle) => assert!(!expect_cancelling, "a live order must be claimed, not dropped"),
+            other => panic!("unexpected status {other:?}"),
+        }
+    }
+}

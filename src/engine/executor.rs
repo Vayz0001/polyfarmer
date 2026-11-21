@@ -238,10 +238,14 @@ impl Executor {
 
     /// Cancel a specific list of order IDs (bot-managed orders only).
     /// Uses the bulk SDK endpoint — one API call for all IDs. Retries on transient errors.
-    pub async fn cancel_orders(&self, order_ids: &[String]) -> Result<()> {
+    ///
+    /// Returns the IDs that are **still open** (see [`still_open`]): callers must
+    /// only treat the others as gone, or the bot would place over orders that are
+    /// still resting.
+    pub async fn cancel_orders(&self, order_ids: &[String]) -> Result<Vec<String>> {
         if order_ids.is_empty() {
             info!("cancel_orders: nothing to cancel");
-            return Ok(());
+            return Ok(Vec::new());
         }
         info!("cancel_orders: cancelling {} orders", order_ids.len());
         let ids_ref: Vec<&str> = order_ids.iter().map(|s| s.as_str()).collect();
@@ -253,13 +257,13 @@ impl Executor {
                         info!("Cancelled order {}", id);
                     }
                     for (id, reason) in &response.not_canceled {
-                        if reason.contains("already canceled") || reason.contains("already matched") {
+                        if already_gone(reason) {
                             info!("Order {} already gone ({})", id, reason);
                         } else {
                             warn!("Order {} NOT cancelled — reason: {}", id, reason);
                         }
                     }
-                    return Ok(());
+                    return Ok(still_open(order_ids, &response.canceled, &response.not_canceled));
                 }
                 Err(e) => {
                     warn!("cancel_orders attempt {}/{}: {}", attempt, RETRY_ATTEMPTS, e);
@@ -330,7 +334,11 @@ impl Executor {
                 }
             }
         }
-        self.cancel_orders(&all_ids).await
+        let open = self.cancel_orders(&all_ids).await?;
+        if !open.is_empty() {
+            return Err(eyre::eyre!("{} open order(s) could not be cancelled", open.len()));
+        }
+        Ok(())
     }
 
     /// Connectivity + auth health check.
@@ -446,6 +454,28 @@ fn is_off_book(status: &OrderStatusType) -> bool {
     matches!(status, OrderStatusType::Matched | OrderStatusType::Canceled)
 }
 
+/// A cancel refusal that means the order is off the book anyway.
+fn already_gone(reason: &str) -> bool {
+    let r = reason.to_ascii_lowercase();
+    r.contains("already canceled") || r.contains("already cancelled") || r.contains("already matched")
+}
+
+/// Which of `requested` are still open after a bulk cancel answered with
+/// `canceled` and `not_canceled` (id → reason). Gone: cancelled now, or already
+/// cancelled or matched. Anything else — refused for another reason, or missing
+/// from the answer — counts as still open (the cautious reading).
+pub fn still_open(
+    requested: &[String],
+    canceled: &[String],
+    not_canceled: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    requested
+        .iter()
+        .filter(|id| !canceled.contains(id) && !not_canceled.get(*id).is_some_and(|r| already_gone(r)))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod verify_tests {
     use super::*;
@@ -485,6 +515,22 @@ mod verify_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_confirmed_cancels_count_as_gone() {
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let requested = ids(&["a", "b", "c", "d", "e"]);
+        let canceled = ids(&["a"]);
+        let not_canceled: std::collections::HashMap<String, String> = [
+            ("b".to_string(), "order already canceled".to_string()),
+            ("c".to_string(), "Order Already Matched".to_string()),
+            ("d".to_string(), "rate limited".to_string()),
+        ]
+        .into();
+        // e is missing from the answer: not known to be gone.
+        assert_eq!(still_open(&requested, &canceled, &not_canceled), ids(&["d", "e"]));
+        assert!(still_open(&[], &canceled, &not_canceled).is_empty());
+    }
     use rust_decimal_macros::dec;
 
     fn entry(cid: u8, pct: &str, earned: &str) -> UserRewardsEarningResponse {

@@ -255,10 +255,7 @@ fn forget(inner: &Inner, token: &str) {
 fn apply_snapshot(inner: &Inner, snap: &WsBookSnapshot) {
     let mut books = inner.books.write().unwrap();
     let book = books.entry(snap.asset_id.clone()).or_default();
-    book.apply_snapshot(snap);
-    // Don't trust level ordering for top-of-book here — derive it.
-    book.best_bid = book.bids.keys().max().copied();
-    book.best_ask = book.asks.keys().min().copied();
+    book.apply_snapshot(snap); // derives top of book from the levels
     inner.snapshotted.write().unwrap().insert(snap.asset_id.clone());
 }
 
@@ -266,16 +263,9 @@ fn handle_message(inner: &Inner, text: &str) {
     let Ok(value) = serde_json::from_str::<Value>(text) else { return };
     let mut changed: HashSet<String> = HashSet::new();
 
-    let snapshots: Vec<&Value> = match &value {
-        Value::Array(items) => items.iter().collect(),
-        v if v.get("event_type").and_then(Value::as_str) == Some("book") => vec![v],
-        _ => Vec::new(),
-    };
-    for v in snapshots {
-        if let Ok(snap) = serde_json::from_value::<WsBookSnapshot>(v.clone()) {
-            apply_snapshot(inner, &snap);
-            changed.insert(snap.asset_id);
-        }
+    for snap in TokenBook::snapshots_in(&value) {
+        apply_snapshot(inner, &snap);
+        changed.insert(snap.asset_id);
     }
 
     if value.get("event_type").and_then(Value::as_str) == Some("price_change") {
