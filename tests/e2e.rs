@@ -310,12 +310,12 @@ async fn e2e_trading_engine_quoter_and_safety_rules() {
     book.asks.insert(dec!(0.52), dec!(800.0));
 
     // 1. Initial State: Idle -> verifies depth -> Place action
-    let action = quoter::evaluate(&config, &book, &OrderStatus::Idle);
+    let action = quoter::evaluate(&config, &book, &OrderStatus::Idle, &[]);
     assert_eq!(action, QuoteAction::Place { price: dec!(0.48) }, "Should place BUY 2 cents below best bid 0.50");
 
     // 2. Active Live Order: Best bid remains 0.50 -> Hold
     let live_status = OrderStatus::Live { order_id: "order_123".to_string(), price: dec!(0.48) };
-    let action = quoter::evaluate(&config, &book, &live_status);
+    let action = quoter::evaluate(&config, &book, &live_status, &[]);
     assert_eq!(action, QuoteAction::Hold, "Should hold resting order when conditions hold");
 
     // 3. Depth Depletion: Bids between target and best bid fall below min_depth ($100)
@@ -323,7 +323,7 @@ async fn e2e_trading_engine_quoter_and_safety_rules() {
     thin_book.bids.insert(dec!(0.50), dec!(50.0)); // 50 * 0.50 = $25.00
     thin_book.bids.insert(dec!(0.49), dec!(10.0)); // 10 * 0.49 = $4.90 -> total depth $29.90 < $100 threshold
     thin_book.asks.insert(dec!(0.52), dec!(800.0));
-    let action = quoter::evaluate(&config, &thin_book, &live_status);
+    let action = quoter::evaluate(&config, &thin_book, &live_status, &[]);
     assert_eq!(
         action,
         QuoteAction::Cancel { order_id: "order_123".to_string(), reason: CancelReason::DepthDropped },
@@ -334,7 +334,7 @@ async fn e2e_trading_engine_quoter_and_safety_rules() {
     let mut volatile_book = TokenBook { best_bid: Some(dec!(0.56)), best_ask: Some(dec!(0.58)), ..Default::default() };
     volatile_book.bids.insert(dec!(0.56), dec!(1000.0));
     volatile_book.asks.insert(dec!(0.58), dec!(800.0));
-    let action = quoter::evaluate(&config, &volatile_book, &live_status);
+    let action = quoter::evaluate(&config, &volatile_book, &live_status, &[]);
     assert!(
         matches!(action, QuoteAction::Deactivate { reason: DeactivateReason::Volatility, .. }),
         "Should deactivate and auto-pause when best bid moves past volatility limit"
@@ -343,7 +343,7 @@ async fn e2e_trading_engine_quoter_and_safety_rules() {
     // 5. Expiration: Expiry timestamp in the past
     let mut expired_config = config.clone();
     expired_config.expires_at = Utc::now() - ChronoDuration::minutes(5);
-    let action = quoter::evaluate(&expired_config, &book, &live_status);
+    let action = quoter::evaluate(&expired_config, &book, &live_status, &[]);
     assert!(
         matches!(action, QuoteAction::Deactivate { reason: DeactivateReason::Expired, .. }),
         "Should deactivate when expiry time has passed"

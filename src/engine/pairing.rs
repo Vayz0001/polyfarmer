@@ -90,7 +90,8 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
             continue;
         };
         let status = s.order_status.get(&c.id).cloned().unwrap_or_default();
-        let raw = quoter::evaluate(c, book, &status);
+        let own = own_orders(s, &c.token_id);
+        let raw = quoter::evaluate(c, book, &status, &own);
         let (id, token, size, tick) = (c.id.clone(), c.token_id.clone(), c.order_size, c.tick_size);
         let action = gate(s, i, &status, raw, now);
         if let QuoteAction::Deactivate { order_id, reason: DeactivateReason::Volatility } = &action {
@@ -116,6 +117,20 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
         out.push((id, action, token, size, tick));
     }
     out
+}
+
+/// Our own orders resting on `token` (price, USD): live ones and ones being
+/// placed (the order may already be on the book). A leg being cancelled has
+/// no known price and leaves the book within moments; it is not counted.
+pub fn own_orders(s: &AppState, token: &str) -> Vec<(Decimal, Decimal)> {
+    s.configs
+        .iter()
+        .filter(|c| c.token_id == token)
+        .filter_map(|c| match s.order_status.get(&c.id) {
+            Some(OrderStatus::Live { price, .. } | OrderStatus::Placing { price }) => Some((*price, c.order_size)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The legs farming the other outcome of `c`'s market.
@@ -159,9 +174,10 @@ fn could_place(s: &AppState, p: &MarketConfig, now: Instant) -> bool {
         && !s.place_retry_at.get(&p.id).is_some_and(|at| now < *at)
         && !held_back(s, &p.id, now)
         && !overdue(s, &p.id, now)
-        && s.books
-            .get(&p.token_id)
-            .is_some_and(|b| matches!(quoter::evaluate(p, b, &OrderStatus::Idle), QuoteAction::Place { .. }))
+        && s.books.get(&p.token_id).is_some_and(|b| {
+            let own = own_orders(s, &p.token_id);
+            matches!(quoter::evaluate(p, b, &OrderStatus::Idle, &own), QuoteAction::Place { .. })
+        })
 }
 
 fn backoff(pulls: u32) -> Duration {
@@ -360,6 +376,50 @@ mod tests {
 
     fn action_of(d: &[Decision], id: &str) -> QuoteAction {
         d.iter().find(|x| x.0 == id).map(|x| x.1.clone()).expect("leg evaluated")
+    }
+
+    /// Through the engine's real decision step: a leg's own order, and another
+    /// leg of ours on the same outcome, are never counted as depth ahead.
+    #[test]
+    fn our_own_orders_never_count_as_depth_ahead() {
+        let mut s = AppState::new(PathBuf::from("unused.json"));
+        let mut a = leg("a", "YES", CID);
+        a.min_depth_between = dec!(400);
+        a.order_size = dec!(500);
+        let mut b = a.clone();
+        b.id = "b".into();
+        s.configs = vec![a];
+        // Best bid 50¢ ($100 of others); our order rests at 49¢ ($500).
+        let resting = || {
+            let mut bk = TokenBook { best_bid: Some(dec!(0.50)), best_ask: Some(dec!(0.51)), ..Default::default() };
+            bk.bids.insert(dec!(0.50), dec!(200));
+            bk.bids.insert(dec!(0.49), dec!(500) / dec!(0.49));
+            bk
+        };
+        s.books.insert("YES".into(), resting());
+        live(&mut s, "a", dec!(0.49));
+        assert_eq!(own_orders(&s, "YES"), vec![(dec!(0.49), dec!(500))]);
+        // Best bid steps down onto our order's level (someone joins at 49¢ with
+        // $100): our order is now 0¢ behind it and must move to 48¢, but only
+        // that $100 of others would be ahead.
+        let mut moved = TokenBook { best_bid: Some(dec!(0.49)), best_ask: Some(dec!(0.50)), ..Default::default() };
+        moved.bids.insert(dec!(0.49), (dec!(100) + dec!(500)) / dec!(0.49));
+        s.books.insert("YES".into(), moved);
+        let d = all(&mut s, Instant::now());
+        assert!(
+            matches!(action_of(&d, "a"), QuoteAction::Cancel { reason: CancelReason::DepthDropped, .. }),
+            "{:?}",
+            action_of(&d, "a")
+        );
+
+        // A second leg of ours on the same outcome: the first one's order at 49¢
+        // is no protection for it either.
+        s.configs.push(b);
+        s.books.insert("YES".into(), resting());
+        let d = all(&mut s, Instant::now());
+        assert_eq!(action_of(&d, "b"), QuoteAction::Hold, "only $100 of others ahead of 49¢, needs $400");
+        // And `a` itself, with only $100 of others ahead of its 49¢ order, comes off.
+        assert!(matches!(action_of(&d, "a"), QuoteAction::Cancel { reason: CancelReason::DepthDropped, .. }));
     }
 
     fn all(s: &mut AppState, now: Instant) -> Vec<Decision> {
@@ -1058,7 +1118,7 @@ mod tests {
                 .iter()
                 .map(|c| {
                     let st = s.order_status.get(&c.id).cloned().unwrap_or_default();
-                    (c.id.clone(), quoter::evaluate(c, &s.books[&c.token_id], &st))
+                    (c.id.clone(), quoter::evaluate(c, &s.books[&c.token_id], &st, &own_orders(&s, &c.token_id)))
                 })
                 .collect();
             let gated = !single_sided_allowed(yes_mid);

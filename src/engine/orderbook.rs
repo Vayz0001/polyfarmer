@@ -94,6 +94,21 @@ impl TokenBook {
             .fold(dec!(0), |acc, x| acc + x)
     }
 
+    /// Like [`Self::bid_depth_between`], but without our own resting orders
+    /// (`own`: price and USD of each), which sit in the public book but are no
+    /// protection for us. Each level is reduced by the USD we have at that
+    /// price, never below zero.
+    pub fn others_depth_between(&self, lower: Decimal, upper: Decimal, own: &[(Decimal, Decimal)]) -> Decimal {
+        self.bids
+            .iter()
+            .filter(|(&p, _)| p > lower && p <= upper)
+            .map(|(&p, &size)| {
+                let mine: Decimal = own.iter().filter(|(op, _)| *op == p).map(|(_, usd)| *usd).sum();
+                (p * size - mine).max(dec!(0))
+            })
+            .fold(dec!(0), |acc, x| acc + x)
+    }
+
     /// Snap a price DOWN to the nearest valid tick.
     /// For BUY orders this guarantees our order is never closer to best_bid
     /// than the configured distance.
@@ -111,6 +126,23 @@ impl TokenBook {
 mod tests {
     use super::*;
     use rust_decimal_macros::dec;
+
+    #[test]
+    fn others_depth_leaves_out_our_own_orders() {
+        let mut book = TokenBook::default();
+        book.bids.insert(dec!(0.20), dec!(500)); // $100, someone else's
+        book.bids.insert(dec!(0.19), dec!(3000)); // $570: $500 of it is ours
+                                                  // All of it, as before:
+        assert_eq!(book.bid_depth_between(dec!(0.18), dec!(0.20)), dec!(670));
+        // Without ours: only the other people's $170.
+        assert_eq!(book.others_depth_between(dec!(0.18), dec!(0.20), &[(dec!(0.19), dec!(500))]), dec!(170));
+        // A level that is all ours counts nothing (never negative), whatever rounding left.
+        let own = [(dec!(0.19), dec!(600)), (dec!(0.20), dec!(100))];
+        assert_eq!(book.others_depth_between(dec!(0.18), dec!(0.20), &own), dec!(0));
+        // Orders of ours outside the range don't change it; none at all = the plain depth.
+        assert_eq!(book.others_depth_between(dec!(0.19), dec!(0.20), &[(dec!(0.19), dec!(500))]), dec!(100));
+        assert_eq!(book.others_depth_between(dec!(0.18), dec!(0.20), &[]), dec!(670));
+    }
 
     #[test]
     fn snap_to_tick_exact() {

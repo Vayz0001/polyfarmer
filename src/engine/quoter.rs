@@ -57,8 +57,17 @@ pub enum DeactivateReason {
 ///   - On every price_change event for the token (primary trigger)
 ///   - On a 30s fallback timer for all active configs
 ///
+/// `own` lists our own orders resting on this token (price, USD), this leg's
+/// included: they are in the public book, but depth ahead must be other
+/// people's money, or a re-peg could count its own old order as protection.
+///
 /// Does NOT perform any I/O — pure logic, returns an action for the caller to execute.
-pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -> QuoteAction {
+pub fn evaluate(
+    config: &MarketConfig,
+    book: &TokenBook,
+    status: &OrderStatus,
+    own: &[(Decimal, Decimal)],
+) -> QuoteAction {
     // ── 1. Deactivate checks (highest priority) ────────────────────────────
     // Only emit Deactivate when there is an order to cancel or the status needs
     // transitioning (Live / Cancelling / Placing). If the market is already Idle
@@ -125,7 +134,7 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
     match status {
         OrderStatus::Idle => {
             // Placing from scratch — check depth at the target we're about to use.
-            let depth = book.bid_depth_between(target, best_bid);
+            let depth = book.others_depth_between(target, best_bid, own);
             if depth >= config.min_depth_between {
                 QuoteAction::Place { price: target }
             } else {
@@ -141,7 +150,7 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
             // position is already invalid regardless of depth — we can't stay here.
             if gap < config.distance {
                 // Check whether the new target position is safe to place at.
-                let target_depth = book.bid_depth_between(target, best_bid);
+                let target_depth = book.others_depth_between(target, best_bid, own);
                 if target_depth >= config.min_depth_between {
                     return QuoteAction::Replace { order_id: order_id.clone(), new_price: target };
                 } else {
@@ -155,7 +164,7 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
             // The order at current_price is only exposed if there's nothing between
             // it and best_bid — using target here would cancel a valid order just
             // because depth is thin at a position we haven't moved to yet.
-            let current_depth = book.bid_depth_between(*current_price, best_bid);
+            let current_depth = book.others_depth_between(*current_price, best_bid, own);
             if current_depth < config.min_depth_between {
                 return QuoteAction::Cancel { order_id: order_id.clone(), reason: CancelReason::DepthDropped };
             }
@@ -164,7 +173,7 @@ pub fn evaluate(config: &MarketConfig, book: &TokenBook, status: &OrderStatus) -
             // best_bid moved away — target shifted. Only replace if the new position
             // is safe. If depth at target is thin, keep the existing protected order.
             if target != *current_price {
-                let target_depth = book.bid_depth_between(target, best_bid);
+                let target_depth = book.others_depth_between(target, best_bid, own);
                 if target_depth >= config.min_depth_between {
                     return QuoteAction::Replace { order_id: order_id.clone(), new_price: target };
                 }
@@ -198,6 +207,35 @@ fn live_order_id(status: &OrderStatus) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The quoter on its own: no orders of ours in the book.
+    fn ev(c: &MarketConfig, b: &TokenBook, s: &OrderStatus) -> QuoteAction {
+        evaluate(c, b, s, &[])
+    }
+
+    /// The bug this guards against: best bid moves into our order, and the only
+    /// "depth" between the new target and the best bid is our own old order. It
+    /// must not count as protection — after the re-peg it is gone.
+    #[test]
+    fn our_own_order_is_not_depth_ahead() {
+        let cfg = config(dec!(0.02), dec!(400)); // need $400 ahead
+        let mut book = TokenBook { best_bid: Some(dec!(0.20)), best_ask: Some(dec!(0.21)), ..Default::default() };
+        book.bids.insert(dec!(0.20), dec!(500)); // $100 of other people's bids
+        book.bids.insert(dec!(0.19), dec!(2631.58)); // ~$500: our own resting order
+        let live = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };
+        // Counting our order ($600 ≥ $400) would re-peg to 0.18 with only $100 really ahead.
+        assert!(matches!(ev(&cfg, &book, &live), QuoteAction::Replace { .. }), "old behaviour, for contrast");
+        let own = [(dec!(0.19), dec!(500))];
+        assert!(matches!(
+            evaluate(&cfg, &book, &live, &own),
+            QuoteAction::Cancel { reason: CancelReason::DepthDropped, .. }
+        ));
+        // With enough other people's money ahead, it still re-pegs.
+        book.bids.insert(dec!(0.20), dec!(2500)); // $500 of others
+        assert!(
+            matches!(evaluate(&cfg, &book, &live, &own), QuoteAction::Replace { new_price, .. } if new_price == dec!(0.18))
+        );
+    }
     use crate::engine::orderbook::TokenBook;
     use crate::types::{MarketConfig, OrderStatus};
     use chrono::{Duration, Utc};
@@ -236,7 +274,7 @@ mod tests {
     fn places_when_conditions_met() {
         let cfg = config(dec!(0.02), dec!(100));
         let book = book_with_depth(dec!(0.21), dec!(500), dec!(0.02));
-        let action = evaluate(&cfg, &book, &OrderStatus::Idle);
+        let action = ev(&cfg, &book, &OrderStatus::Idle);
         assert!(matches!(action, QuoteAction::Place { price } if price == dec!(0.19)));
     }
 
@@ -244,7 +282,7 @@ mod tests {
     fn holds_when_depth_insufficient() {
         let cfg = config(dec!(0.02), dec!(1000));
         let book = book_with_depth(dec!(0.21), dec!(50), dec!(0.02)); // only $50 depth
-        let action = evaluate(&cfg, &book, &OrderStatus::Idle);
+        let action = ev(&cfg, &book, &OrderStatus::Idle);
         assert_eq!(action, QuoteAction::Hold);
     }
 
@@ -254,7 +292,7 @@ mod tests {
         let cfg = config(dec!(0.02), dec!(500));
         let book = book_with_depth(dec!(0.21), dec!(50), dec!(0.02)); // only $50 depth at mid
         let status = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };
-        let action = evaluate(&cfg, &book, &status);
+        let action = ev(&cfg, &book, &status);
         assert!(matches!(action, QuoteAction::Cancel { reason: CancelReason::DepthDropped, .. }));
     }
 
@@ -266,7 +304,7 @@ mod tests {
         let cfg = config(dec!(0.02), dec!(100));
         let book = book_with_depth(dec!(0.20), dec!(500), dec!(0.02));
         let status = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };
-        let action = evaluate(&cfg, &book, &status);
+        let action = ev(&cfg, &book, &status);
         assert!(matches!(action, QuoteAction::Replace { new_price, .. } if new_price == dec!(0.18)));
     }
 
@@ -281,7 +319,7 @@ mod tests {
         book.bids.insert(dec!(0.24), dec!(600)); // $144 depth between 0.23 and 0.25
         book.bids.insert(dec!(0.22), dec!(600)); // also between 0.19 and 0.25
         let status = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };
-        let action = evaluate(&cfg, &book, &status);
+        let action = ev(&cfg, &book, &status);
         assert!(matches!(action, QuoteAction::Replace { new_price, .. } if new_price == dec!(0.23)));
     }
 
@@ -294,7 +332,7 @@ mod tests {
         // depth only between 0.19 and 0.23 (protects current order), NOT between 0.23 and 0.25
         book.bids.insert(dec!(0.22), dec!(600));
         let status = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };
-        let action = evaluate(&cfg, &book, &status);
+        let action = ev(&cfg, &book, &status);
         assert_eq!(action, QuoteAction::Hold);
     }
 
@@ -304,7 +342,7 @@ mod tests {
         cfg.expires_at = Utc::now() - Duration::seconds(1);
         let book = book_with_depth(dec!(0.21), dec!(500), dec!(0.02));
         let status = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };
-        let action = evaluate(&cfg, &book, &status);
+        let action = ev(&cfg, &book, &status);
         assert!(matches!(action, QuoteAction::Deactivate { reason: DeactivateReason::Expired, .. }));
     }
 
@@ -315,13 +353,13 @@ mod tests {
         let book = TokenBook { best_bid: Some(dec!(0.01)), best_ask: Some(dec!(0.02)), ..Default::default() };
         let live = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.01) };
         assert_eq!(
-            evaluate(&cfg, &book, &live),
+            ev(&cfg, &book, &live),
             QuoteAction::Cancel { order_id: "ord1".to_string(), reason: CancelReason::DepthDropped }
         );
-        assert_eq!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Hold, "no order, nothing to cancel");
+        assert_eq!(ev(&cfg, &book, &OrderStatus::Idle), QuoteAction::Hold, "no order, nothing to cancel");
         for status in [OrderStatus::Idle, OrderStatus::Placing { price: dec!(0.01) }] {
             assert!(
-                !matches!(evaluate(&cfg, &book, &status), QuoteAction::Cancel { ref order_id, .. } if order_id.is_empty()),
+                !matches!(ev(&cfg, &book, &status), QuoteAction::Cancel { ref order_id, .. } if order_id.is_empty()),
                 "never a Cancel with an empty order id ({status:?})"
             );
         }
@@ -339,21 +377,21 @@ mod tests {
         volatile.benchmark_bid = Some(dec!(0.20));
         volatile.max_volatility = Some(dec!(0.05));
         for cfg in [&paused, &expired] {
-            assert_eq!(evaluate(cfg, &book, &cancelling), QuoteAction::Hold, "no repeat Deactivate while cancelling");
+            assert_eq!(ev(cfg, &book, &cancelling), QuoteAction::Hold, "no repeat Deactivate while cancelling");
         }
         // A volatility trip still pauses the leg once (keeping the order being
         // cancelled); once paused it holds like the others.
         assert_eq!(
-            evaluate(&volatile, &book, &cancelling),
+            ev(&volatile, &book, &cancelling),
             QuoteAction::Deactivate { order_id: Some("ord1".to_string()), reason: DeactivateReason::Volatility }
         );
         volatile.paused = true;
-        assert_eq!(evaluate(&volatile, &book, &cancelling), QuoteAction::Hold);
+        assert_eq!(ev(&volatile, &book, &cancelling), QuoteAction::Hold);
         // With a live order they still deactivate, and a Placing leg is still reset.
         let live = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.28) };
-        assert!(matches!(evaluate(&paused, &book, &live), QuoteAction::Deactivate { order_id: Some(_), .. }));
+        assert!(matches!(ev(&paused, &book, &live), QuoteAction::Deactivate { order_id: Some(_), .. }));
         assert!(matches!(
-            evaluate(&paused, &book, &OrderStatus::Placing { price: dec!(0.28) }),
+            ev(&paused, &book, &OrderStatus::Placing { price: dec!(0.28) }),
             QuoteAction::Deactivate { order_id: None, .. }
         ));
     }
@@ -366,30 +404,30 @@ mod tests {
         cfg.max_volatility = Some(dec!(0.05));
         // Waiting with no order: it pauses (and alerts) instead of holding silently.
         assert_eq!(
-            evaluate(&cfg, &book, &OrderStatus::Idle),
+            ev(&cfg, &book, &OrderStatus::Idle),
             QuoteAction::Deactivate { order_id: None, reason: DeactivateReason::Volatility }
         );
         assert_eq!(
-            evaluate(&cfg, &book, &OrderStatus::Placing { price: dec!(0.28) }),
+            ev(&cfg, &book, &OrderStatus::Placing { price: dec!(0.28) }),
             QuoteAction::Deactivate { order_id: None, reason: DeactivateReason::Volatility }
         );
         // Once paused it holds: one alert, not one per book update.
         cfg.paused = true;
-        assert_eq!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Hold);
+        assert_eq!(ev(&cfg, &book, &OrderStatus::Idle), QuoteAction::Hold);
         // Inside the limit (exactly at it trips; just under doesn't).
         cfg.paused = false;
         cfg.benchmark_bid = Some(dec!(0.2501));
-        assert!(!matches!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Deactivate { .. }));
+        assert!(!matches!(ev(&cfg, &book, &OrderStatus::Idle), QuoteAction::Deactivate { .. }));
         cfg.benchmark_bid = Some(dec!(0.25));
-        assert!(matches!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Deactivate { .. }));
+        assert!(matches!(ev(&cfg, &book, &OrderStatus::Idle), QuoteAction::Deactivate { .. }));
         // No limit or no reference: never trips.
         cfg.max_volatility = None;
-        assert!(!matches!(evaluate(&cfg, &book, &OrderStatus::Idle), QuoteAction::Deactivate { .. }));
+        assert!(!matches!(ev(&cfg, &book, &OrderStatus::Idle), QuoteAction::Deactivate { .. }));
         // An expired leg with no order still just holds (expiry is checked first).
         let mut expired = config(dec!(0.02), dec!(0));
         expired.benchmark_bid = Some(dec!(0.20));
         expired.max_volatility = Some(dec!(0.05));
         expired.expires_at = Utc::now() - Duration::seconds(1);
-        assert_eq!(evaluate(&expired, &book, &OrderStatus::Idle), QuoteAction::Hold);
+        assert_eq!(ev(&expired, &book, &OrderStatus::Idle), QuoteAction::Hold);
     }
 }
