@@ -205,12 +205,12 @@ async fn scoring_swr(state: &WebState, mut live_ids: Vec<String>) -> HashMap<Str
 }
 
 pub(super) async fn build_rows(state: &WebState) -> Vec<MarketRow> {
-    let (configs, order_status, tops, pair_wait) = {
+    let (configs, order_status, tops, pair_wait, low_balance) = {
         let s = state.engine.read().await;
         // Top of book per token, from the engine's live WS-fed books.
         let tops: HashMap<String, (Option<Decimal>, Option<Decimal>)> =
             s.books.iter().map(|(t, b)| (t.clone(), (b.best_bid, b.best_ask))).collect();
-        (s.configs.clone(), s.order_status.clone(), tops, s.pair_wait.clone())
+        (s.configs.clone(), s.order_status.clone(), tops, s.pair_wait.clone(), s.low_balance_paused.clone())
     };
 
     let live_ids: Vec<String> = order_status
@@ -246,7 +246,8 @@ pub(super) async fn build_rows(state: &WebState) -> Vec<MarketRow> {
                 .enumerate()
                 .map(|(i, c)| {
                     let row = leg_row(c, i, order_status.get(&c.id), tops.get(&c.token_id), max_spread, &scoring);
-                    with_pair_wait(row, pair_wait.get(&c.id).copied())
+                    let row = with_pair_wait(row, pair_wait.get(&c.id).copied());
+                    with_low_balance(row, low_balance.contains(&c.id))
                 })
                 .collect();
             apply_two_sided(&mut legs);
@@ -285,6 +286,18 @@ fn apply_two_sided(legs: &mut [LegRow]) {
                 .to_string(),
         };
     }
+}
+
+/// A leg the engine paused because Polymarket said there wasn't enough balance
+/// for its order (`engine::placer::low_balance`) says so instead of "Paused".
+fn with_low_balance(mut row: LegRow, low: bool) -> LegRow {
+    if low && row.paused {
+        row.status_label = "No balance";
+        row.status_class = "warn";
+        row.status_title = "Paused: Polymarket said there isn't enough balance for this order. Add funds or lower \
+                            the size, then Resume.";
+    }
+    row
 }
 
 /// A leg the engine is holding off the book under Polymarket's two-sided rule
@@ -799,6 +812,12 @@ mod tests {
         let live = with_pair_wait(leg("y", "yes", 0, Some(dec!(0.94)), dec!(0.95)), Some(PairWait::OtherSide));
         assert_eq!(live.status_label, "Live");
         assert_eq!(with_pair_wait(idle(false), None).status_title, idle(false).status_title);
+        // Paused for lack of funds: says so; only while actually paused.
+        let broke = with_low_balance(idle(true), true);
+        assert_eq!((broke.status_label, broke.status_class), ("No balance", "warn"));
+        assert!(broke.status_title.contains("enough balance") && broke.paused);
+        assert_eq!(with_low_balance(idle(false), true).status_label, "Waiting");
+        assert_eq!(with_low_balance(idle(true), false).status_label, "Paused");
     }
 
     #[test]

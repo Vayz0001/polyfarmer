@@ -87,6 +87,50 @@ pub const CANCEL_RETRY_AFTER: Duration = Duration::from_secs(25);
 const CANCEL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(20);
 /// Unconfirmed retries in a row before the user is alerted (once per order).
 pub const CANCEL_ALERT_AFTER: u32 = 3;
+/// After a first "not enough balance", wait this long and try once more: a fill
+/// that is still settling can lock collateral for a few seconds.
+pub const LOW_BALANCE_RETRY: Duration = Duration::from_secs(15);
+/// A second "not enough balance" within this window pauses the leg.
+const LOW_BALANCE_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Polymarket refused an order for lack of funds.
+pub fn is_low_balance(msg: &str) -> bool {
+    msg.to_ascii_lowercase().contains("not enough balance")
+}
+
+/// Handle "not enough balance" for a leg that is now Idle (the caller released
+/// it). The first time: retry once after [`LOW_BALANCE_RETRY`]. Again within
+/// [`LOW_BALANCE_WINDOW`]: pause the leg (saved), mark it for the dashboard
+/// ("No balance") and alert once. `cost` is the order's dollar value, for the
+/// message. Never counts as a placement failure, so it can't auto-remove a leg.
+pub async fn low_balance(state: &RwLock<AppState>, alerter: &Alerter, config_id: &str, cost: Decimal) -> Outcome {
+    let mut s = state.write().await;
+    let now = std::time::Instant::now();
+    let repeat = s.low_balance_since.get(config_id).is_some_and(|t| now.duration_since(*t) < LOW_BALANCE_WINDOW);
+    if !repeat {
+        s.low_balance_since.insert(config_id.to_string(), now);
+        s.place_retry_at.insert(config_id.to_string(), Instant::now() + LOW_BALANCE_RETRY);
+        warn!("[{config_id}] not enough balance — retrying once in {}s", LOW_BALANCE_RETRY.as_secs());
+        return Outcome::Settling;
+    }
+    s.low_balance_since.remove(config_id);
+    s.place_retry_at.remove(config_id);
+    let Some(cfg) = s.configs.iter_mut().find(|c| c.id == config_id) else { return Outcome::Superseded };
+    cfg.paused = true;
+    let label = cfg.label.clone();
+    s.low_balance_paused.insert(config_id.to_string());
+    let saved = save_markets(&s.markets_file, &s.configs);
+    drop(s);
+    if let Err(e) = &saved {
+        error!("Could not save the pause of '{label}' after not enough balance: {e}");
+    }
+    alerter.warn(format!(
+        "Paused · {label}\nNot enough balance on Polymarket for this order (about ${}). Add funds or lower the size, \
+         then Resume.",
+        cost.round_dp(2)
+    ));
+    Outcome::PausedNoBalance
+}
 
 /// Cancel `order_id` and wait (bounded) for Polymarket to confirm it is gone.
 async fn confirmed_gone<A: OrderApi>(api: &A, order_id: &str) -> bool {
@@ -338,8 +382,11 @@ pub enum Outcome {
     Placed,
     /// The tick changed and the price no longer fits: re-quote, no failure.
     Requote,
-    /// Collateral still settling: try again on the next evaluation, no failure.
+    /// Not enough balance for the first time: one retry after
+    /// [`LOW_BALANCE_RETRY`] (collateral may be locked by a settling fill), no failure.
     Settling,
+    /// Not enough balance again: the leg was paused and the user told.
+    PausedNoBalance,
     Failed {
         failures: u32,
     },
@@ -446,6 +493,7 @@ pub async fn run_place<A: OrderApi>(
             s.place_attempt.remove(&config_id);
             s.place_failures.remove(&config_id);
             s.place_retry_at.remove(&config_id);
+            s.low_balance_since.remove(&config_id);
             let (label, token_label) = names(&s, &config_id);
             drop(s);
             alerter.info(format!(
@@ -456,11 +504,18 @@ pub async fn run_place<A: OrderApi>(
         }
         Err(e) => {
             let msg = e.to_string();
-            // Collateral locked by a matching/settling order: not the config's fault.
-            if msg.contains("not enough balance") {
-                warn!("Place skipped: insufficient balance (order settling?) — will retry on next tick");
-                let mut s = state.write().await;
-                return if release(&mut s, &config_id, attempt) { Outcome::Settling } else { Outcome::Superseded };
+            // Not enough funds (or collateral briefly locked by a settling fill):
+            // retry once, then pause the leg and say so. Never a "failure".
+            if is_low_balance(&msg) {
+                let released = {
+                    let mut s = state.write().await;
+                    release(&mut s, &config_id, attempt)
+                };
+                return if released {
+                    low_balance(&state, &alerter, &config_id, shares * price).await
+                } else {
+                    Outcome::Superseded
+                };
             }
             // The exchange rejected the price over the tick: re-read it once.
             if mentions_tick(&msg) {
@@ -818,15 +873,74 @@ mod tests {
         assert!(s.place_failures.is_empty() && s.place_retry_at.is_empty());
     }
 
+    /// "Not enough balance": the first time it retries once after a short wait
+    /// (collateral can be locked while a fill settles); again within the window
+    /// it pauses the leg, saves that, marks it for the dashboard and alerts once.
+    /// It is never a placement failure, so it can't auto-remove the leg.
     #[tokio::test]
-    async fn settling_collateral_is_not_a_failure() {
+    async fn not_enough_balance_retries_once_then_pauses() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        let now = Instant::now();
+        api.script(Err("not enough balance / allowance"));
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), now).await, Some(Outcome::Settling));
+        {
+            let s = e.state.read().await;
+            assert!(s.place_failures.is_empty(), "not a failure");
+            assert_eq!(s.order_status.get("a"), Some(&OrderStatus::Idle));
+            assert!(s
+                .place_retry_at
+                .get("a")
+                .is_some_and(|t| *t >= now + LOW_BALANCE_RETRY - Duration::from_millis(50)));
+            assert!(!s.configs[0].paused && s.low_balance_paused.is_empty());
+        }
+        // The retry waits.
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, None, "held until the retry time");
+
+        // Second refusal: paused, saved, shown, one alert.
+        api.script(Err("not enough balance / allowance"));
+        let later = Instant::now() + LOW_BALANCE_RETRY + Duration::from_millis(10);
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), later).await, Some(Outcome::PausedNoBalance));
+        {
+            let s = e.state.read().await;
+            assert!(s.configs[0].paused && s.low_balance_paused.contains("a"));
+            assert!(s.place_failures.is_empty() && s.low_balance_since.is_empty());
+            assert_eq!(s.order_status.get("a"), Some(&OrderStatus::Idle), "no order left");
+        }
+        let saved: Vec<MarketConfig> =
+            serde_json::from_str(&std::fs::read_to_string(e.dir.join("markets.json")).unwrap()).unwrap();
+        assert!(saved[0].paused, "the pause is saved");
+        let text = alerts(&e);
+        assert_eq!(text.matches("Not enough balance on Polymarket").count(), 1, "{text}");
+        assert!(!text.contains("Order placement failed"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_successful_place_forgets_an_earlier_low_balance() {
         let e = env(vec![leg("a", dec!(0.01))]);
         let api = Fake::new(dec!(0.01), dec!(0.01));
         api.script(Err("not enough balance / allowance"));
         assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Settling));
-        let s = e.state.read().await;
-        assert!(s.place_failures.is_empty() && s.place_retry_at.is_empty());
-        assert_eq!(s.order_status.get("a"), Some(&OrderStatus::Idle));
+        api.script(Ok(()));
+        let later = Instant::now() + LOW_BALANCE_RETRY + Duration::from_millis(10);
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), later).await, Some(Outcome::Placed));
+        assert!(e.state.read().await.low_balance_since.is_empty());
+        // So a later refusal is a fresh first one: retry, not pause.
+        {
+            let mut s = e.state.write().await;
+            s.order_status.insert("a".into(), OrderStatus::Idle);
+        }
+        api.script(Err("not enough balance / allowance"));
+        let much_later = later + Duration::from_secs(1);
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), much_later).await, Some(Outcome::Settling));
+        assert!(!e.state.read().await.configs[0].paused);
+    }
+
+    #[test]
+    fn low_balance_is_recognised_whatever_the_case() {
+        assert!(is_low_balance("not enough balance / allowance"));
+        assert!(is_low_balance("PolyApi: Not Enough Balance"));
+        assert!(!is_low_balance("invalid tick size"));
     }
 
     #[tokio::test]
