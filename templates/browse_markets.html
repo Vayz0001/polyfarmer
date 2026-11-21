@@ -5,7 +5,7 @@
 <div class="page-head">
   <div>
     <h1>Find markets</h1>
-    <div class="sub">Reward-eligible markets: Polymarket pays makers daily on these. Bigger pool and fewer competitors = more for you.</div>
+    <div class="sub">Reward-eligible markets: Polymarket pays makers daily on these. Bigger daily rewards and fewer competitors = more for you.</div>
   </div>
 </div>
 
@@ -16,7 +16,7 @@
           hx-trigger="input changed delay:300ms from:#browse-q, change from:#browse-sort, change from:#browse-dir">
       <div class="affix" style="flex:1;max-width:420px"><input class="input" type="search" name="q" id="browse-q" aria-label="Search markets" placeholder="Search markets…" value="{{ q }}" style="height:30px" /></div>
       <select class="input" name="sort" id="browse-sort" aria-label="Sort by" style="width:auto;height:30px">
-        <option value="rate_per_day" {% if sort == "rate_per_day" %}selected{% endif %}>Daily pool</option>
+        <option value="rate_per_day" {% if sort == "rate_per_day" %}selected{% endif %}>Daily rewards</option>
         <option value="competitiveness" {% if sort == "competitiveness" %}selected{% endif %}>Competition</option>
         <option value="spread" {% if sort == "spread" %}selected{% endif %}>Spread</option>
         <option value="volume_24hr" {% if sort == "volume_24hr" %}selected{% endif %}>24h volume</option>

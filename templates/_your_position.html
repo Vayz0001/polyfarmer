@@ -5,7 +5,7 @@
     {% match scoring %}{% when Some(true) %}<span class="pill ok">Scoring</span>{% when Some(false) %}<span class="pill warn">Not scoring</span>{% when None %}{% endmatch %}
   </div>
   <div class="panel-body kv">
-    {% if let Some(p) = reward_pct %}<div class="kv-row"><span class="k">Your share of today's pool</span><span class="v">{{ p }}</span></div>{% endif %}
+    {% if let Some(p) = reward_pct %}<div class="kv-row"><span class="k">Your share of today's rewards</span><span class="v">{{ p }}</span></div>{% endif %}
     {% if let Some(e) = earnings_today %}<div class="kv-row ok"><span class="k">Earned today</span><span class="v">{{ e }}</span></div>{% endif %}
     {% for leg in row.legs %}
     <div class="pos-leg">

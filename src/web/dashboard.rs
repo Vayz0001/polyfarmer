@@ -69,6 +69,26 @@ pub(super) fn usd(v: Decimal) -> String {
     }
 }
 
+/// A market's daily liquidity rewards for display: "$1,905", "<$1", or "" when
+/// there are none. Whole dollars, rounded half away from zero.
+pub(super) fn daily_rewards(v: Decimal) -> String {
+    if v <= Decimal::ZERO {
+        return String::new();
+    }
+    if v < Decimal::ONE {
+        return "<$1".to_string();
+    }
+    let whole = v.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero).to_string();
+    let mut out = String::with_capacity(whole.len() + whole.len() / 3 + 1);
+    for (i, c) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    format!("${out}")
+}
+
 /// Time until `t`: "6d 4h", "3h 12m", "45m", "expired", or "never" for the
 /// far-future sentinel used by "Never" expiry.
 pub(super) fn until(t: DateTime<Utc>) -> String {
@@ -825,6 +845,17 @@ mod tests {
     fn slug_is_last_segment() {
         assert_eq!(slug_of("https://polymarket.com/event/ev/mk"), "mk");
         assert_eq!(slug_of("https://polymarket.com/event/mk/"), "mk");
+    }
+
+    #[test]
+    fn daily_rewards_are_whole_dollars_with_separators() {
+        assert_eq!(daily_rewards(dec!(0)), "");
+        assert_eq!(daily_rewards(dec!(-5)), "");
+        assert_eq!(daily_rewards(dec!(0.4)), "<$1");
+        assert_eq!(daily_rewards(dec!(313.5)), "$314");
+        assert_eq!(daily_rewards(dec!(1904.6)), "$1,905");
+        assert_eq!(daily_rewards(dec!(60000)), "$60,000");
+        assert_eq!(daily_rewards(dec!(1234567)), "$1,234,567");
     }
 
     #[test]

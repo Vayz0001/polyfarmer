@@ -277,7 +277,7 @@ struct MarketViewTemplate {
     image: Option<String>,
     group_item_title: Option<String>,
     has_rewards: bool,
-    /// Daily reward pool, e.g. "$1905/day".
+    /// What the market pays in liquidity rewards per day, e.g. "$1,905".
     reward_pool: String,
     reward_min: String,
     reward_max_spread: String,
@@ -1385,7 +1385,7 @@ fn to_browse_row(m: markets_browse::RewardsMultiMarket, tracked: &[String]) -> B
         question: m.question,
         market_slug: m.market_slug,
         image: m.image.filter(|s| !s.is_empty()),
-        daily_pool: format!("${}", daily_pool.round_dp(0)),
+        daily_pool: super::dashboard::daily_rewards(daily_pool),
         min_size: format!("{}", m.rewards_min_size.normalize()),
         max_spread: format!("±{}¢", m.rewards_max_spread.normalize()),
         spread_now: format!("{:.1}¢", m.spread * dec!(100)),
@@ -1479,15 +1479,9 @@ fn to_picker_candidate(mr: MarketRef, use_group_title: bool) -> PickerCandidate 
     }
 }
 
-/// A daily reward pool for display: "$1905/day", "<$1/day", or "" for none.
+/// A market's daily rewards for display: "$1,905", "<$1", or "" for none.
 fn pool_label(pool: Decimal) -> String {
-    if pool <= dec!(0) {
-        String::new()
-    } else if pool < dec!(1) {
-        "<$1/day".to_string()
-    } else {
-        format!("${}/day", pool.round_dp(0))
-    }
+    super::dashboard::daily_rewards(pool)
 }
 
 // ── Edit a running leg in place ──────────────────────────────────────────────
