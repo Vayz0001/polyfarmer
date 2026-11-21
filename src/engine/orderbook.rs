@@ -96,10 +96,11 @@ impl TokenBook {
         Some((price, size))
     }
 
-    /// Total USDC depth of bids strictly between `lower` and `upper` (exclusive).
-    /// Used to check: is there enough depth between our order price and best_bid?
+    /// Total USDC depth of bids above `lower` up to and including `upper` (the
+    /// best bid): what sits ahead of an order at `lower`. The engine uses
+    /// [`Self::others_depth_between`], which leaves our own orders out.
     ///
-    /// Depth (USDC) = Σ price * size  for all bids where lower < price < upper
+    /// Depth (USDC) = Σ price * size  for all bids where lower < price <= upper
     pub fn bid_depth_between(&self, lower: Decimal, upper: Decimal) -> Decimal {
         self.bids
             .iter()

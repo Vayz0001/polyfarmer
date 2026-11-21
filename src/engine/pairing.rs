@@ -63,9 +63,15 @@ pub struct AloneClock {
     pub pending: bool,
 }
 
-/// `(config id, action, token id, order size, tick size)`, as the engine's
-/// action runners take them.
-pub type Decision = (String, QuoteAction, String, Decimal, Decimal);
+/// One leg's decision, as the engine's runner (`engine::runner`) takes it. The
+/// order size is read when the placement claims the leg, not here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decision {
+    pub config_id: String,
+    pub action: QuoteAction,
+    pub token_id: String,
+    pub tick_size: Decimal,
+}
 
 /// Evaluate the selected legs and apply the two-sided rule. Updates the rule's
 /// bookkeeping in `s` (grace clocks, back-off, display reasons). Legs without a
@@ -79,6 +85,7 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
     s.pair_wait.retain(|id, _| ids.contains(id));
     s.low_balance_since.retain(|id, _| ids.contains(id));
     s.low_balance_paused.retain(|id| ids.contains(id));
+    s.repegging.retain(|id| ids.contains(id));
 
     let mut out = Vec::new();
     for i in 0..s.configs.len() {
@@ -94,7 +101,7 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
         let status = s.order_status.get(&c.id).cloned().unwrap_or_default();
         let own = own_orders(s, &c.token_id);
         let raw = quoter::evaluate(c, book, &status, &own);
-        let (id, token, size, tick) = (c.id.clone(), c.token_id.clone(), c.order_size, c.tick_size);
+        let (id, token, tick) = (c.id.clone(), c.token_id.clone(), c.tick_size);
         let action = gate(s, i, &status, raw, now);
         if let QuoteAction::Deactivate { order_id, reason: DeactivateReason::Volatility } = &action {
             // Record the auto-pause now, under the lock (the runner saves it),
@@ -116,7 +123,7 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
                 _ => {}
             }
         }
-        out.push((id, action, token, size, tick));
+        out.push(Decision { config_id: id, action, token_id: token, tick_size: tick });
     }
     out
 }
@@ -377,7 +384,7 @@ mod tests {
     }
 
     fn action_of(d: &[Decision], id: &str) -> QuoteAction {
-        d.iter().find(|x| x.0 == id).map(|x| x.1.clone()).expect("leg evaluated")
+        d.iter().find(|x| x.config_id == id).map(|x| x.action.clone()).expect("leg evaluated")
     }
 
     /// Through the engine's real decision step: a leg's own order, and another
@@ -984,7 +991,7 @@ mod tests {
         live(&mut s, "y", dec!(0.94));
         let d = decide(&mut s, |c| c.id == "n", Instant::now());
         assert_eq!(d.len(), 1);
-        assert_eq!(d[0].0, "n");
+        assert_eq!(d[0].config_id, "n");
         all(&mut s, Instant::now());
         assert!(s.pair_alone_since.contains_key("y"));
         s.configs.retain(|c| c.id != "y");
@@ -1140,7 +1147,7 @@ mod tests {
             }
 
             // 4. Execute, as the engine does.
-            for (id, action, _, _, _) in decisions {
+            for Decision { config_id: id, action, .. } in decisions {
                 match action {
                     QuoteAction::Hold => {}
                     QuoteAction::Place { price } => {

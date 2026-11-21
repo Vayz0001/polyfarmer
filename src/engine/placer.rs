@@ -519,13 +519,8 @@ pub async fn run_place<A: OrderApi>(
             if !still_ours {
                 drop(s);
                 warn!("State changed during placement — cancelling orphan {order_id}");
-                if !matches!(api.cancel(&order_id).await, Ok(true)) {
-                    error!("Could not confirm cancel of orphan order {order_id}");
-                    alerter.error(format!(
-                        "An order placed while the market was being changed ({order_id}) could not be confirmed \
-                         cancelled. Check your open orders on Polymarket."
-                    ));
-                }
+                // Verified (checks Polymarket on an ambiguous reply), one alert text.
+                cancel_orphan(&*api, &alerter, &order_id).await;
                 return Outcome::Superseded;
             }
             s.order_status.insert(config_id.clone(), OrderStatus::Live { order_id, price });
@@ -533,10 +528,12 @@ pub async fn run_place<A: OrderApi>(
             s.place_failures.remove(&config_id);
             s.place_retry_at.remove(&config_id);
             s.low_balance_since.remove(&config_id);
+            let replaced = s.repegging.remove(&config_id);
             let (label, token_label) = names(&s, &config_id);
             drop(s);
             alerter.info(format!(
-                "Order placed · {label}\nBUY {shares} {token_label} shares @ {}¢ (${order_size})",
+                "Order {} · {label}\nBUY {shares} {token_label} shares @ {}¢ (${order_size})",
+                if replaced { "replaced" } else { "placed" },
                 price * Decimal::ONE_HUNDRED
             ));
             Outcome::Placed
@@ -629,144 +626,9 @@ async fn fail(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &str,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::test_support::*;
     use crate::types::MarketConfig;
-    use chrono::Utc;
     use rust_decimal_macros::dec;
-    use std::collections::VecDeque;
-    use std::path::PathBuf;
-    use std::sync::Mutex;
-
-    const TOKEN: &str = "20006732765674855733524007935991362439352594042415161039767275461950712817548";
-
-    /// A fake exchange. `sdk` is the order library's cached tick, `real` the
-    /// tick Polymarket uses now. Like the real SDK it rejects a price with more
-    /// decimal places than its cached tick; like the exchange it rejects a
-    /// price that is not a whole number of real ticks.
-    struct Fake {
-        sdk: Mutex<Decimal>,
-        real: Mutex<Decimal>,
-        refreshes: Mutex<u32>,
-        placed: Mutex<Vec<Decimal>>,
-        scripted: Mutex<VecDeque<std::result::Result<(), String>>>,
-        refresh_fails: Mutex<bool>,
-        cancelled: Mutex<Vec<String>>,
-        /// Scripted `cancel_verified` replies (default: confirmed gone).
-        verify: Mutex<VecDeque<std::result::Result<bool, String>>>,
-        /// Makes `cancel_verified` hang (to exercise the timeout).
-        verify_hangs: Mutex<bool>,
-    }
-
-    impl Fake {
-        fn new(sdk: Decimal, real: Decimal) -> Arc<Self> {
-            Arc::new(Self {
-                sdk: Mutex::new(sdk),
-                real: Mutex::new(real),
-                refreshes: Mutex::new(0),
-                placed: Mutex::new(Vec::new()),
-                scripted: Mutex::new(VecDeque::new()),
-                refresh_fails: Mutex::new(false),
-                cancelled: Mutex::new(Vec::new()),
-                verify: Mutex::new(VecDeque::new()),
-                verify_hangs: Mutex::new(false),
-            })
-        }
-        fn script(&self, r: std::result::Result<(), &str>) {
-            self.scripted.lock().unwrap().push_back(r.map_err(str::to_string));
-        }
-    }
-
-    impl OrderApi for Fake {
-        fn sdk_tick(&self, _t: &str) -> impl Future<Output = Result<Decimal>> + Send {
-            let v = *self.sdk.lock().unwrap();
-            async move { Ok(v) }
-        }
-        fn refresh_tick(&self, _t: &str) -> impl Future<Output = Result<Decimal>> + Send {
-            let fails = *self.refresh_fails.lock().unwrap();
-            let real = *self.real.lock().unwrap();
-            if fails {
-                return futures_util::future::Either::Left(async { Err(eyre::eyre!("connection reset")) });
-            }
-            *self.sdk.lock().unwrap() = real;
-            *self.refreshes.lock().unwrap() += 1;
-            futures_util::future::Either::Right(async move { Ok(real) })
-        }
-        fn place_buy(&self, _t: &str, price: Decimal, _shares: Decimal) -> impl Future<Output = Result<String>> + Send {
-            let sdk = *self.sdk.lock().unwrap();
-            let real = *self.real.lock().unwrap();
-            let scripted = self.scripted.lock().unwrap().pop_front();
-            let out = if price.normalize().scale() > sdk.scale() {
-                Err(eyre::eyre!(
-                    "Validation: invalid: Unable to build Order: Price {price} has {} decimal places. Minimum tick size {sdk} has {} decimal places.",
-                    price.scale(),
-                    sdk.scale()
-                ))
-            } else if !aligned(price, real) {
-                Err(eyre::eyre!("order {price} is invalid: breaks minimum tick size rule: {real}"))
-            } else if let Some(Err(e)) = scripted {
-                Err(eyre::eyre!(e))
-            } else {
-                self.placed.lock().unwrap().push(price);
-                Ok("0xorder".to_string())
-            };
-            async move { out }
-        }
-        async fn cancel(&self, o: &str) -> Result<bool> {
-            self.cancelled.lock().unwrap().push(o.to_string());
-            Ok(true)
-        }
-        async fn cancel_verified(&self, o: &str) -> Result<bool> {
-            self.cancelled.lock().unwrap().push(o.to_string());
-            if *self.verify_hangs.lock().unwrap() {
-                std::future::pending::<()>().await;
-            }
-            match self.verify.lock().unwrap().pop_front() {
-                Some(Ok(b)) => Ok(b),
-                Some(Err(e)) => Err(eyre::eyre!(e)),
-                None => Ok(true),
-            }
-        }
-    }
-
-    fn leg(id: &str, tick: Decimal) -> MarketConfig {
-        MarketConfig {
-            id: id.to_string(),
-            url: "https://polymarket.com/event/x".to_string(),
-            label: format!("leg {id}"),
-            condition_id: "0xabc".to_string(),
-            token_id: TOKEN.to_string(),
-            token_label: "Yes".to_string(),
-            tick_size: tick,
-            distance: dec!(0.023),
-            min_depth_between: dec!(500),
-            order_size: dec!(150),
-            expires_at: Utc::now() + chrono::Duration::days(1),
-            paused: false,
-            benchmark_bid: None,
-            max_volatility: None,
-        }
-    }
-
-    struct Env {
-        state: Arc<RwLock<AppState>>,
-        alerter: Arc<Alerter>,
-        dir: PathBuf,
-    }
-    impl Drop for Env {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
-        }
-    }
-
-    fn env(legs: Vec<MarketConfig>) -> Env {
-        let dir = std::env::temp_dir().join(format!("pf-placer-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let markets = dir.join("markets.json");
-        save_markets(&markets, &legs).unwrap();
-        let mut s = AppState::new(markets);
-        s.configs = legs;
-        let (tx, _rx) = tokio::sync::broadcast::channel(64);
-        Env { state: Arc::new(RwLock::new(s)), alerter: Arc::new(Alerter::new(&dir.join("alerts.json"), tx)), dir }
-    }
 
     async fn attempt(e: &Env, api: &Arc<Fake>, id: &str, price: Decimal, now: Instant) -> Option<Outcome> {
         let (claimed, tick) = {
@@ -1159,9 +1021,6 @@ mod tests {
             .checked_sub(std::time::Duration::from_secs(age_secs))
             .unwrap_or_else(std::time::Instant::now);
         e_state.order_status.insert(id.into(), OrderStatus::Cancelling { order_id: order.into(), since });
-    }
-    fn alerts(e: &Env) -> String {
-        std::fs::read_to_string(e.dir.join("alerts.json")).unwrap_or_default()
     }
 
     #[tokio::test]

@@ -11,4 +11,7 @@ pub mod orderbook;
 pub mod pairing;
 pub mod placer;
 pub mod quoter;
+pub mod runner;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod ws_manager;

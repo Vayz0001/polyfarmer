@@ -56,6 +56,11 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: a re-peg's new order gets the same checks as any other.** Moving an order cancelled the old one and
+  placed the new one straight away at "best bid − distance", skipping the "Depth ahead" check, Polymarket's
+  two-sided rule, tick handling, retries and the "No balance" handling. Now, once the old order is confirmed gone,
+  the leg goes through the normal placement path at once; if the depth ahead has gone, it waits instead of placing
+  unprotected. Alerts still say "Order replaced".
 - **Engine: an order can no longer end up resting on Polymarket untracked.**
   - A cancel (from the engine, or from Pause/Edit on the dashboard) now only claims the order the leg holds at that
     moment. Before, a re-peg that put up a new order in between could be overwritten, and the new order was left
