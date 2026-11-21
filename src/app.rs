@@ -683,6 +683,7 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                                     .find(|c| c.id == config_id)
                                     .map(|c| (c.label.clone(), c.token_label.clone()))
                                     .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
+                                s.low_balance_since.remove(&config_id);
                                 s.order_status
                                     .insert(config_id, OrderStatus::Live { order_id: oid, price: fresh_price });
                                 drop(s);
@@ -692,7 +693,9 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                                     shares,
                                     token_label,
                                     fresh_price * rust_decimal_macros::dec!(100),
-                                    order_size
+                                    // The size this order was placed with (an edit during
+                                    // the cancel is picked up), not the one decided earlier.
+                                    fresh_size
                                 ));
                             } else {
                                 drop(s);
@@ -701,13 +704,25 @@ async fn evaluate_all_markets(state: &Arc<RwLock<AppState>>, executor: &Arc<Exec
                             }
                         }
                         Err(e) => {
-                            error!("Timer replace failed: {}", e);
-                            alert2.error(format!("Replace order failed: {}", e));
-                            let mut s = state2.write().await;
-                            if matches!(s.order_status.get(&config_id),
-                                Some(OrderStatus::Cancelling { order_id: existing, .. }) if existing == &order_id)
-                            {
-                                s.order_status.insert(config_id, OrderStatus::Idle);
+                            let msg = e.to_string();
+                            let low = placer::is_low_balance(&msg);
+                            if !low {
+                                error!("Timer replace failed: {}", msg);
+                                alert2.error(format!("Replace order failed: {}", msg));
+                            }
+                            let released = {
+                                let mut s = state2.write().await;
+                                let ours = matches!(s.order_status.get(&config_id),
+                                    Some(OrderStatus::Cancelling { order_id: existing, .. }) if existing == &order_id);
+                                if ours {
+                                    s.order_status.insert(config_id.clone(), OrderStatus::Idle);
+                                }
+                                ours
+                            };
+                            // The old order is gone; with no money for the new one, retry
+                            // once and then pause the leg and say so (placer::low_balance).
+                            if low && released {
+                                placer::low_balance(&state2, &alert2, &config_id, shares * fresh_price).await;
                             }
                         }
                     }

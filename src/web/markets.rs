@@ -877,6 +877,15 @@ struct OtherLeg {
     weight_pct: String,
     meets_min: bool,
     shares: String,
+    /// Its best bid is too low to bid the same distance below it.
+    no_room: bool,
+}
+
+/// Where the other leg of a both-sides farm would bid: the same distance below
+/// its own best bid, on the tick. `None` when that isn't a real price.
+fn other_side_price(best_bid: Decimal, distance: Decimal, tick: Decimal) -> Option<Decimal> {
+    let p = crate::engine::orderbook::TokenBook::snap_to_tick(best_bid - distance, tick);
+    (p > dec!(0)).then_some(p)
 }
 
 #[derive(Template)]
@@ -973,7 +982,8 @@ pub async fn view_preview(
                 let distance = bb - price;
                 let op = (dec!(1) - ba) - distance;
                 let other_mid = dec!(1) - mid;
-                let shares = if op > dec!(0) { (eval.per_side_size / op).round_dp(0) } else { dec!(0) };
+                // Same rounding as the engine (2 decimals) and this leg's preview.
+                let shares = if op > dec!(0) { (eval.per_side_size / op).round_dp(2) } else { dec!(0) };
                 let meets = shares >= min_size;
                 let w =
                     if op > dec!(0) && meets { market_data::score_weight(other_mid, op, max_spread) } else { dec!(0) };
@@ -982,8 +992,9 @@ pub async fn view_preview(
                         label: mr.outcomes.get(1 - side).cloned().unwrap_or_default(),
                         price_cents: cents(op),
                         weight_pct: pct(w),
-                        meets_min: meets,
-                        shares: format!("{shares}"),
+                        meets_min: meets || op <= dec!(0),
+                        shares: shares.normalize().to_string(),
+                        no_room: op <= dec!(0),
                     },
                     w,
                 ))
@@ -1022,8 +1033,10 @@ pub async fn view_preview(
         effective_pct: pct(effective),
         effective_tone,
         sided_note,
-        per_side_size: format!("${:.2}", eval.per_side_size),
-        per_side_shares: format!("{:.0}", eval.per_side_shares),
+        per_side_size: super::dashboard::usd(eval.per_side_size),
+        // As the engine places it: 2 decimals (`{:.0}` truncated, and hid a
+        // shortfall like 49.6 shares under a 50 minimum).
+        per_side_shares: eval.per_side_shares.normalize().to_string(),
         per_side_meets_min: eval.per_side_meets_min,
         min_size: min_size.normalize().to_string(),
         fill_risk: eval.fill_risk.label(),
@@ -1145,6 +1158,17 @@ pub async fn start_farming(
         let Some(best_bid_b) = book_b.best_bid else {
             return render_start_error("No live bids on the other side right now.");
         };
+        // The other leg bids the same distance below its own best bid: that must
+        // be a real price, or the leg would sit waiting forever.
+        if other_side_price(best_bid_b, distance, mr.tick_size).is_none() {
+            let other_label = mr.outcomes.get(other).cloned().unwrap_or_default();
+            return render_start_error(&format!(
+                "{other_label}'s best bid is {}¢, so there's no room {}¢ below it. Farm one side, or bid closer to \
+                 the best bid.",
+                cents(best_bid_b),
+                cents(distance)
+            ));
+        }
         new_configs.push(make(other, best_bid_b));
     }
     for cfg in &new_configs {
@@ -1943,6 +1967,9 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool, restart_from: Opt
             c.benchmark_bid = Some(bb);
         }
         c.paused = pausing;
+        // A manual pause or resume replaces the "No balance" pause and its retry clock.
+        s.low_balance_paused.remove(id);
+        s.low_balance_since.remove(id);
         if !pausing {
             // Resuming is a fresh start: no leftover retry delay or failure count,
             // nor the two-sided rule's back-off (engine::pairing).
@@ -2065,6 +2092,38 @@ pub async fn resume_group(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_other_side_needs_room_below_its_best_bid() {
+        assert_eq!(other_side_price(dec!(0.40), dec!(0.02), dec!(0.01)), Some(dec!(0.38)));
+        assert_eq!(other_side_price(dec!(0.03), dec!(0.02), dec!(0.01)), Some(dec!(0.01)));
+        assert_eq!(other_side_price(dec!(0.02), dec!(0.02), dec!(0.01)), None, "0¢ isn't a price");
+        assert_eq!(other_side_price(dec!(0.01), dec!(0.03), dec!(0.01)), None, "below zero");
+        assert_eq!(other_side_price(dec!(0.004), dec!(0.002), dec!(0.001)), Some(dec!(0.002)));
+    }
+
+    /// Shares are shown as the engine places them (2 decimals, not cut to whole
+    /// shares), and an other leg with no room says so instead of a negative price.
+    #[test]
+    fn the_preview_shows_real_share_counts_and_no_room() {
+        let mut t = PlacementPreviewTemplate::message(true, None);
+        t.per_side_shares = dec!(49.6).normalize().to_string();
+        t.per_side_size = super::super::dashboard::usd(dec!(19.84));
+        t.min_size = "50".into();
+        t.per_side_meets_min = false; // 49.6 < 50
+        t.fill_risk = "low";
+        t.other_leg = Some(OtherLeg {
+            label: "No".into(),
+            price_cents: "-1.0".into(),
+            weight_pct: "0%".into(),
+            meets_min: true,
+            shares: "0".into(),
+            no_room: true,
+        });
+        let html = t.render().unwrap();
+        assert!(html.contains("49.6 sh · $19.84") && html.contains("under 50 min"), "{html}");
+        assert!(html.contains("no room below its best bid") && !html.contains("-1.0¢"), "{html}");
+    }
 
     fn two_outcome_market() -> MarketRef {
         MarketRef {

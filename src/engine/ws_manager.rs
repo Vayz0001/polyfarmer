@@ -73,6 +73,12 @@ pub struct AppState {
     pub pair_retry_at: HashMap<String, tokio::time::Instant>,
     /// Two-sided rule: legs held off the book by it, and why (display).
     pub pair_wait: HashMap<String, crate::engine::pairing::PairWait>,
+    /// "Not enough balance": when a leg first hit it (one short retry is allowed,
+    /// as collateral can be briefly locked while a fill settles).
+    pub low_balance_since: HashMap<String, std::time::Instant>,
+    /// Legs paused because Polymarket said there wasn't enough balance (display;
+    /// cleared on resume or pause).
+    pub low_balance_paused: HashSet<String>,
 }
 
 impl AppState {
@@ -97,6 +103,8 @@ impl AppState {
             pair_pulls: HashMap::new(),
             pair_retry_at: HashMap::new(),
             pair_wait: HashMap::new(),
+            low_balance_since: HashMap::new(),
+            low_balance_paused: HashSet::new(),
         }
     }
 }
@@ -764,6 +772,7 @@ async fn execute_actions(
                                     .find(|c| c.id == config_id)
                                     .map(|c| (c.label.clone(), c.token_label.clone()))
                                     .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
+                                s.low_balance_since.remove(&config_id);
                                 s.order_status.insert(
                                     config_id,
                                     OrderStatus::Live { order_id: new_order_id, price: fresh_price },
@@ -775,7 +784,9 @@ async fn execute_actions(
                                     shares,
                                     token_label,
                                     fresh_price * rust_decimal_macros::dec!(100),
-                                    order_size
+                                    // The size this order was placed with (an edit during
+                                    // the cancel is picked up), not the one decided earlier.
+                                    fresh_size
                                 ));
                             } else {
                                 drop(s);
@@ -787,13 +798,25 @@ async fn execute_actions(
                             }
                         }
                         Err(e) => {
-                            error!("Replace: place failed: {}", e);
-                            alerter2.error(format!("Replace order failed: {}", e));
-                            let mut s = state2.write().await;
-                            if matches!(s.order_status.get(&config_id),
-                                Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id)
-                            {
-                                s.order_status.insert(config_id, OrderStatus::Idle);
+                            let msg = e.to_string();
+                            let low = placer::is_low_balance(&msg);
+                            if !low {
+                                error!("Replace: place failed: {}", msg);
+                                alerter2.error(format!("Replace order failed: {}", msg));
+                            }
+                            let released = {
+                                let mut s = state2.write().await;
+                                let ours = matches!(s.order_status.get(&config_id),
+                                    Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id);
+                                if ours {
+                                    s.order_status.insert(config_id.clone(), OrderStatus::Idle);
+                                }
+                                ours
+                            };
+                            // The old order is gone; with no money for the new one, retry
+                            // once and then pause the leg and say so (placer::low_balance).
+                            if low && released {
+                                placer::low_balance(&state2, &alerter2, &config_id, shares * fresh_price).await;
                             }
                         }
                     }

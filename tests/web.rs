@@ -1835,3 +1835,30 @@ async fn market_trades_and_holders_need_a_login_and_handle_bad_links() {
     let (status, _, _) = get_authed(&app, &cookie, "/markets/view/trades?slug=&min=notanumber").await;
     assert!(status.is_client_error(), "a non-numeric filter is rejected: {status}");
 }
+
+/// A leg the engine paused for lack of funds shows "No balance" in the Markets
+/// table and on the market page, and resuming it clears that (and its retry clock).
+#[tokio::test]
+async fn a_leg_paused_for_low_balance_says_so_until_resumed() {
+    use polyfarmer::types::OrderStatus;
+    let (app, pw, engine, _) = app_with_leg(OrderStatus::Idle);
+    {
+        let mut s = engine.write().await;
+        s.configs[0].paused = true;
+        s.low_balance_paused.insert("mar_leg".into());
+        s.low_balance_since.insert("mar_leg".into(), std::time::Instant::now());
+    }
+    let cookie = login(&app, &pw).await;
+    let (_, page, rotated) = get_authed(&app, &cookie, "/markets").await;
+    let cookie = rotated.unwrap_or(cookie);
+    let csrf = extract_csrf(&page);
+    let (_, table, _) = get_authed(&app, &cookie, "/markets/table").await;
+    assert!(table.contains(">No balance<") && table.contains("enough balance"), "{table}");
+    let (_, panel, _) = get_authed(&app, &cookie, "/markets/view/position?cid=0xabc").await;
+    assert!(panel.contains(">No balance<"), "{panel}");
+
+    let (body, _) = post_as(&app, &cookie, "/markets/mar_leg/resume", format!("csrf={csrf}")).await;
+    assert!(!body.contains("No balance"), "{body}");
+    let s = engine.read().await;
+    assert!(!s.configs[0].paused && s.low_balance_paused.is_empty() && s.low_balance_since.is_empty());
+}

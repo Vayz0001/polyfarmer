@@ -60,6 +60,22 @@ anything may change between releases.
   added up the bids between the new price and the best bid, which included that order itself (and any other leg of
   yours on the same outcome). So an order could move with less of other people's money ahead of it than the "Depth
   ahead" you set. Every depth check in the engine now leaves your own resting orders out.
+- **"Not enough balance" no longer retries silently forever.** Before, a leg Polymarket refused for lack of funds was
+  retried on every order-book update with no alert. Now it retries once after 15 seconds (a fill that is still
+  settling can lock funds for a moment), and if it is refused again within two minutes the leg is **paused** and the
+  Markets table and the market page show **No balance**, with one alert saying how much the order needed. Add funds or
+  lower the size, then Resume. The same applies when a re-peg's new order is refused. It never counts as a failed
+  placement, so it can't auto-remove the leg.
+- Order form and preview fixes:
+  - In **Both sides** mode the shares box showed the whole size at this side's price. It now shows this side's
+    shares (half the size), labelled with the outcome ("39 No shares"), and typing shares sets the total to match.
+  - Share counts are rounded the way orders are placed (to 2 decimals) in the meter and the preview, which used to
+    show unrounded or whole numbers. A size just under the reward minimum (49.6 vs 50) no longer looks like it
+    meets it.
+  - Starting **Both sides** when the other outcome's best bid is too low to bid the same distance below it is
+    refused with a clear message, instead of creating a leg that waits forever. The preview and meter say "no
+    room below its best bid".
+  - "Order replaced" alerts show the size the new order was placed with, not the one from before an edit.
 - Links to polyfarmer.xyz now show a preview card on X, Discord and other apps: the site announced a large image
   card but never said which image, so none appeared. It now has a 1200×630 preview image and the matching tags.
 - The Rewards page's rank card retries a failed lookup after 5 minutes instead of showing "rank unavailable" for
