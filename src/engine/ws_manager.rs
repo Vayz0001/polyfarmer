@@ -4,7 +4,7 @@ use crate::engine::orderbook::TokenBook;
 use crate::engine::pairing;
 use crate::engine::placer;
 use crate::engine::quoter::{DeactivateReason, QuoteAction};
-use crate::types::{MarketConfig, OrderStatus, WsBookSnapshot, WsCommand, WsPriceChangeEvent};
+use crate::types::{MarketConfig, OrderStatus, WsCommand, WsPriceChangeEvent};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -325,62 +325,53 @@ pub fn spawn(
                 live_order_ids.len()
             ));
 
-            // Retry up to 3 times — only reset statuses on confirmed cancellation.
-            // If we reset to Idle without confirming, the bot re-places orders that are still
-            // open on the CLOB, creating duplicate positions.
-            let mut cancel_confirmed = false;
+            // Retry up to 3 times — only orders confirmed gone are reset. Resetting one
+            // that is still open would let the bot place a second order beside it.
+            let mut remaining = live_order_ids.clone();
+            let mut answered = false;
             for attempt in 1u32..=3 {
-                match executor.cancel_orders(&live_order_ids).await {
-                    Ok(_) => {
-                        cancel_confirmed = true;
-                        break;
-                    }
-                    Err(e) => {
-                        error!("cancel_orders attempt {}/3 failed: {}", attempt, e);
-                        if attempt < 3 {
-                            tokio::time::sleep(Duration::from_secs(attempt as u64)).await;
+                match executor.cancel_orders(&remaining).await {
+                    Ok(open) => {
+                        answered = true;
+                        remaining = open;
+                        if remaining.is_empty() {
+                            break;
                         }
+                        warn!("cancel_orders attempt {}/3: {} order(s) still open", attempt, remaining.len());
                     }
+                    Err(e) => error!("cancel_orders attempt {}/3 failed: {}", attempt, e),
+                }
+                if attempt < 3 {
+                    tokio::time::sleep(Duration::from_secs(attempt as u64)).await;
                 }
             }
 
-            if cancel_confirmed {
-                // Reset statuses to Idle so the quoter can re-quote on reconnect.
-                // Only clear place_failures for configs that had a live order —
-                // those failures were placement successes (order got onto the book),
-                // so the underlying config is valid. Configs that were Idle/Placing
-                // keep their failure count: a reconnect doesn't fix a broken config.
-                let mut s = state.write().await;
-                let mut live_config_ids: HashSet<String> = HashSet::new();
-                for (id, status) in s.order_status.iter_mut() {
-                    if matches!(status, OrderStatus::Live { .. }) {
-                        live_config_ids.insert(id.clone());
-                    }
-                    *status = OrderStatus::Idle;
-                }
-                for id in &live_config_ids {
-                    s.place_failures.remove(id);
-                }
-                // Stuck cancels were just confirmed by this bulk cancel. Tell the user
-                // about any that had already raised a "can't confirm" alert.
-                let resolved: Vec<String> = std::mem::take(&mut s.cancel_failures)
-                    .into_iter()
-                    .filter(|(_, (_, tries))| *tries >= placer::CANCEL_ALERT_AFTER)
-                    .map(|(id, _)| s.configs.iter().find(|c| c.id == id).map(|c| c.label.clone()).unwrap_or(id))
-                    .collect();
-                // Books will be rebuilt from snapshots on reconnect
-                s.snapshotted.clear();
-                s.books.clear();
-                drop(s);
+            if answered {
+                let resolved = {
+                    let mut s = state.write().await;
+                    let resolved = reset_after_bulk_cancel(&mut s, &remaining);
+                    // Books will be rebuilt from snapshots on reconnect
+                    s.snapshotted.clear();
+                    s.books.clear();
+                    resolved
+                };
                 for label in resolved {
                     alerter.info(format!("Cancel confirmed · {label}\nConfirmed by the reconnect's cancel."));
                 }
+                if !remaining.is_empty() {
+                    alerter.error(format!(
+                        "{} order(s) could not be confirmed cancelled after the disconnect. They are kept as \
+                         cancelling and retried every 30 s; nothing new is placed on those legs until they are gone.",
+                        remaining.len()
+                    ));
+                }
             } else {
-                // Could not confirm cancellation — keep statuses dirty so the quoter
-                // won't place new orders (it only places from Idle). Alert for manual check.
+                // No answer at all: keep every status as it is, so nothing is placed
+                // over an order that may still rest. Live legs re-peg through a
+                // verified cancel, and Cancelling ones are retried by the timer.
                 alerter.error(
-                    "cancel_orders failed after 3 attempts on WS disconnect — \
-                     manual check required, bot will not re-quote until restart",
+                    "Could not cancel orders after the disconnect (3 attempts failed) — check your open orders on \
+                     Polymarket.",
                 );
             }
 
@@ -388,6 +379,50 @@ pub fn spawn(
             backoff_ms = (backoff_ms * 2).min(RECONNECT_MAX_MS);
         }
     });
+}
+
+/// After a reconnect's bulk cancel, given the orders still open:
+/// - a leg whose order is confirmed gone returns to Idle (and, if it had a live
+///   order, loses its placement-failure count: the order did get on the book);
+/// - a leg whose order is still open is kept `Cancelling` it, so nothing is
+///   placed beside it and the 30 s timer keeps cancelling it;
+/// - an in-flight placement is freed (it cancels its own order when it lands).
+///
+/// Returns the labels of stuck cancels this confirmed that had already alerted.
+pub fn reset_after_bulk_cancel(s: &mut AppState, still_open: &[String]) -> Vec<String> {
+    let mut had_live: HashSet<String> = HashSet::new();
+    let mut freed: HashSet<String> = HashSet::new();
+    for (id, status) in s.order_status.iter_mut() {
+        let open = match status {
+            OrderStatus::Live { order_id, .. } | OrderStatus::Cancelling { order_id, .. } => {
+                still_open.contains(order_id).then(|| order_id.clone())
+            }
+            _ => None,
+        };
+        if let Some(order_id) = open {
+            *status = OrderStatus::Cancelling { order_id, since: std::time::Instant::now() };
+            continue;
+        }
+        if matches!(status, OrderStatus::Live { .. }) {
+            had_live.insert(id.clone());
+        }
+        *status = OrderStatus::Idle;
+        freed.insert(id.clone());
+    }
+    for id in &had_live {
+        s.place_failures.remove(id);
+    }
+    // Stuck cancels just confirmed: report the ones that had raised a "can't confirm" alert.
+    let confirmed: Vec<(String, (String, u32))> =
+        s.cancel_failures.iter().filter(|(id, _)| freed.contains(*id)).map(|(k, v)| (k.clone(), v.clone())).collect();
+    for (id, _) in &confirmed {
+        s.cancel_failures.remove(id);
+    }
+    confirmed
+        .into_iter()
+        .filter(|(_, (_, tries))| *tries >= placer::CANCEL_ALERT_AFTER)
+        .map(|(id, _)| s.configs.iter().find(|c| c.id == id).map(|c| c.label.clone()).unwrap_or(id))
+        .collect()
 }
 
 /// Handle one incoming WS text message.
@@ -400,11 +435,10 @@ async fn handle_message(text: &str, state: &Arc<RwLock<AppState>>, executor: &Ar
         }
     };
 
-    // Initial book snapshot = JSON array
-    if let Some(arr) = value.as_array() {
-        let snapshots: Vec<WsBookSnapshot> =
-            arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect();
-
+    // Full book snapshots: an array on subscribe, single `book` objects later
+    // (after trades). Both replace the token's book.
+    let snapshots = TokenBook::snapshots_in(&value);
+    if !snapshots.is_empty() {
         let mut s = state.write().await;
         for snap in snapshots {
             let asset_id = snap.asset_id.clone();
@@ -583,10 +617,10 @@ async fn execute_actions(
             QuoteAction::Cancel { order_id, reason } => {
                 let (label, token_label) = {
                     let mut s = state.write().await;
-                    s.order_status.insert(
-                        config_id.clone(),
-                        OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
-                    );
+                    // Only if the leg still holds this order (placer::begin_cancel).
+                    if !placer::begin_cancel(&mut s, &config_id, &order_id) {
+                        continue;
+                    }
                     s.configs
                         .iter()
                         .find(|c| c.id == config_id)
@@ -642,10 +676,10 @@ async fn execute_actions(
                         continue; // CLOB unreachable — don't cancel+replace
                     }
                     let prev_status = s.order_status.get(&config_id).cloned();
-                    s.order_status.insert(
-                        config_id.clone(),
-                        OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() },
-                    );
+                    // Only if the leg still holds this order (placer::begin_cancel).
+                    if !placer::begin_cancel(&mut s, &config_id, &order_id) {
+                        continue;
+                    }
                     prev_status
                 };
 
@@ -854,33 +888,65 @@ async fn execute_actions(
                     alerter.info(format!("{} · {}\n{}", title, label, msg));
                 }
 
-                match order_id {
-                    Some(oid) => {
-                        // Set Cancelling synchronously before spawning — subsequent price_change
-                        // events will see Cancelling and return Hold, preventing duplicate alerts.
-                        {
-                            let mut s = state.write().await;
-                            s.order_status.insert(
-                                config_id.clone(),
-                                OrderStatus::Cancelling { order_id: oid.clone(), since: std::time::Instant::now() },
-                            );
-                        }
-                        let exec = Arc::clone(executor);
-                        let state2 = Arc::clone(state);
-                        tokio::spawn(async move {
-                            placer::cancel_deactivated(&*exec, &state2, &config_id, &oid).await;
-                        });
+                // Mark Cancelling synchronously before spawning, so later book events
+                // hold instead of alerting again. Claim the decided order if the leg
+                // still holds it; otherwise settle whatever it holds now — a
+                // placement still in flight is freed (it cancels its own orphan), and
+                // one that landed meanwhile is cancelled, never left untracked.
+                let target = {
+                    let mut s = state.write().await;
+                    match &order_id {
+                        Some(oid) if placer::begin_cancel(&mut s, &config_id, oid) => Some(oid.clone()),
+                        _ => placer::settle_unplaced(&mut s, &config_id),
                     }
-                    None => {
-                        // No real order exists yet (Idle or Placing).
-                        // Reset to Idle immediately — if Placing, the in-flight task will
-                        // see the state change and cancel the orphan order itself.
-                        let mut s = state.write().await;
-                        s.order_status.insert(config_id, OrderStatus::Idle);
-                    }
+                };
+                if let Some(oid) = target {
+                    let exec = Arc::clone(executor);
+                    let state2 = Arc::clone(state);
+                    tokio::spawn(async move {
+                        placer::cancel_deactivated(&*exec, &state2, &config_id, &oid).await;
+                    });
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod bulk_cancel_tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    /// After a reconnect's bulk cancel, only legs whose order is confirmed gone go
+    /// back to Idle; a leg whose order is still open keeps cancelling it, so the
+    /// bot never places a second order beside it.
+    #[test]
+    fn only_confirmed_cancels_free_a_leg() {
+        let mut s = AppState::new(PathBuf::from("unused.json"));
+        let live = |id: &str| OrderStatus::Live { order_id: id.into(), price: dec!(0.3) };
+        s.order_status.insert("gone".into(), live("o1"));
+        s.order_status.insert("stuck".into(), live("o2"));
+        s.order_status.insert(
+            "was_cancelling".into(),
+            OrderStatus::Cancelling { order_id: "o3".into(), since: std::time::Instant::now() },
+        );
+        s.order_status.insert("placing".into(), OrderStatus::Placing { price: dec!(0.3) });
+        s.place_failures.insert("gone".into(), 2);
+        s.place_failures.insert("stuck".into(), 2);
+        s.cancel_failures.insert("was_cancelling".into(), ("o3".into(), placer::CANCEL_ALERT_AFTER));
+
+        let resolved = reset_after_bulk_cancel(&mut s, &["o2".to_string()]);
+
+        assert_eq!(s.order_status.get("gone"), Some(&OrderStatus::Idle));
+        assert!(
+            matches!(s.order_status.get("stuck"), Some(OrderStatus::Cancelling { order_id, .. }) if order_id == "o2")
+        );
+        assert_eq!(s.order_status.get("was_cancelling"), Some(&OrderStatus::Idle), "its cancel was confirmed");
+        assert_eq!(s.order_status.get("placing"), Some(&OrderStatus::Idle));
+        assert!(!s.place_failures.contains_key("gone"), "its order did get on the book");
+        assert_eq!(s.place_failures.get("stuck"), Some(&2), "unchanged while still open");
+        assert_eq!(resolved, vec!["was_cancelling".to_string()], "the alerted stuck cancel is reported once");
+        assert!(s.cancel_failures.is_empty());
     }
 }
 

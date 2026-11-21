@@ -56,6 +56,21 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: an order can no longer end up resting on Polymarket untracked.**
+  - A cancel (from the engine, or from Pause/Edit on the dashboard) now only claims the order the leg holds at that
+    moment. Before, a re-peg that put up a new order in between could be overwritten, and the new order was left
+    resting with nothing watching it.
+  - A leg paused or expired while its order was being placed now cancels that order if it landed meanwhile, instead
+    of marking the leg as having none.
+  - Pause and a size/distance edit also settle an order that is still being placed.
+- **Engine: a bulk cancel only frees the orders Polymarket confirms gone.** After a disconnect or a lost heartbeat,
+  orders Polymarket did not confirm cancelled used to be treated as gone, so a second order could be placed beside
+  them. They now stay "cancelling" and are retried every 30 seconds, with an alert; the startup check refuses to
+  trade while any are still open, and shutdown reports them.
+- **Engine: full order-book updates after trades are no longer ignored.** Polymarket resends a token's whole book
+  as a single message (often after a trade). The engine only read the list form sent on subscribe, so its book,
+  which the safeguards use, could be out of date. The engine and the market page now share one reader, and best
+  bid/ask come from the price levels rather than their order in the message.
 - **Depth ahead no longer counts your own orders.** When the best bid moved onto a resting order, the re-peg check
   added up the bids between the new price and the best bid, which included that order itself (and any other leg of
   yours on the same outcome). So an order could move with less of other people's money ahead of it than the "Depth

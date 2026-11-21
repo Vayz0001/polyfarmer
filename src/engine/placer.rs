@@ -308,6 +308,45 @@ pub fn begin_place(s: &mut AppState, config_id: &str, price: Decimal, now: Insta
     Some(attempt)
 }
 
+/// Claim a leg's order for cancelling: only while the leg still holds that very
+/// order (`Live` with this id, or already `Cancelling` it — the two-sided rule
+/// and auto-pause mark it at decision time). Anything else means the state moved
+/// on between the decision and now (a replace put up a new order, the leg was
+/// removed…); then nothing is touched and the caller does nothing, so a newer
+/// order is never overwritten and left untracked.
+pub fn begin_cancel(s: &mut AppState, config_id: &str, order_id: &str) -> bool {
+    match s.order_status.get(config_id) {
+        Some(OrderStatus::Live { order_id: oid, .. }) if oid == order_id => {
+            s.order_status.insert(
+                config_id.to_string(),
+                OrderStatus::Cancelling { order_id: order_id.to_string(), since: std::time::Instant::now() },
+            );
+            true
+        }
+        Some(OrderStatus::Cancelling { order_id: oid, .. }) => oid == order_id,
+        _ => false,
+    }
+}
+
+/// A paused or expired leg that had no order when it was evaluated: free it. If
+/// a placement finished in the meantime, its order is claimed for cancelling and
+/// returned instead (marking it Idle would leave it resting, untracked). A
+/// placement still in flight is set Idle; `run_place` then sees it no longer
+/// owns the leg and cancels what it gets back.
+pub fn settle_unplaced(s: &mut AppState, config_id: &str) -> Option<String> {
+    match s.order_status.get(config_id) {
+        Some(OrderStatus::Placing { .. }) => {
+            s.order_status.insert(config_id.to_string(), OrderStatus::Idle);
+            None
+        }
+        Some(OrderStatus::Live { order_id, .. }) => {
+            let oid = order_id.clone();
+            begin_cancel(s, config_id, &oid).then_some(oid)
+        }
+        _ => None,
+    }
+}
+
 /// This attempt still owns the leg: it is `Placing` and nobody re-claimed it.
 fn owns(s: &AppState, config_id: &str, attempt: u64) -> bool {
     matches!(s.order_status.get(config_id), Some(OrderStatus::Placing { .. }))
@@ -934,6 +973,62 @@ mod tests {
         let much_later = later + Duration::from_secs(1);
         assert_eq!(attempt(&e, &api, "a", dec!(0.21), much_later).await, Some(Outcome::Settling));
         assert!(!e.state.read().await.configs[0].paused);
+    }
+
+    fn live(id: &str) -> OrderStatus {
+        OrderStatus::Live { order_id: id.into(), price: dec!(0.2) }
+    }
+    fn cancelling_status(id: &str) -> OrderStatus {
+        OrderStatus::Cancelling { order_id: id.into(), since: std::time::Instant::now() }
+    }
+
+    /// A cancel only claims the order the leg still holds: never a newer one put
+    /// up in between (that one would be overwritten and left resting untracked).
+    #[tokio::test]
+    async fn a_cancel_only_claims_the_order_the_leg_still_holds() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let mut s = e.state.write().await;
+        s.order_status.insert("a".into(), live("old"));
+        assert!(begin_cancel(&mut s, "a", "old"));
+        assert!(matches!(s.order_status.get("a"), Some(OrderStatus::Cancelling { order_id, .. }) if order_id == "old"));
+        // Already being cancelled (the two-sided rule marks it at decision time): fine.
+        assert!(begin_cancel(&mut s, "a", "old"));
+        // A replace put up "new" meanwhile: the decision about "old" touches nothing.
+        s.order_status.insert("a".into(), live("new"));
+        assert!(!begin_cancel(&mut s, "a", "old"));
+        assert_eq!(s.order_status.get("a"), Some(&live("new")));
+        s.order_status.insert("a".into(), cancelling_status("new"));
+        assert!(!begin_cancel(&mut s, "a", "old"));
+        for st in [OrderStatus::Idle, OrderStatus::Placing { price: dec!(0.2) }] {
+            s.order_status.insert("a".into(), st.clone());
+            assert!(!begin_cancel(&mut s, "a", "old"));
+            assert_eq!(s.order_status.get("a"), Some(&st), "untouched");
+        }
+        assert!(!begin_cancel(&mut s, "gone", "old"), "a removed leg");
+    }
+
+    /// A paused/expired leg with no order at decision time: a placement still in
+    /// flight is freed, but one that landed meanwhile is cancelled — never marked
+    /// Idle while its order rests on the book.
+    #[tokio::test]
+    async fn settling_a_paused_leg_cancels_an_order_that_landed_meanwhile() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let mut s = e.state.write().await;
+        s.order_status.insert("a".into(), OrderStatus::Placing { price: dec!(0.2) });
+        assert_eq!(settle_unplaced(&mut s, "a"), None);
+        assert_eq!(s.order_status.get("a"), Some(&OrderStatus::Idle));
+
+        s.order_status.insert("a".into(), live("landed"));
+        assert_eq!(settle_unplaced(&mut s, "a").as_deref(), Some("landed"));
+        assert!(
+            matches!(s.order_status.get("a"), Some(OrderStatus::Cancelling { order_id, .. }) if order_id == "landed")
+        );
+
+        // Already cancelling, or idle: nothing to do.
+        assert_eq!(settle_unplaced(&mut s, "a"), None);
+        s.order_status.insert("a".into(), OrderStatus::Idle);
+        assert_eq!(settle_unplaced(&mut s, "a"), None);
+        assert_eq!(s.order_status.get("a"), Some(&OrderStatus::Idle));
     }
 
     #[test]

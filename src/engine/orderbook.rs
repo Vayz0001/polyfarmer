@@ -52,9 +52,23 @@ impl TokenBook {
             }
         }
 
-        // Best bid = last item (ascending), best ask = last item (descending)
-        self.best_bid = snap.bids.last().and_then(|l| Decimal::from_str(&l.price).ok());
-        self.best_ask = snap.asks.last().and_then(|l| Decimal::from_str(&l.price).ok());
+        // Top of book from the levels themselves, not their order in the message.
+        self.best_bid = self.bids.keys().max().copied();
+        self.best_ask = self.asks.keys().min().copied();
+    }
+
+    /// The book snapshots in one market-channel message. Polymarket sends them as
+    /// a JSON array (on subscribe) and as single `book` objects (after trades, and
+    /// whenever it resends a full book). Both carry the whole book for a token;
+    /// missing the single ones left our copy stale. Shared by the engine and the
+    /// dashboard's book hub.
+    pub fn snapshots_in(value: &serde_json::Value) -> Vec<WsBookSnapshot> {
+        let items: Vec<&serde_json::Value> = match value {
+            serde_json::Value::Array(items) => items.iter().collect(),
+            v if v.get("event_type").and_then(serde_json::Value::as_str) == Some("book") => vec![v],
+            _ => Vec::new(),
+        };
+        items.into_iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect()
     }
 
     /// Apply a single price_change entry, updating levels and top-of-book.
@@ -126,6 +140,42 @@ impl TokenBook {
 mod tests {
     use super::*;
     use rust_decimal_macros::dec;
+
+    /// Message shapes as Polymarket sends them (seen live, Nov 2026): an array of
+    /// books on subscribe, and single `book` objects after trades. Both count;
+    /// other events don't.
+    #[test]
+    fn book_snapshots_come_as_arrays_and_as_single_objects() {
+        let book = |id: &str| {
+            serde_json::json!({"market":"0xm","asset_id":id,"event_type":"book","timestamp":"1",
+                "bids":[{"price":"0.30","size":"10"},{"price":"0.32","size":"5"}],
+                "asks":[{"price":"0.36","size":"7"},{"price":"0.34","size":"3"}]})
+        };
+        let arr = serde_json::Value::Array(vec![book("a"), book("b")]);
+        assert_eq!(TokenBook::snapshots_in(&arr).len(), 2);
+        let single = TokenBook::snapshots_in(&book("c"));
+        assert_eq!(single.len(), 1);
+        assert_eq!(single[0].asset_id, "c");
+        for other in [
+            serde_json::json!({"event_type":"price_change","price_changes":[]}),
+            serde_json::json!({"event_type":"last_trade_price","asset_id":"a","price":"0.3"}),
+            serde_json::json!({"event_type":"best_bid_ask","asset_id":"a"}),
+            serde_json::json!({"event_type":"new_market","id":"1"}),
+        ] {
+            assert!(TokenBook::snapshots_in(&other).is_empty(), "{other}");
+        }
+
+        // Top of book comes from the levels, whatever order they arrive in.
+        let mut tb = TokenBook::default();
+        tb.apply_snapshot(&single[0]);
+        assert_eq!((tb.best_bid, tb.best_ask), (Some(dec!(0.32)), Some(dec!(0.34))));
+        // A later single snapshot replaces the book entirely.
+        let mut after = book("c");
+        after["bids"] = serde_json::json!([{"price":"0.31","size":"9"}]);
+        tb.apply_snapshot(&TokenBook::snapshots_in(&after)[0]);
+        assert_eq!(tb.best_bid, Some(dec!(0.31)));
+        assert_eq!(tb.bids.len(), 1, "old levels gone");
+    }
 
     #[test]
     fn others_depth_leaves_out_our_own_orders() {
