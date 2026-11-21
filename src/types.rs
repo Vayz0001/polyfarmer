@@ -17,7 +17,7 @@ pub struct MarketConfig {
     /// Human-readable label e.g. "US Iran — YES BUY"
     pub label: String,
 
-    /// Resolved condition ID (needed for future user-channel WS)
+    /// Resolved condition ID: groups a market's legs (two-sided rule, dashboard)
     pub condition_id: String,
 
     /// Token ID to quote on (YES or NO)

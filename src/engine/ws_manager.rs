@@ -3,7 +3,8 @@ use crate::engine::executor::Executor;
 use crate::engine::orderbook::TokenBook;
 use crate::engine::pairing;
 use crate::engine::placer;
-use crate::engine::quoter::{DeactivateReason, QuoteAction};
+use crate::engine::quoter::QuoteAction;
+use crate::engine::runner;
 use crate::types::{MarketConfig, OrderStatus, WsCommand, WsPriceChangeEvent};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -79,6 +80,9 @@ pub struct AppState {
     /// Legs paused because Polymarket said there wasn't enough balance (display;
     /// cleared on resume or pause).
     pub low_balance_paused: HashSet<String>,
+    /// Legs whose order was just taken down for a re-peg: their next placement
+    /// is announced as "Order replaced" (`engine::runner`).
+    pub repegging: HashSet<String>,
 }
 
 impl AppState {
@@ -105,6 +109,7 @@ impl AppState {
             pair_wait: HashMap::new(),
             low_balance_since: HashMap::new(),
             low_balance_paused: HashSet::new(),
+            repegging: HashSet::new(),
         }
     }
 }
@@ -120,6 +125,7 @@ pub fn spawn(
     state: Arc<RwLock<AppState>>,
     executor: Arc<Executor>,
     alerter: Arc<Alerter>,
+    nudge: Arc<tokio::sync::Notify>,
     mut cmd_rx: mpsc::Receiver<WsCommand>,
     mut stop_rx: watch::Receiver<bool>,
 ) {
@@ -212,12 +218,7 @@ pub fn spawn(
                                 }
                                 state.write().await.last_ws_msg = Some(std::time::Instant::now());
                                 if text.trim() == "PONG" { continue; }
-                                handle_message(
-                                    &text,
-                                    &state,
-                                    &executor,
-                                    &alerter,
-                                ).await;
+                                handle_message(&text, &state, &executor, &alerter, &nudge).await;
                             }
                             Some(Ok(Message::Binary(data))) => {
                                 if data.len() > MAX_MESSAGE_BYTES {
@@ -226,7 +227,7 @@ pub fn spawn(
                                 }
                                 debug!("WS recv binary ({} bytes)", data.len());
                                 if let Ok(text) = std::str::from_utf8(&data) {
-                                    handle_message(text, &state, &executor, &alerter).await;
+                                    handle_message(text, &state, &executor, &alerter, &nudge).await;
                                 } else {
                                     warn!("WS binary message is not valid UTF-8");
                                 }
@@ -426,7 +427,13 @@ pub fn reset_after_bulk_cancel(s: &mut AppState, still_open: &[String]) -> Vec<S
 }
 
 /// Handle one incoming WS text message.
-async fn handle_message(text: &str, state: &Arc<RwLock<AppState>>, executor: &Arc<Executor>, alerter: &Arc<Alerter>) {
+async fn handle_message(
+    text: &str,
+    state: &Arc<RwLock<AppState>>,
+    executor: &Arc<Executor>,
+    alerter: &Arc<Alerter>,
+    nudge: &Arc<tokio::sync::Notify>,
+) {
     let value: Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(e) => {
@@ -506,7 +513,7 @@ async fn handle_message(text: &str, state: &Arc<RwLock<AppState>>, executor: &Ar
                     },
                     tokio::time::Instant::now(),
                 );
-                for (id, action, token_id, _, _) in &actions {
+                for pairing::Decision { config_id: id, action, token_id, .. } in &actions {
                     let Some(c) = s.configs.iter().find(|c| &c.id == id) else { continue };
                     let book = s.books.get(token_id);
                     let status = s.order_status.get(id).cloned().unwrap_or_default();
@@ -528,7 +535,7 @@ async fn handle_message(text: &str, state: &Arc<RwLock<AppState>>, executor: &Ar
                 actions
             };
 
-            execute_actions(actions, state, executor, alerter).await;
+            runner::execute(actions, executor, state, alerter, nudge).await;
         }
 
         "last_trade_price" => {
@@ -577,339 +584,6 @@ fn parse_tick_size_change(value: &serde_json::Value) -> Option<(String, rust_dec
     }
     let tick = rust_decimal::Decimal::from_str(value.get("new_tick_size")?.as_str()?).ok()?;
     (tick > rust_decimal::Decimal::ZERO && tick < rust_decimal::Decimal::ONE).then(|| (asset.to_string(), tick))
-}
-
-/// Execute a batch of quote actions. Sets order status optimistically before
-/// the network call to prevent double-placement from concurrent events.
-async fn execute_actions(
-    actions: Vec<(String, QuoteAction, String, rust_decimal::Decimal, rust_decimal::Decimal)>,
-    state: &Arc<RwLock<AppState>>,
-    executor: &Arc<Executor>,
-    alerter: &Arc<Alerter>,
-) {
-    for (config_id, action, token_id, order_size, tick_size) in actions {
-        match action {
-            QuoteAction::Hold => {}
-
-            QuoteAction::Place { price } => {
-                // Claim the slot first (Idle, heartbeat healthy, no retry delay)
-                // so concurrent events never place twice.
-                let attempt = {
-                    let mut s = state.write().await;
-                    match placer::begin_place(&mut s, &config_id, price, tokio::time::Instant::now()) {
-                        Some(a) => a,
-                        None => continue,
-                    }
-                };
-                tokio::spawn(placer::run_place(
-                    Arc::clone(executor),
-                    Arc::clone(state),
-                    Arc::clone(alerter),
-                    config_id,
-                    attempt,
-                    token_id,
-                    order_size,
-                    price,
-                    tick_size,
-                ));
-            }
-
-            QuoteAction::Cancel { order_id, reason } => {
-                let (label, token_label) = {
-                    let mut s = state.write().await;
-                    // Only if the leg still holds this order (placer::begin_cancel).
-                    if !placer::begin_cancel(&mut s, &config_id, &order_id) {
-                        continue;
-                    }
-                    s.configs
-                        .iter()
-                        .find(|c| c.id == config_id)
-                        .map(|c| (c.label.clone(), c.token_label.clone()))
-                        .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()))
-                };
-
-                let exec = Arc::clone(executor);
-                let state2 = Arc::clone(state);
-                let alerter2 = Arc::clone(alerter);
-                let reason_str = reason.describe();
-                tokio::spawn(async move {
-                    let confirmed = match exec.cancel_order_verified(&order_id).await {
-                        Ok(true) => {
-                            alerter2.info(format!(
-                                "Order cancelled · {}\n${} of {} — {}",
-                                label, order_size, token_label, reason_str,
-                            ));
-                            true
-                        }
-                        Ok(false) => {
-                            // Verified: order still active on CLOB — leave Cancelling.
-                            // The 30s timer retries the cancel (placer::confirm_stuck_cancel).
-                            warn!("Order {} still on CLOB after verified cancel — leaving Cancelling for the timer to retry", order_id);
-                            alerter2.warn(format!(
-                                "Order {} cancel unconfirmed (still live) — will retry via 30s timer",
-                                order_id
-                            ));
-                            false
-                        }
-                        Err(e) => {
-                            // HTTP/network error — leave Cancelling; the 30s timer retries it
-                            error!("Cancel order {} failed: {}", order_id, e);
-                            false
-                        }
-                    };
-                    if confirmed {
-                        let mut s = state2.write().await;
-                        // Guard: only reset to Idle if still Cancelling this exact order.
-                        if matches!(s.order_status.get(&config_id),
-                            Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id)
-                        {
-                            s.order_status.insert(config_id, OrderStatus::Idle);
-                        }
-                    }
-                });
-            }
-
-            QuoteAction::Replace { order_id, new_price } => {
-                let prev_status = {
-                    let mut s = state.write().await;
-                    if s.heartbeat_paused {
-                        continue; // CLOB unreachable — don't cancel+replace
-                    }
-                    let prev_status = s.order_status.get(&config_id).cloned();
-                    // Only if the leg still holds this order (placer::begin_cancel).
-                    if !placer::begin_cancel(&mut s, &config_id, &order_id) {
-                        continue;
-                    }
-                    prev_status
-                };
-
-                let exec = Arc::clone(executor);
-                let state2 = Arc::clone(state);
-                let alerter2 = Arc::clone(alerter);
-                tokio::spawn(async move {
-                    // The live order stays until the new price is known to be valid:
-                    // with a stale tick, cancelling first would leave the leg with no order.
-                    let tick_ok = placer::check_tick(&*exec, &state2, &alerter2, &token_id, tick_size, new_price).await;
-                    if tick_ok != placer::TickCheck::Ok {
-                        if let placer::TickCheck::Error(e) = &tick_ok {
-                            warn!("Replace skipped: {e}");
-                        }
-                        let mut s = state2.write().await;
-                        if matches!(s.order_status.get(&config_id),
-                            Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id)
-                        {
-                            match prev_status {
-                                Some(prev @ OrderStatus::Live { .. }) => {
-                                    s.order_status.insert(config_id, prev);
-                                }
-                                _ => {
-                                    s.order_status.insert(config_id, OrderStatus::Idle);
-                                }
-                            }
-                        }
-                        return;
-                    }
-                    // Cancel first, with CLOB verification on ambiguous responses.
-                    // Ok(true)  = confirmed off CLOB — safe to place.
-                    // Ok(false) = verified still active — leave Cancelling; the timer retries until confirmed.
-                    // Err(_)    = network failure — leave Cancelling; the timer retries until confirmed.
-                    match exec.cancel_order_verified(&order_id).await {
-                        Ok(true) => {}
-                        Ok(false) => {
-                            warn!(
-                                "Replace: cancel of {} verified still live — leaving Cancelling for the timer to retry",
-                                order_id
-                            );
-                            return; // leave Cancelling; the timer retries until confirmed
-                        }
-                        Err(e) => {
-                            error!("Replace: cancel {} failed — aborting replace: {}", order_id, e);
-                            // Leave Cancelling; the 30s timer retries until confirmed.
-                            return;
-                        }
-                    }
-
-                    // Paused or expired while the old order was being cancelled (e.g. a
-                    // volatility trip auto-paused it): place nothing, just free the leg.
-                    let stop = state2
-                        .read()
-                        .await
-                        .configs
-                        .iter()
-                        .find(|c| c.id == config_id)
-                        .is_some_and(|c| c.paused || chrono::Utc::now() >= c.expires_at);
-                    if stop {
-                        placer::free_if_cancelling(&mut *state2.write().await, &config_id, &order_id);
-                        return;
-                    }
-
-                    // Cancel confirmed. Re-read the book now — the market may have moved
-                    // during the cancel network call, so new_price (captured at decision time)
-                    // could be stale. Compute a fresh target from the current book state.
-                    let (fresh_price, fresh_size) = {
-                        let s = state2.read().await;
-                        match (s.books.get(&token_id), s.configs.iter().find(|c| c.id == config_id)) {
-                            (Some(book), Some(cfg)) => {
-                                match book.best_bid {
-                                    Some(bb) => {
-                                        use crate::engine::orderbook::TokenBook;
-                                        use rust_decimal_macros::dec;
-                                        let raw = bb - cfg.distance;
-                                        if raw <= dec!(0) {
-                                            // Degenerate — reset to Idle, quoter will re-evaluate
-                                            drop(s);
-                                            let mut s = state2.write().await;
-                                            if matches!(s.order_status.get(&config_id),
-                                                Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id)
-                                            {
-                                                s.order_status.insert(config_id, OrderStatus::Idle);
-                                            }
-                                            return;
-                                        }
-                                        (TokenBook::snap_to_tick(raw, cfg.tick_size), cfg.order_size)
-                                    }
-                                    // No book data yet — fall back to the original decision price
-                                    None => (new_price, order_size),
-                                }
-                            }
-                            // Config was removed while cancel was in-flight; state guard below will catch it
-                            _ => (new_price, order_size),
-                        }
-                    };
-
-                    let shares = match Executor::shares_from_usd(fresh_size, fresh_price) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Replace: invalid price {}: {}", fresh_price, e);
-                            let mut s = state2.write().await;
-                            if matches!(s.order_status.get(&config_id),
-                                Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id)
-                            {
-                                s.order_status.insert(config_id, OrderStatus::Idle);
-                            }
-                            return;
-                        }
-                    };
-                    match exec.place_buy_order(&token_id, fresh_price, shares).await {
-                        Ok(new_order_id) => {
-                            let mut s = state2.write().await;
-                            // Guard: only commit if still Cancelling this exact order.
-                            // A timeout-reset may have changed state while cancel/place were in-flight.
-                            let still_cancelling = matches!(
-                                s.order_status.get(&config_id),
-                                Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id
-                            );
-                            if still_cancelling {
-                                let (label, token_label) = s
-                                    .configs
-                                    .iter()
-                                    .find(|c| c.id == config_id)
-                                    .map(|c| (c.label.clone(), c.token_label.clone()))
-                                    .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
-                                s.low_balance_since.remove(&config_id);
-                                s.order_status.insert(
-                                    config_id,
-                                    OrderStatus::Live { order_id: new_order_id, price: fresh_price },
-                                );
-                                drop(s);
-                                alerter2.info(format!(
-                                    "Order replaced · {}\nBUY {} {} shares @ {}¢ (${})",
-                                    label,
-                                    shares,
-                                    token_label,
-                                    fresh_price * rust_decimal_macros::dec!(100),
-                                    // The size this order was placed with (an edit during
-                                    // the cancel is picked up), not the one decided earlier.
-                                    fresh_size
-                                ));
-                            } else {
-                                drop(s);
-                                warn!(
-                                    "Replace: state changed during cancel+place — cancelling orphan {}",
-                                    new_order_id
-                                );
-                                placer::cancel_orphan(&*exec, &alerter2, &new_order_id).await;
-                            }
-                        }
-                        Err(e) => {
-                            let msg = e.to_string();
-                            let low = placer::is_low_balance(&msg);
-                            if !low {
-                                error!("Replace: place failed: {}", msg);
-                                alerter2.error(format!("Replace order failed: {}", msg));
-                            }
-                            let released = {
-                                let mut s = state2.write().await;
-                                let ours = matches!(s.order_status.get(&config_id),
-                                    Some(OrderStatus::Cancelling { order_id: oid, .. }) if oid == &order_id);
-                                if ours {
-                                    s.order_status.insert(config_id.clone(), OrderStatus::Idle);
-                                }
-                                ours
-                            };
-                            // The old order is gone; with no money for the new one, retry
-                            // once and then pause the leg and say so (placer::low_balance).
-                            if low && released {
-                                placer::low_balance(&state2, &alerter2, &config_id, shares * fresh_price).await;
-                            }
-                        }
-                    }
-                });
-            }
-
-            QuoteAction::Deactivate { order_id, reason } => {
-                let label = {
-                    let s = state.read().await;
-                    s.configs
-                        .iter()
-                        .find(|c| c.id == config_id)
-                        .map(|c| c.label.clone())
-                        .unwrap_or_else(|| config_id.clone())
-                };
-
-                if matches!(reason, DeactivateReason::Volatility) {
-                    // Auto-pause so the bot doesn't re-place while the market is swinging
-                    if let Some((_, Err(e))) = placer::auto_pause(state, &config_id).await {
-                        error!("Failed to save markets after volatility pause of '{}': {}", label, e);
-                        alerter.error(format!(
-                            "Auto-pause of '{label}' could not be saved: {e}\nIt is paused now but would resume after a restart."
-                        ));
-                    }
-                    alerter.warn(format!(
-                        "Auto-paused · {}\nBest bid moved past your auto-pause limit — resume from Markets to restart from the current price",
-                        label
-                    ));
-                } else {
-                    let (title, msg) = match reason {
-                        DeactivateReason::Paused => ("Paused", "Order cancelled — resume from Markets"),
-                        DeactivateReason::Expired => ("Expired", "Order cancelled — edit the leg to extend it"),
-                        DeactivateReason::Volatility => unreachable!(),
-                    };
-                    alerter.info(format!("{} · {}\n{}", title, label, msg));
-                }
-
-                // Mark Cancelling synchronously before spawning, so later book events
-                // hold instead of alerting again. Claim the decided order if the leg
-                // still holds it; otherwise settle whatever it holds now — a
-                // placement still in flight is freed (it cancels its own orphan), and
-                // one that landed meanwhile is cancelled, never left untracked.
-                let target = {
-                    let mut s = state.write().await;
-                    match &order_id {
-                        Some(oid) if placer::begin_cancel(&mut s, &config_id, oid) => Some(oid.clone()),
-                        _ => placer::settle_unplaced(&mut s, &config_id),
-                    }
-                };
-                if let Some(oid) = target {
-                    let exec = Arc::clone(executor);
-                    let state2 = Arc::clone(state);
-                    tokio::spawn(async move {
-                        placer::cancel_deactivated(&*exec, &state2, &config_id, &oid).await;
-                    });
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
