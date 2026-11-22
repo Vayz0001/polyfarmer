@@ -15,6 +15,11 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch, Notify, RwLock};
 use tracing::{error, info, warn};
 
+/// Shutdown: how long placements already in flight may take to land.
+const SHUTDOWN_SETTLE: Duration = Duration::from_secs(5);
+/// Shutdown: the limit for each of the two cancel steps. 5 + 20 + 20 stays
+/// inside the service's 60 s stop timeout (deploy/polyfarmer.service).
+const SHUTDOWN_CANCEL_LIMIT: Duration = Duration::from_secs(20);
 const QUOTE_TIMER_INTERVAL: Duration = Duration::from_secs(30);
 const HOURLY_SUMMARY_INTERVAL: Duration = Duration::from_secs(3600);
 /// How often the boot task re-checks for a newly-configured wallet (cheap,
@@ -43,6 +48,10 @@ fn harden_process() {}
 
 pub async fn run() -> Result<()> {
     harden_process();
+    // Listen for SIGTERM / Ctrl+C from the very start, once, for the whole run:
+    // a signal that arrives while the bot is busy (signing in, the startup
+    // check, spawning tasks) is latched instead of lost.
+    let mut shutdown = Shutdown::listen();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -155,7 +164,7 @@ pub async fn run() -> Result<()> {
                     info!("No wallet configured — waiting (configure at http://{})", config.dashboard_bind);
                     waiting_logged = true;
                 }
-                if wait_or_exit(&wallet_ready, WALLET_POLL).await {
+                if wait_or_exit(&wallet_ready, WALLET_POLL, &mut shutdown).await {
                     return Ok(());
                 }
                 continue;
@@ -176,7 +185,7 @@ pub async fn run() -> Result<()> {
                     failure_alerted = true;
                 }
                 set_phase(&state, EnginePhase::Error).await;
-                if wait_or_exit(&wallet_ready, START_RETRY).await {
+                if wait_or_exit(&wallet_ready, START_RETRY, &mut shutdown).await {
                     return Ok(());
                 }
                 continue;
@@ -200,7 +209,7 @@ pub async fn run() -> Result<()> {
                     failure_alerted = true;
                 }
                 set_phase(&state, EnginePhase::Error).await;
-                if wait_or_exit(&wallet_ready, START_RETRY).await {
+                if wait_or_exit(&wallet_ready, START_RETRY, &mut shutdown).await {
                     return Ok(());
                 }
                 continue;
@@ -221,7 +230,7 @@ pub async fn run() -> Result<()> {
                 failure_alerted = true;
             }
             set_phase(&state, EnginePhase::Error).await;
-            if wait_or_exit(&wallet_ready, START_RETRY).await {
+            if wait_or_exit(&wallet_ready, START_RETRY, &mut shutdown).await {
                 return Ok(());
             }
             continue;
@@ -320,13 +329,21 @@ pub async fn run() -> Result<()> {
     info!("All tasks spawned, bot is running");
 
     // ── Graceful shutdown: Ctrl+C, SIGTERM, or closing the window on Windows ──
-    shutdown_signal().await;
+    shutdown.wait().await;
     info!("Shutdown signal received — cancelling bot orders...");
     alerter.warn("Bot shutting down — cancelling open orders");
 
+    // 1. Refuse new placements, then stop the engine's tasks.
+    state.write().await.stopping = true;
     let _ = stop_tx.send(true);
+    // 2. Let placements already in flight land, so they're cancelled below.
+    let still_placing = settle_placements(&state, SHUTDOWN_SETTLE).await;
+    if still_placing > 0 {
+        warn!("Shutdown: {still_placing} placement(s) still in flight — the final sweep catches them if they land");
+    }
 
-    // Include Cancelling — the in-flight cancel may not have completed before shutdown.
+    // 3. Cancel everything tracked. Include Cancelling — the in-flight cancel
+    //    may not have completed before shutdown.
     let live_order_ids: Vec<String> = {
         let s = state.read().await;
         s.order_status
@@ -337,16 +354,35 @@ pub async fn run() -> Result<()> {
             })
             .collect()
     };
-    match executor.cancel_orders(&live_order_ids).await {
-        Ok(open) if open.is_empty() => {}
-        Ok(open) => {
+    match tokio::time::timeout(SHUTDOWN_CANCEL_LIMIT, executor.cancel_orders(&live_order_ids)).await {
+        Ok(Ok(open)) if open.is_empty() => {}
+        Ok(Ok(open)) => {
             error!("Shutdown: {} order(s) could not be cancelled: {:?}", open.len(), open);
             alerter.error(format!(
                 "Shutting down with {} order(s) not confirmed cancelled — check your open orders on Polymarket.",
                 open.len()
             ));
         }
-        Err(e) => error!("Shutdown cancel failed: {}", e),
+        Ok(Err(e)) => error!("Shutdown cancel failed: {}", e),
+        Err(_) => error!("Shutdown cancel got no answer within {}s", SHUTDOWN_CANCEL_LIMIT.as_secs()),
+    }
+
+    // 4. Sweep every farmed market for any open order the list above missed:
+    //    one that landed after it, or an orphan. Same check as at startup.
+    let tokens: Vec<String> = {
+        let s = state.read().await;
+        s.configs.iter().map(|c| c.token_id.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect()
+    };
+    match tokio::time::timeout(SHUTDOWN_CANCEL_LIMIT, executor.cancel_orders_for_tokens(&tokens)).await {
+        Ok(Ok(())) => info!("Shutdown sweep: no open orders left on farmed markets"),
+        Ok(Err(e)) => {
+            error!("Shutdown sweep failed: {e}");
+            alerter.error(format!("Shutdown couldn't confirm all orders are gone ({e}) — check Polymarket."));
+        }
+        Err(_) => {
+            error!("Shutdown sweep got no answer within {}s", SHUTDOWN_CANCEL_LIMIT.as_secs());
+            alerter.error("Shutdown couldn't confirm all orders are gone (no answer) — check Polymarket.");
+        }
     }
 
     info!("Shutdown complete");
@@ -467,14 +503,83 @@ pub async fn shutdown_signal() {
 /// The `notified()` arm is the fast path (fires the instant `set_wallet` pings
 /// it); the 3s sleep is belt-and-suspenders so a missed notify still self-heals
 /// — the caller re-reads the file each loop, so the bot can't silently hang.
-async fn wait_or_exit(wallet_ready: &Notify, retry_after: Duration) -> bool {
+async fn wait_or_exit(wallet_ready: &Notify, retry_after: Duration, shutdown: &mut Shutdown) -> bool {
+    if shutdown.requested() {
+        return true;
+    }
     tokio::select! {
         _ = wallet_ready.notified() => false,
         _ = tokio::time::sleep(retry_after) => false,
-        _ = shutdown_signal() => {
-            info!("Shutdown requested before a wallet was configured");
+        _ = shutdown.wait() => {
+            info!("Shutdown requested before the engine started");
             true
         }
+    }
+}
+
+/// A shutdown latch. [`Shutdown::listen`] installs the SIGTERM handler right
+/// away and keeps one task waiting for SIGTERM or Ctrl+C for the whole run, so
+/// a signal is remembered even when nothing is awaiting it at that moment.
+/// (Creating a new handler at each wait could miss one that arrived between
+/// waits, and the process would keep trading until it was killed.)
+#[derive(Clone)]
+pub struct Shutdown(watch::Receiver<bool>);
+
+impl Shutdown {
+    pub fn listen() -> Self {
+        let (tx, rx) = watch::channel(false);
+        #[cfg(unix)]
+        let term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+        tokio::spawn(async move {
+            #[cfg(unix)]
+            {
+                match term {
+                    Some(mut term) => {
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => {}
+                            _ = term.recv() => {}
+                        }
+                    }
+                    None => {
+                        let _ = tokio::signal::ctrl_c().await;
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            shutdown_signal().await;
+            let _ = tx.send(true);
+        });
+        Shutdown(rx)
+    }
+
+    /// A shutdown was requested (it stays requested).
+    pub fn requested(&self) -> bool {
+        *self.0.borrow()
+    }
+
+    /// Resolve once a shutdown has been requested (at once if it already was).
+    pub async fn wait(&mut self) {
+        while !*self.0.borrow_and_update() {
+            if self.0.changed().await.is_err() {
+                // The listener ended without a signal: nothing more will come.
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+}
+
+/// Give placements already in flight up to `limit` to land, so their orders
+/// are cancelled with the rest instead of left resting after exit. New ones
+/// are refused once `AppState.stopping` is set.
+async fn settle_placements(state: &RwLock<AppState>, limit: Duration) -> usize {
+    let deadline = tokio::time::Instant::now() + limit;
+    loop {
+        let placing =
+            state.read().await.order_status.values().filter(|s| matches!(s, OrderStatus::Placing { .. })).count();
+        if placing == 0 || tokio::time::Instant::now() >= deadline {
+            return placing;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -517,7 +622,7 @@ mod link_tests {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::shutdown_signal;
+    use super::{AppState, OrderStatus, RwLock};
     use std::time::Duration;
 
     #[test]
@@ -537,16 +642,31 @@ mod tests {
     /// dying with orders still resting.
     #[tokio::test]
     async fn sigterm_triggers_graceful_shutdown() {
-        let waiter = tokio::spawn(shutdown_signal());
-        // Let the task register its handler before the signal arrives.
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        // SAFETY: raising a signal in our own process; tokio's handler (installed
-        // above and kept for the process lifetime) consumes it.
+        // `listen` installs the SIGTERM handler before returning, so raising it
+        // now can't hit the default action (which would kill the test binary).
+        let mut shutdown = super::Shutdown::listen();
+        assert!(!shutdown.requested());
+        // SAFETY: raising a signal in our own process; tokio's handler consumes it.
         assert_eq!(unsafe { libc::raise(libc::SIGTERM) }, 0);
-        tokio::time::timeout(Duration::from_secs(3), waiter)
+        tokio::time::timeout(Duration::from_secs(3), shutdown.wait()).await.expect("SIGTERM latches the shutdown");
+        // Latched: later waits (the next startup retry, the main wait) see it at once.
+        assert!(shutdown.requested());
+        tokio::time::timeout(Duration::from_millis(100), shutdown.wait()).await.expect("already requested");
+    }
+
+    /// Shutdown waits a bounded time for placements in flight, so their orders
+    /// are cancelled with the rest — and never waits longer than the limit.
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_lets_placements_in_flight_land_but_never_waits_forever() {
+        let state = RwLock::new(AppState::new(std::path::PathBuf::from("unused.json")));
+        assert_eq!(super::settle_placements(&state, Duration::from_secs(5)).await, 0, "nothing to wait for");
+        state
+            .write()
             .await
-            .expect("shutdown_signal should resolve after SIGTERM")
-            .expect("task should not panic");
+            .order_status
+            .insert("a".into(), OrderStatus::Placing { price: rust_decimal_macros::dec!(0.3) });
+        // Stuck: gives up at the limit and reports it.
+        assert_eq!(super::settle_placements(&state, Duration::from_secs(5)).await, 1);
     }
 
     /// Core dumps (which would contain the decrypted wallet key) are disabled and,

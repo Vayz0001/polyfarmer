@@ -56,6 +56,12 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: shutdown leaves no orders behind.** Stopping the bot cancelled the orders it was tracking at that
+  moment, but an order still being placed could land just after and stay up once the bot had exited. A stop signal
+  arriving while the bot was busy starting could also be missed, so it kept trading until the service killed it. Now
+  the stop signal is caught from the moment the bot starts; on shutdown nothing new is placed, placements in flight
+  get a few seconds to land, everything tracked is cancelled, and a final sweep cancels any open order left on the
+  markets it farms. Each step has a time limit, so a stop finishes within the service's 60 seconds.
 - **Engine: a frozen market feed is noticed.** A connection that stays open but stops delivering data left the bot
   quoting on a frozen order book indefinitely. Now, if nothing arrives for 30 seconds (Polymarket answers the
   bot's ping every 10 seconds), the bot drops the connection, cancels its orders as on any disconnect, and
