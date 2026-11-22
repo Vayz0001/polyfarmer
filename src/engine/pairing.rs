@@ -86,6 +86,7 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
     s.low_balance_since.retain(|id, _| ids.contains(id));
     s.low_balance_paused.retain(|id| ids.contains(id));
     s.repegging.retain(|id| ids.contains(id));
+    s.repeg_retry_at.retain(|id, _| ids.contains(id));
     s.place_outage.retain(|id, _| ids.contains(id));
     let tokens: HashSet<String> = s.configs.iter().map(|c| c.token_id.clone()).collect();
     s.reconcile_tokens.retain(|t| tokens.contains(t));

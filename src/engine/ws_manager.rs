@@ -128,6 +128,10 @@ pub struct AppState {
     pub reconcile_tokens: HashSet<String>,
     /// Tokens being checked right now (one check per token at a time).
     pub reconciling: HashSet<String>,
+    /// Legs with a re-peg in progress (one at a time per leg, `engine::runner`).
+    pub repegging_now: HashSet<String>,
+    /// A re-peg's tick read failed: no new re-peg for this leg until then.
+    pub repeg_retry_at: HashMap<String, tokio::time::Instant>,
 }
 
 impl AppState {
@@ -160,6 +164,8 @@ impl AppState {
             stopping: false,
             reconcile_tokens: HashSet::new(),
             reconciling: HashSet::new(),
+            repegging_now: HashSet::new(),
+            repeg_retry_at: HashMap::new(),
         }
     }
 }
