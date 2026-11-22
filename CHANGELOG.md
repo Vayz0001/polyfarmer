@@ -56,6 +56,10 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: "No balance" always pauses on the second refusal.** The second "not enough balance" only paused the leg
+  if it came within two minutes of the first. When the retry was held back longer (thin depth, the two-sided
+  rule), it counted as a first refusal again and the leg kept retrying without ever showing "No balance". Now the
+  leg pauses whenever its next attempt is refused for funds again; any other outcome in between starts over.
 - **Engine: a re-peg can't undo another cancel, and doesn't hammer Polymarket.** Moving an order first marked it as
   being cancelled, then checked the market's tick size; if that check failed it "restored" the leg, which could
   wipe out a cancel another part of the bot had started (the order stayed up while the leg could place a second
