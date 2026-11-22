@@ -403,7 +403,7 @@ pub fn begin_place(s: &mut AppState, config_id: &str, price: Decimal, now: Insta
     // and the leg paused (dashboard, auto-pause, "No balance"), expired or
     // removed since. Placing then would put an order on a stopped leg, and a
     // removed leg would be left with a "Placing" status nothing clears.
-    let Some(c) = s.configs.iter().find(|c| c.id == config_id) else { return None };
+    let c = s.configs.iter().find(|c| c.id == config_id)?;
     if c.paused || c.expires_at <= chrono::Utc::now() || s.low_balance_paused.contains(config_id) {
         return None;
     }
