@@ -23,7 +23,6 @@ use crate::engine::pairing::Decision;
 use crate::engine::placer::{self, OrderApi};
 use crate::engine::quoter::{DeactivateReason, QuoteAction};
 use crate::engine::ws_manager::AppState;
-use crate::types::OrderStatus;
 
 /// Run one batch of decisions. Placements and cancels are spawned; the
 /// function returns once each decision has claimed (or skipped) its leg.
@@ -126,11 +125,19 @@ async fn cancel<A: OrderApi>(
     });
 }
 
-/// Re-peg: check the new price fits the order library's tick first (with a
-/// stale tick, cancelling would leave the leg with no order), cancel the old
-/// order, and once it's confirmed gone hand the leg back to the decision path:
-/// Idle, marked as a re-peg (the "Order replaced" alert), and a nudge so the
-/// engine decides — and places — straight away.
+/// After a tick-size read fails during a re-peg, wait this long before the leg
+/// tries to re-peg again (it keeps its working order meanwhile).
+const REPEG_TICK_RETRY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Re-peg. First check the new price fits the order library's tick while the
+/// old order still stands (with a stale tick, cancelling would leave the leg
+/// with no order) — nothing is claimed yet, so a failed check has nothing to
+/// undo and can't disturb a cancel someone else started. Then claim the order
+/// (only if the leg still holds it), cancel it, and once it's confirmed gone
+/// hand the leg back to the decision path: Idle, marked as a re-peg (the
+/// "Order replaced" alert), and a nudge so the engine decides — and places —
+/// straight away. One re-peg per leg at a time; a failed tick read waits
+/// [`REPEG_TICK_RETRY`] before the next.
 #[allow(clippy::too_many_arguments)]
 async fn replace<A: OrderApi>(
     api: &Arc<A>,
@@ -143,57 +150,75 @@ async fn replace<A: OrderApi>(
     new_price: rust_decimal::Decimal,
     tick_size: rust_decimal::Decimal,
 ) {
-    let prev = {
+    {
         let mut s = state.write().await;
         if s.heartbeat_paused {
             return; // Polymarket unreachable: don't take a working order down
         }
-        let prev = s.order_status.get(&config_id).cloned();
-        if !placer::begin_cancel(&mut s, &config_id, &order_id) {
-            return;
+        if s.repeg_retry_at.get(&config_id).is_some_and(|t| tokio::time::Instant::now() < *t) {
+            return; // the last tick read failed moments ago
         }
-        prev
-    };
+        if !s.repegging_now.insert(config_id.clone()) {
+            return; // already re-pegging this leg
+        }
+    }
     let (api, state, alerter, nudge) = (Arc::clone(api), Arc::clone(state), Arc::clone(alerter), Arc::clone(nudge));
     tokio::spawn(async move {
-        let tick = placer::check_tick(&*api, &state, &alerter, &token_id, tick_size, new_price).await;
-        if tick != placer::TickCheck::Ok {
-            if let placer::TickCheck::Error(e) = &tick {
-                warn!("Replace skipped: {e}");
-            }
-            // Keep the working order: put the leg back as it was.
-            let mut s = state.write().await;
-            if matches!(s.order_status.get(&config_id),
-                Some(OrderStatus::Cancelling { order_id: oid, .. }) if *oid == order_id)
-            {
-                let back = match prev {
-                    Some(live @ OrderStatus::Live { .. }) => live,
-                    _ => OrderStatus::Idle,
-                };
-                s.order_status.insert(config_id, back);
-            }
+        repeg(&*api, &state, &alerter, &nudge, &config_id, &order_id, &token_id, new_price, tick_size).await;
+        state.write().await.repegging_now.remove(&config_id);
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn repeg<A: OrderApi>(
+    api: &A,
+    state: &Arc<RwLock<AppState>>,
+    alerter: &Alerter,
+    nudge: &Notify,
+    config_id: &str,
+    order_id: &str,
+    token_id: &str,
+    new_price: rust_decimal::Decimal,
+    tick_size: rust_decimal::Decimal,
+) {
+    match placer::check_tick(api, state, alerter, token_id, tick_size, new_price).await {
+        placer::TickCheck::Ok => {}
+        // The tick changed and the config adopted it: the next decision re-quotes.
+        placer::TickCheck::Requote => return,
+        placer::TickCheck::Error(e) => {
+            warn!("Replace skipped (keeping the current order): {e}");
+            state
+                .write()
+                .await
+                .repeg_retry_at
+                .insert(config_id.to_string(), tokio::time::Instant::now() + REPEG_TICK_RETRY);
             return;
         }
-        match api.cancel_verified(&order_id).await {
-            Ok(true) => {
-                let freed = {
-                    let mut s = state.write().await;
-                    let freed = placer::free_if_cancelling(&mut s, &config_id, &order_id);
-                    if freed {
-                        s.repegging.insert(config_id);
-                    }
-                    freed
-                };
+    }
+    // Claim the order now, only if the leg still holds it.
+    if !placer::begin_cancel(&mut *state.write().await, config_id, order_id) {
+        return;
+    }
+    match api.cancel_verified(order_id).await {
+        Ok(true) => {
+            let freed = {
+                let mut s = state.write().await;
+                let freed = placer::free_if_cancelling(&mut s, config_id, order_id);
                 if freed {
-                    nudge.notify_one();
+                    s.repegging.insert(config_id.to_string());
+                    s.repeg_retry_at.remove(config_id);
                 }
+                freed
+            };
+            if freed {
+                nudge.notify_one();
             }
-            // Still on the book, or unknown: stay Cancelling; the timer retries
-            // until Polymarket confirms, and nothing is placed beside it.
-            Ok(false) => warn!("Replace: {order_id} still on the book after a verified cancel — the timer retries it"),
-            Err(e) => error!("Replace: cancel of {order_id} failed (the timer retries it): {e}"),
         }
-    });
+        // Still on the book, or unknown: stay Cancelling; the timer retries
+        // until Polymarket confirms, and nothing is placed beside it.
+        Ok(false) => warn!("Replace: {order_id} still on the book after a verified cancel — the timer retries it"),
+        Err(e) => error!("Replace: cancel of {order_id} failed (the timer retries it): {e}"),
+    }
 }
 
 /// Paused, expired or auto-paused: alert once, then cancel the order the leg
@@ -253,6 +278,7 @@ mod tests {
     use crate::engine::quoter::CancelReason;
     use crate::engine::test_support::*;
     use crate::types::MarketConfig;
+    use crate::types::OrderStatus;
     use rust_decimal_macros::dec;
     use std::time::Duration;
 
@@ -440,5 +466,69 @@ mod tests {
         run(&e, &api, &n, decided).await;
         assert!(api.placed.lock().unwrap().is_empty());
         assert_eq!(e.state.read().await.order_status.get("a"), None);
+    }
+
+    fn replace_to(price: rust_decimal::Decimal) -> QuoteAction {
+        QuoteAction::Replace { order_id: "o1".into(), new_price: price }
+    }
+    /// A decision for a leg on a 0.1¢ tick.
+    fn d_fine(id: &str, action: QuoteAction) -> Decision {
+        Decision { tick_size: dec!(0.001), ..d(id, action) }
+    }
+
+    /// A tick read that fails leaves the working order alone (nothing was
+    /// claimed), and the leg waits before trying to re-peg again — before, it
+    /// retried on every book update, re-reading the tick each time.
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_tick_read_keeps_the_order_and_waits_before_retrying() {
+        let (e, _, n) = setup(vec![leg("a", dec!(0.001))]);
+        let api = Fake::new(dec!(0.01), dec!(0.001)); // the order library's tick is stale
+        *api.refresh_fails.lock().unwrap() = true; // and can't be re-read right now
+        e.state.write().await.order_status.insert("a".into(), live("o1", dec!(0.213)));
+        run(&e, &api, &n, vec![d_fine("a", replace_to(dec!(0.211)))]).await;
+        {
+            let s = e.state.read().await;
+            assert_eq!(s.order_status.get("a"), Some(&live("o1", dec!(0.213))), "never claimed");
+            assert!(s.repeg_retry_at.contains_key("a") && s.repegging_now.is_empty());
+        }
+        assert!(api.cancelled.lock().unwrap().is_empty());
+        // Within the wait: a new Replace is skipped outright (no tick read).
+        *api.refresh_fails.lock().unwrap() = false;
+        run(&e, &api, &n, vec![d_fine("a", replace_to(dec!(0.211)))]).await;
+        assert_eq!(*api.refreshes.lock().unwrap(), 0, "no tick read while waiting");
+        // After it: the re-peg goes ahead.
+        tokio::time::sleep(REPEG_TICK_RETRY).await;
+        run(&e, &api, &n, vec![d_fine("a", replace_to(dec!(0.211)))]).await;
+        assert_eq!(*api.refreshes.lock().unwrap(), 1);
+        assert_eq!(e.state.read().await.order_status.get("a"), Some(&OrderStatus::Idle), "cancelled for the re-peg");
+    }
+
+    /// The bug: someone else (the two-sided rule, auto-pause, the dashboard)
+    /// was already cancelling the order; a re-peg whose tick read then failed
+    /// "restored" the leg to Idle, dropping that cancel — the order stayed up
+    /// while the leg could place a second one.
+    #[tokio::test]
+    async fn a_failed_re_peg_never_drops_someone_elses_cancel() {
+        let (e, _, n) = setup(vec![leg("a", dec!(0.001))]);
+        let api = Fake::new(dec!(0.01), dec!(0.001));
+        *api.refresh_fails.lock().unwrap() = true;
+        let since = std::time::Instant::now();
+        e.state.write().await.order_status.insert("a".into(), OrderStatus::Cancelling { order_id: "o1".into(), since });
+        run(&e, &api, &n, vec![d_fine("a", replace_to(dec!(0.211)))]).await;
+        assert_eq!(
+            e.state.read().await.order_status.get("a"),
+            Some(&OrderStatus::Cancelling { order_id: "o1".into(), since }),
+            "the pending cancel is left to finish"
+        );
+    }
+
+    /// Two book updates deciding a re-peg at once: one re-peg runs, one cancel.
+    #[tokio::test]
+    async fn one_re_peg_per_leg_at_a_time() {
+        let (e, api, n) = setup(vec![leg("a", dec!(0.01))]);
+        e.state.write().await.order_status.insert("a".into(), live("o1", dec!(0.20)));
+        run(&e, &api, &n, vec![d("a", replace_to(dec!(0.18))), d("a", replace_to(dec!(0.18)))]).await;
+        assert_eq!(*api.cancelled.lock().unwrap(), vec!["o1".to_string()]);
+        assert!(e.state.read().await.repegging_now.is_empty(), "the slot is freed afterwards");
     }
 }

@@ -56,6 +56,11 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: a re-peg can't undo another cancel, and doesn't hammer Polymarket.** Moving an order first marked it as
+  being cancelled, then checked the market's tick size; if that check failed it "restored" the leg, which could
+  wipe out a cancel another part of the bot had started (the order stayed up while the leg could place a second
+  one). The tick is now checked before anything is touched. A failed tick read also used to be retried on every
+  order-book update; now the leg waits 10 seconds, and only one re-peg per leg runs at a time.
 - **Engine: no order on a leg you've just paused.** A decision to place made a moment before you paused (or before
   the leg expired, hit "No balance" or was removed) could still go out, leaving an order on a stopped leg until the
   next check pulled it. Placing now re-checks the leg itself at that moment.
