@@ -56,6 +56,9 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: no order on a leg you've just paused.** A decision to place made a moment before you paused (or before
+  the leg expired, hit "No balance" or was removed) could still go out, leaving an order on a stopped leg until the
+  next check pulled it. Placing now re-checks the leg itself at that moment.
 - **Engine: a Deposit Wallet's orders are never signed the wrong way.** At start the bot asks Polygon whether your
   Polymarket wallet is a Deposit Wallet, which decides how orders are signed. If the public Polygon endpoint failed
   at that moment, it quietly assumed "no", and a Deposit Wallet then had every order rejected for the whole
