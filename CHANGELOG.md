@@ -56,6 +56,11 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: a frozen market feed is noticed.** A connection that stays open but stops delivering data left the bot
+  quoting on a frozen order book indefinitely. Now, if nothing arrives for 30 seconds (Polymarket answers the
+  bot's ping every 10 seconds), the bot drops the connection, cancels its orders as on any disconnect, and
+  reconnects. Connecting has a 10-second limit, a server that keeps dropping the connection gets a growing delay
+  instead of a tight reconnect loop, and connect/disconnect alerts are limited to one per 5 minutes while it flaps.
 - **Engine: a leg is never deleted automatically any more.** Three failed placements in a row used to remove the
   leg from your markets for good, and network blips, timeouts and Polymarket being busy (5xx, rate limits) counted
   as failures, so a short outage could wipe every leg. Now outages only back off (2 seconds doubling to a minute)
