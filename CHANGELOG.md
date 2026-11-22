@@ -56,6 +56,11 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: a Deposit Wallet's orders are never signed the wrong way.** At start the bot asks Polygon whether your
+  Polymarket wallet is a Deposit Wallet, which decides how orders are signed. If the public Polygon endpoint failed
+  at that moment, it quietly assumed "no", and a Deposit Wallet then had every order rejected for the whole
+  session. Now each endpoint is tried in turn, and if none can answer, the engine start fails with a clear message
+  and retries shortly instead of guessing. (A wallet that answers "not supported" is a definite no.)
 - **Engine: calls to Polymarket can no longer hang forever, and stray orders are cleaned up.** The Polymarket
   library sets no time limit, so a stalled connection could freeze the heartbeat watchdog, leave a leg "placing"
   for good, or block a shutdown or Remove. Every call now has a limit (5 to 30 seconds); a timeout counts as an

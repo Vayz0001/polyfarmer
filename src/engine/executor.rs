@@ -82,12 +82,23 @@ impl Executor {
 
         let sig_type = if proxy_wallet == eoa {
             SignatureType::Eoa
-        } else if crate::wallet_detect::is_deposit_wallet(proxy_wallet, rpc_url).await {
-            SignatureType::Poly1271
-        } else if Some(proxy_wallet) == derive_proxy_wallet(eoa, POLYGON) {
-            SignatureType::Proxy
         } else {
-            SignatureType::GnosisSafe
+            // Never guess: the wrong signature type gets every order rejected
+            // for the whole session. If Polygon can't be asked, fail this start;
+            // the engine retries it shortly.
+            let deposit = crate::wallet_detect::deposit_wallet_check(proxy_wallet, rpc_url).await.map_err(|e| {
+                eyre::eyre!(
+                    "couldn't check your Polymarket wallet's type on Polygon ({e}). Orders signed with the wrong \
+                     type would all be rejected, so the engine retries shortly. A reliable POLYGON_RPC_URL avoids this."
+                )
+            })?;
+            if deposit {
+                SignatureType::Poly1271
+            } else if Some(proxy_wallet) == derive_proxy_wallet(eoa, POLYGON) {
+                SignatureType::Proxy
+            } else {
+                SignatureType::GnosisSafe
+            }
         };
         info!("Order maker {proxy_wallet} → signatureType {sig_type:?}");
 
