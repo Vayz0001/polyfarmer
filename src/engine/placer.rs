@@ -295,7 +295,7 @@ pub fn aligned(price: Decimal, tick: Decimal) -> bool {
 /// and any retry delay over. Marks it `Placing` so concurrent events do not
 /// place twice, and returns the attempt id that now owns it.
 pub fn begin_place(s: &mut AppState, config_id: &str, price: Decimal, now: Instant) -> Option<u64> {
-    if s.heartbeat_paused || s.feed_down {
+    if s.heartbeat_paused || s.feed_down || s.stopping {
         return None;
     }
     if s.place_retry_at.get(config_id).is_some_and(|at| now < *at) {
@@ -1012,6 +1012,10 @@ mod tests {
         assert_eq!(begin_place(&mut s, "a", dec!(0.2), Instant::now()), None);
         assert_eq!(s.order_status.get("a"), None, "untouched");
         s.feed_down = false;
+        // Shutting down: refused too, so nothing lands after the final cancel.
+        s.stopping = true;
+        assert_eq!(begin_place(&mut s, "a", dec!(0.2), Instant::now()), None);
+        s.stopping = false;
         assert!(begin_place(&mut s, "a", dec!(0.2), Instant::now()).is_some());
     }
 

@@ -120,6 +120,8 @@ pub struct AppState {
     /// Placement failures in a row that were outages (network, 5xx, 429), not
     /// rejections: they only back off (`placer::outage`).
     pub place_outage: HashMap<String, u32>,
+    /// Shutting down: nothing new is placed (`placer::begin_place`).
+    pub stopping: bool,
 }
 
 impl AppState {
@@ -149,6 +151,7 @@ impl AppState {
             repegging: HashSet::new(),
             feed_down: false,
             place_outage: HashMap::new(),
+            stopping: false,
         }
     }
 }
