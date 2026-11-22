@@ -233,26 +233,44 @@ pub async fn detect_wallets(eoa: Address, configured_rpc: Option<&str>) -> Resul
     }
 }
 
-/// Best-effort check: is `addr` a Polymarket **Deposit Wallet**? Reads the
-/// on-chain EIP-712 domain (`eip712Domain()`); a deposit wallet reports
-/// `name = "DepositWallet"`. A deposit wallet must be traded via the EIP-1271
-/// (`Poly1271`) flow, not the classic Gnosis-Safe signature.
+/// Is `addr` a Polymarket **Deposit Wallet**? Reads its on-chain EIP-712
+/// domain (`eip712Domain()`); a deposit wallet reports `name = "DepositWallet"`
+/// and must be traded via the EIP-1271 (`Poly1271`) flow, not the classic
+/// Gnosis-Safe/proxy signature.
 ///
-/// Any RPC/parse failure returns `false` so the caller falls back to the
-/// classic path — a wrong guess here only affects the signature type, which the
-/// CLOB validates anyway.
-pub async fn is_deposit_wallet(addr: Address, configured_rpc: Option<&str>) -> bool {
+/// `Ok` is a definite answer: a wallet without that function (Safe, proxy)
+/// makes the call revert, which means "no"; a plain address answers "0x".
+/// `Err` means no RPC could answer at all. Each RPC is tried in turn (the
+/// configured one first): one can answer `eth_chainId` yet fail real calls.
+/// The caller must not guess on `Err` — the wrong signature type gets every
+/// order rejected for the whole session.
+pub async fn deposit_wallet_check(addr: Address, configured_rpc: Option<&str>) -> Result<bool> {
     // selector for eip712Domain()  (ERC-5267)
     const EIP712_DOMAIN_SELECTOR: [u8; 4] = [0x84, 0xb0, 0x19, 0x6e];
-    // "DepositWallet" as lowercase hex — searched for in the ABI-encoded return,
-    // avoiding a full tuple decode.
-    const DEPOSIT_WALLET_HEX: &str = "4465706f73697457616c6c6574";
-
-    let Ok(rpc) = Rpc::connect(configured_rpc).await else { return false };
-    match rpc.eth_call(addr, &EIP712_DOMAIN_SELECTOR).await {
-        Ok(hex) => hex.to_lowercase().contains(DEPOSIT_WALLET_HEX),
-        Err(_) => false,
+    let client = RPC_HTTP.clone();
+    let mut last_err = eyre!("no RPC configured");
+    for url in configured_rpc.into_iter().chain(DEFAULT_RPC_URLS.iter().copied()) {
+        let rpc = Rpc { client: client.clone(), url: url.to_string() };
+        match rpc.eth_call(addr, &EIP712_DOMAIN_SELECTOR).await {
+            Ok(hex) => return Ok(is_deposit_wallet_domain(&hex)),
+            Err(e) if is_revert(&e) => return Ok(false),
+            Err(e) => last_err = e,
+        }
     }
+    Err(last_err)
+}
+
+/// The ABI-encoded `eip712Domain()` reply names "DepositWallet" (searched as
+/// hex, avoiding a full tuple decode).
+fn is_deposit_wallet_domain(hex_result: &str) -> bool {
+    const DEPOSIT_WALLET_HEX: &str = "4465706f73697457616c6c6574";
+    hex_result.to_lowercase().contains(DEPOSIT_WALLET_HEX)
+}
+
+/// The node ran the call and it reverted (the contract has no such function):
+/// a definite answer, unlike a network or server error.
+fn is_revert(e: &eyre::Report) -> bool {
+    e.to_string().to_ascii_lowercase().contains("revert")
 }
 
 async fn detect_wallets_inner(eoa: Address, configured_rpc: Option<&str>) -> Result<Vec<WalletCandidate>> {
@@ -301,6 +319,43 @@ async fn detect_wallets_inner(eoa: Address, configured_rpc: Option<&str>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A revert is a definite "not a Deposit Wallet"; a network or server
+    /// error is not an answer at all (the engine start retries instead of
+    /// guessing — the old code guessed "not a Deposit Wallet" on any error).
+    #[test]
+    fn a_revert_is_an_answer_but_a_network_error_is_not() {
+        let revert = eyre!("RPC error from https://x: {{\"code\":3,\"message\":\"execution reverted\"}}");
+        assert!(is_revert(&revert));
+        let geth = eyre!("RPC error from https://x: {{\"code\":-32000,\"message\":\"Execution Reverted\"}}");
+        assert!(is_revert(&geth));
+        for not in [
+            "error sending request for url",
+            "RPC error from https://x: {\"code\":-32005,\"message\":\"rate limited\"}",
+            "operation timed out",
+        ] {
+            assert!(!is_revert(&eyre!("{not}")), "{not}");
+        }
+        // The reply that names a deposit wallet (ABI-encoded "DepositWallet").
+        assert!(is_deposit_wallet_domain("0x0f...4465706F73697457616C6C6574..."));
+        assert!(!is_deposit_wallet_domain("0x"));
+    }
+
+    /// Live (`cargo test -- --ignored`, set PF_LIVE_WALLET=0x… to a Polymarket
+    /// wallet address): the check returns a definite answer through the public
+    /// RPCs, and an unreachable RPC alone yields an error, not a guess.
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn live_deposit_wallet_check() {
+        let Ok(addr) = std::env::var("PF_LIVE_WALLET") else { return };
+        let addr: Address = addr.parse().unwrap();
+        let answer = deposit_wallet_check(addr, None).await;
+        eprintln!("deposit wallet? {answer:?}");
+        assert!(answer.is_ok(), "{answer:?}");
+        // A non-contract address answers too (definitely not a deposit wallet).
+        let eoa: Address = "0x000000000000000000000000000000000000dEaD".parse().unwrap();
+        assert!(!deposit_wallet_check(eoa, None).await.unwrap());
+    }
 
     #[test]
     fn selector_matches_known_value() {
