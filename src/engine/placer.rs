@@ -195,8 +195,6 @@ async fn reconcile_inner<A: OrderApi>(api: &A, state: &RwLock<AppState>, alerter
 /// Placement outages in a row for one leg before the user is told (once).
 const OUTAGE_ALERT_AFTER: u32 = 5;
 pub const LOW_BALANCE_RETRY: Duration = Duration::from_secs(15);
-/// A second "not enough balance" within this window pauses the leg.
-const LOW_BALANCE_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Polymarket refused an order for lack of funds.
 pub fn is_low_balance(msg: &str) -> bool {
@@ -204,16 +202,19 @@ pub fn is_low_balance(msg: &str) -> bool {
 }
 
 /// Handle "not enough balance" for a leg that is now Idle (the caller released
-/// it). The first time: retry once after [`LOW_BALANCE_RETRY`]. Again within
-/// [`LOW_BALANCE_WINDOW`]: pause the leg (saved), mark it for the dashboard
-/// ("No balance") and alert once. `cost` is the order's dollar value, for the
+/// it). The first time: retry once after [`LOW_BALANCE_RETRY`]. If the leg's
+/// next attempt is refused for funds again — however long depth or the
+/// two-sided rule delayed it — pause the leg (saved), mark it for the dashboard
+/// ("No balance") and alert once. Any other outcome in between (placed,
+/// another error, an outage, pause/resume) starts over. `cost` is the order's dollar value, for the
 /// message. Never counts as a placement failure.
 pub async fn low_balance(state: &RwLock<AppState>, alerter: &Alerter, config_id: &str, cost: Decimal) -> Outcome {
     let mut s = state.write().await;
-    let now = std::time::Instant::now();
-    let repeat = s.low_balance_since.get(config_id).is_some_and(|t| now.duration_since(*t) < LOW_BALANCE_WINDOW);
+    // Keyed on the previous attempt, not on time: with a time window, a retry
+    // held back past it counted as a fresh "first" refusal and the leg looped.
+    let repeat = s.low_balance_since.contains_key(config_id);
     if !repeat {
-        s.low_balance_since.insert(config_id.to_string(), now);
+        s.low_balance_since.insert(config_id.to_string(), std::time::Instant::now());
         s.place_retry_at.insert(config_id.to_string(), Instant::now() + LOW_BALANCE_RETRY);
         warn!("[{config_id}] not enough balance — retrying once in {}s", LOW_BALANCE_RETRY.as_secs());
         return Outcome::Settling;
@@ -733,6 +734,7 @@ async fn outage(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &st
         if !release(&mut s, config_id, attempt) {
             return Outcome::Superseded;
         }
+        s.low_balance_since.remove(config_id); // a different outcome: start over
         let n = {
             let n = s.place_outage.entry(config_id.to_string()).or_insert(0);
             *n += 1;
@@ -764,6 +766,7 @@ async fn fail(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &str,
     if !release(&mut s, config_id, attempt) {
         return Outcome::Superseded;
     }
+    s.low_balance_since.remove(config_id); // a different outcome: start over
     let failures = {
         let f = s.place_failures.entry(config_id.to_string()).or_insert(0);
         *f += 1;
@@ -1119,6 +1122,39 @@ mod tests {
         let text = alerts(&e);
         assert_eq!(text.matches("Not enough balance on Polymarket").count(), 1, "{text}");
         assert!(!text.contains("Order placement failed"), "{text}");
+    }
+
+    /// The bug: the second refusal only paused within 2 minutes of the first.
+    /// When depth or the two-sided rule held the retry back longer, it counted
+    /// as a fresh "first" refusal, and the leg cycled forever without a "No
+    /// balance" status. Now the next attempt's refusal pauses, however late.
+    #[tokio::test(start_paused = true)]
+    async fn a_late_second_refusal_still_pauses() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        api.script(Err("not enough balance / allowance"));
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Settling));
+        tokio::time::advance(Duration::from_secs(600)).await; // held back for 10 minutes
+        api.script(Err("not enough balance / allowance"));
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::PausedNoBalance));
+        assert!(e.state.read().await.low_balance_paused.contains("a"));
+    }
+
+    /// Another outcome between two refusals starts over: the next refusal is a
+    /// "first" one again (retry, not pause).
+    #[tokio::test(start_paused = true)]
+    async fn another_outcome_between_refusals_starts_over() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        api.script(Err("not enough balance / allowance"));
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Settling));
+        tokio::time::sleep(LOW_BALANCE_RETRY + Duration::from_millis(10)).await;
+        api.script(Err("Status: error(400 Bad Request) making POST call to /order with invalid"));
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Failed { failures: 1 }));
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        api.script(Err("not enough balance / allowance"));
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Settling));
+        assert!(!e.state.read().await.configs[0].paused);
     }
 
     #[tokio::test]
