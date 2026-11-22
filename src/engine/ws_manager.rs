@@ -122,6 +122,12 @@ pub struct AppState {
     pub place_outage: HashMap<String, u32>,
     /// Shutting down: nothing new is placed (`placer::begin_place`).
     pub stopping: bool,
+    /// Tokens whose open orders must be checked before any leg on them places
+    /// again: a placement there failed in a way that leaves it unclear whether
+    /// the order reached Polymarket (`placer::reconcile`).
+    pub reconcile_tokens: HashSet<String>,
+    /// Tokens being checked right now (one check per token at a time).
+    pub reconciling: HashSet<String>,
 }
 
 impl AppState {
@@ -152,6 +158,8 @@ impl AppState {
             feed_down: false,
             place_outage: HashMap::new(),
             stopping: false,
+            reconcile_tokens: HashSet::new(),
+            reconciling: HashSet::new(),
         }
     }
 }

@@ -603,6 +603,17 @@ async fn evaluate_all_markets(
         });
     }
 
+    // Check every farmed market's open orders against what the legs track, and
+    // cancel any stray ones (placer::reconcile; one check per market at a time).
+    let tokens: std::collections::HashSet<String> =
+        state.read().await.configs.iter().map(|c| c.token_id.clone()).collect();
+    for token in tokens {
+        let (exec, st, al) = (Arc::clone(executor), Arc::clone(state), Arc::clone(alerter));
+        tokio::spawn(async move {
+            placer::reconcile(&*exec, &st, &al, &token).await;
+        });
+    }
+
     // Every leg, with Polymarket's two-sided rule applied across each market's
     // legs, carried out by the same runner the book-update path uses.
     let actions = pairing::decide(&mut *state.write().await, |_| true, tokio::time::Instant::now());
