@@ -131,9 +131,10 @@ impl Executor {
 
         let signed = self.client.sign(&self.signer, order).await?;
         let response = self.client.post_order(signed).await?;
+        let order_id = accepted_order_id(response.success, &response.order_id, response.error_msg.as_deref())?;
 
-        info!("Order placed: {} @ {} size {}", response.order_id, price, size);
-        Ok(response.order_id)
+        info!("Order placed: {} @ {} size {}", order_id, price, size);
+        Ok(order_id)
     }
 
     /// Cancel a single order by ID.
@@ -463,6 +464,20 @@ fn is_off_book(status: &OrderStatusType) -> bool {
     matches!(status, OrderStatusType::Matched | OrderStatusType::Canceled)
 }
 
+/// The order id from a place reply, or an error with Polymarket's message.
+/// The reply can arrive as HTTP 200 with `success: false` (and an empty id);
+/// that is a rejection, not a placed order — treating it as placed left the
+/// leg "live" on an order that doesn't exist, stuck cancelling it forever. A
+/// refusal for funds keeps its text, so it reaches the "No balance" handling.
+fn accepted_order_id(success: bool, order_id: &str, error_msg: Option<&str>) -> Result<String> {
+    let id = order_id.trim();
+    if success && !id.is_empty() {
+        return Ok(id.to_string());
+    }
+    let why = error_msg.map(str::trim).filter(|m| !m.is_empty()).unwrap_or("no order id in Polymarket's reply");
+    Err(eyre::eyre!("order rejected: {why}"))
+}
+
 /// Most pages of open orders read for one token before giving up (a cursor
 /// that never ends would otherwise loop forever).
 const MAX_ORDER_PAGES: usize = 50;
@@ -555,6 +570,19 @@ mod verify_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rejected_reply_is_an_error_not_a_placed_order() {
+        assert_eq!(accepted_order_id(true, "0xabc", None).unwrap(), "0xabc");
+        let msg = |r: Result<String>| format!("{:#}", r.unwrap_err());
+        // HTTP 200 but success=false: an error, with Polymarket's reason.
+        let e = msg(accepted_order_id(false, "", Some("not enough balance / allowance")));
+        assert!(e.contains("not enough balance"), "{e}");
+        assert!(crate::engine::placer::is_low_balance(&e), "reaches the No balance handling");
+        // success=true but no id: still not something we can track or cancel.
+        assert!(msg(accepted_order_id(true, "  ", None)).contains("no order id"));
+        assert!(msg(accepted_order_id(false, "0xabc", Some(""))).contains("rejected"));
+    }
 
     /// The startup check used to log a market whose open orders couldn't be
     /// listed and carry on as if it had none — then trade beside its old orders.
