@@ -286,6 +286,7 @@ impl Executor {
         let req = OrdersRequest::builder().asset_id(asset_id).build();
         let mut ids = Vec::new();
         let mut cursor: Option<String> = None;
+        let mut pages = 0usize;
         loop {
             let mut last_err = None;
             let page = 'retry: {
@@ -306,10 +307,12 @@ impl Executor {
             for order in &page.data {
                 ids.push(order.id.clone());
             }
-            if page.next_cursor == TERMINAL_CURSOR {
-                break;
+            pages += 1;
+            match next_page(&page.next_cursor, pages) {
+                Ok(Some(next)) => cursor = Some(next),
+                Ok(None) => break,
+                Err(e) => return Err(e),
             }
-            cursor = Some(page.next_cursor);
         }
         Ok(ids)
     }
@@ -322,19 +325,25 @@ impl Executor {
             return Ok(());
         }
         info!("cancel_orders_for_tokens: checking {} tokens for open orders", token_ids.len());
-        let mut all_ids = Vec::new();
+        let mut listings = Vec::with_capacity(token_ids.len());
         for token_id in token_ids {
-            match self.fetch_open_order_ids(token_id).await {
-                Ok(ids) => {
-                    info!("  token {}...: {} open orders", token_id.get(..8).unwrap_or(token_id), ids.len());
-                    all_ids.extend(ids);
-                }
+            let listing = self.fetch_open_order_ids(token_id).await;
+            match &listing {
+                Ok(ids) => info!("  token {}...: {} open orders", token_id.get(..8).unwrap_or(token_id), ids.len()),
                 Err(e) => {
                     error!("Failed to fetch orders for token {}...: {}", token_id.get(..8).unwrap_or(token_id), e)
                 }
             }
+            listings.push(listing);
         }
+        // Cancel what was found, then fail if any market couldn't be listed:
+        // its old orders may still be resting, and trading beside them is what
+        // this check exists to prevent. The caller retries the whole start.
+        let (all_ids, unlisted) = gather_listings(listings);
         let open = self.cancel_orders(&all_ids).await?;
+        if unlisted > 0 {
+            return Err(eyre::eyre!("could not list the open orders of {unlisted} market(s)"));
+        }
         if !open.is_empty() {
             return Err(eyre::eyre!("{} open order(s) could not be cancelled", open.len()));
         }
@@ -454,6 +463,37 @@ fn is_off_book(status: &OrderStatusType) -> bool {
     matches!(status, OrderStatusType::Matched | OrderStatusType::Canceled)
 }
 
+/// Most pages of open orders read for one token before giving up (a cursor
+/// that never ends would otherwise loop forever).
+const MAX_ORDER_PAGES: usize = 50;
+
+/// The next page to read after `cursor`, given `pages` read so far: `None` at
+/// the end (Polymarket's `LTE=`, or an empty cursor), an error past
+/// [`MAX_ORDER_PAGES`].
+fn next_page(cursor: &str, pages: usize) -> Result<Option<String>> {
+    if cursor.is_empty() || cursor == TERMINAL_CURSOR {
+        return Ok(None);
+    }
+    if pages >= MAX_ORDER_PAGES {
+        return Err(eyre::eyre!("open orders still not exhausted after {MAX_ORDER_PAGES} pages"));
+    }
+    Ok(Some(cursor.to_string()))
+}
+
+/// All order IDs found across the markets' listings, and how many markets
+/// couldn't be listed.
+fn gather_listings(listings: Vec<Result<Vec<String>>>) -> (Vec<String>, usize) {
+    let mut ids = Vec::new();
+    let mut failed = 0;
+    for l in listings {
+        match l {
+            Ok(found) => ids.extend(found),
+            Err(_) => failed += 1,
+        }
+    }
+    (ids, failed)
+}
+
 /// A cancel refusal that means the order is off the book anyway.
 fn already_gone(reason: &str) -> bool {
     let r = reason.to_ascii_lowercase();
@@ -515,6 +555,25 @@ mod verify_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The startup check used to log a market whose open orders couldn't be
+    /// listed and carry on as if it had none — then trade beside its old orders.
+    #[test]
+    fn a_market_that_cannot_be_listed_fails_the_startup_check() {
+        let ok = |v: &[&str]| Ok(v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let (ids, failed) = gather_listings(vec![ok(&["a", "b"]), Err(eyre::eyre!("502")), ok(&["c"])]);
+        assert_eq!(ids, vec!["a", "b", "c"], "what was found is still cancelled");
+        assert_eq!(failed, 1);
+        assert_eq!(gather_listings(vec![ok(&[]), ok(&["x"])]), (vec!["x".to_string()], 0));
+    }
+
+    #[test]
+    fn order_pages_end_on_the_terminal_or_an_empty_cursor_and_are_capped() {
+        assert_eq!(next_page("LTE=", 1).unwrap(), None);
+        assert_eq!(next_page("", 1).unwrap(), None, "an empty cursor ends instead of restarting at page 1");
+        assert_eq!(next_page("MTAw", 1).unwrap().as_deref(), Some("MTAw"));
+        assert!(next_page("MTAw", MAX_ORDER_PAGES).is_err(), "never loops forever");
+    }
 
     #[test]
     fn only_confirmed_cancels_count_as_gone() {
