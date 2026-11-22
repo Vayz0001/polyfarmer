@@ -20,6 +20,37 @@ const WS_URL: &str = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 const PING_INTERVAL: Duration = Duration::from_secs(10);
 const RECONNECT_BASE_MS: u64 = 100;
 const RECONNECT_MAX_MS: u64 = 5_000;
+/// Longest a connection attempt may take.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Nothing heard (no book update, no reply to our PING every 10 s) for this
+/// long: the connection is treated as dead — a half-open socket would
+/// otherwise leave the bot quoting on a frozen book.
+const SILENCE_LIMIT: Duration = Duration::from_secs(30);
+/// A connection must last this long before the reconnect delay starts over;
+/// a server that accepts and drops at once gets a growing delay, not a loop.
+const STABLE_AFTER: Duration = Duration::from_secs(60);
+/// While the feed keeps flapping, connect/disconnect alerts at most this often.
+const FEED_ALERT_EVERY: Duration = Duration::from_secs(300);
+
+/// The connection has been silent for longer than [`SILENCE_LIMIT`].
+fn silent_too_long(last_heard: std::time::Instant, now: std::time::Instant) -> bool {
+    now.saturating_duration_since(last_heard) > SILENCE_LIMIT
+}
+
+/// The reconnect delay after a connection that lasted `lasted`: back to the
+/// base only after a stable one, otherwise doubled (capped).
+fn next_backoff_ms(current: u64, lasted: Duration) -> u64 {
+    if lasted >= STABLE_AFTER {
+        RECONNECT_BASE_MS
+    } else {
+        (current * 2).min(RECONNECT_MAX_MS)
+    }
+}
+
+/// Whether a feed alert may go out now (at most one per [`FEED_ALERT_EVERY`]).
+fn feed_alert_due(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last.is_none_or(|t| now.saturating_duration_since(t) >= FEED_ALERT_EVERY)
+}
 pub const MAX_PLACE_FAILURES: u32 = 3;
 
 /// Shared application state — all tasks hold an Arc clone of this.
@@ -139,6 +170,9 @@ pub fn spawn(
 ) {
     tokio::spawn(async move {
         let mut backoff_ms = RECONNECT_BASE_MS;
+        // Throttles the connect/disconnect alerts while the feed flaps.
+        let mut last_feed_alert: Option<std::time::Instant> = None;
+        let mut disconnect_alerted = false;
 
         loop {
             // Check for shutdown
@@ -174,11 +208,13 @@ pub fn spawn(
 
             info!("WS connecting ({} tokens)...", token_ids.len());
 
-            let (ws_stream, _) = match connect_async(WS_URL).await {
-                Ok(s) => {
-                    backoff_ms = RECONNECT_BASE_MS;
-                    s
-                }
+            let connected = match tokio::time::timeout(CONNECT_TIMEOUT, connect_async(WS_URL)).await {
+                Ok(Ok((s, _))) => Ok(s),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err(format!("no answer within {}s", CONNECT_TIMEOUT.as_secs())),
+            };
+            let ws_stream = match connected {
+                Ok(s) => s,
                 Err(e) => {
                     error!("WS connect failed: {}", e);
                     tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
@@ -186,6 +222,23 @@ pub fn spawn(
                     continue;
                 }
             };
+            let connected_at = std::time::Instant::now();
+            let (mut write, mut read) = ws_stream.split();
+
+            // Subscribe all active token_ids immediately. If that fails the
+            // connection is useless: wait and reconnect (still marked down).
+            let sub = json!({
+                "assets_ids": token_ids,
+                "type": "market",
+                "custom_feature_enabled": true
+            });
+            info!("WS sending subscribe: {}", sub);
+            if let Err(e) = write.send(Message::Text(sub.to_string().into())).await {
+                error!("WS initial subscribe failed: {}", e);
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(RECONNECT_MAX_MS);
+                continue;
+            }
 
             info!("WS connected");
             {
@@ -193,23 +246,12 @@ pub fn spawn(
                 s.ws_connected = true;
                 s.feed_down = false;
             }
-            alerter.info("WS connected");
-
-            let (mut write, mut read) = ws_stream.split();
-
-            // Subscribe all active token_ids immediately
-            if !token_ids.is_empty() {
-                let sub = json!({
-                    "assets_ids": token_ids,
-                    "type": "market",
-                    "custom_feature_enabled": true
-                });
-                info!("WS sending subscribe: {}", sub);
-                if let Err(e) = write.send(Message::Text(sub.to_string().into())).await {
-                    error!("WS initial subscribe failed: {}", e);
-                    continue;
-                }
+            // Tell the user it's back only if they were told it went down.
+            if disconnect_alerted {
+                alerter.info("WS connected");
+                disconnect_alerted = false;
             }
+            let mut last_heard = std::time::Instant::now();
 
             // PING interval
             let mut ping_ticker = tokio::time::interval(PING_INTERVAL);
@@ -222,6 +264,9 @@ pub fn spawn(
                     // ── Incoming WS message ─────────────────────────────────
                     msg = read.next() => {
                         const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024; // 64 MB
+                        if matches!(msg, Some(Ok(_))) {
+                            last_heard = std::time::Instant::now();
+                        }
                     match msg {
                             Some(Ok(Message::Text(text))) => {
                                 if text.len() > MAX_MESSAGE_BYTES {
@@ -257,6 +302,9 @@ pub fn spawn(
 
                     // ── PING ────────────────────────────────────────────────
                     _ = ping_ticker.tick() => {
+                        if silent_too_long(last_heard, std::time::Instant::now()) {
+                            break format!("no messages for {}s", SILENCE_LIMIT.as_secs());
+                        }
                         if write.send(Message::Text("PING".into())).await.is_err() {
                             break "ping send failed".to_string();
                         }
@@ -337,11 +385,16 @@ pub fn spawn(
             };
 
             warn!("WS disconnected: {} — cancelling {} bot orders", disconnect_reason, live_order_ids.len());
-            alerter.warn(format!(
-                "WS disconnected ({}) — cancelling {} open orders",
-                disconnect_reason,
-                live_order_ids.len()
-            ));
+            let now = std::time::Instant::now();
+            if feed_alert_due(last_feed_alert, now) {
+                alerter.warn(format!(
+                    "WS disconnected ({}) — cancelling {} open orders",
+                    disconnect_reason,
+                    live_order_ids.len()
+                ));
+                last_feed_alert = Some(now);
+                disconnect_alerted = true;
+            }
 
             // Retry up to 3 times — only orders confirmed gone are reset. Resetting one
             // that is still open would let the bot place a second order beside it.
@@ -393,8 +446,9 @@ pub fn spawn(
                 );
             }
 
+            // Back to a short delay only after a connection that stayed up.
+            backoff_ms = next_backoff_ms(backoff_ms, connected_at.elapsed());
             tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-            backoff_ms = (backoff_ms * 2).min(RECONNECT_MAX_MS);
         }
     });
 }
@@ -607,6 +661,42 @@ fn parse_tick_size_change(value: &serde_json::Value) -> Option<(String, rust_dec
     }
     let tick = rust_decimal::Decimal::from_str(value.get("new_tick_size")?.as_str()?).ok()?;
     (tick > rust_decimal::Decimal::ZERO && tick < rust_decimal::Decimal::ONE).then(|| (asset.to_string(), tick))
+}
+
+#[cfg(test)]
+mod feed_health_tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn a_silent_connection_is_dropped_after_the_limit() {
+        let t0 = Instant::now();
+        assert!(!silent_too_long(t0, t0 + Duration::from_secs(29)));
+        assert!(!silent_too_long(t0, t0 + SILENCE_LIMIT));
+        assert!(silent_too_long(t0, t0 + SILENCE_LIMIT + Duration::from_millis(1)));
+        // PINGs go out every 10 s, so a live feed always answers well inside it.
+        assert!(PING_INTERVAL * 2 < SILENCE_LIMIT);
+    }
+
+    #[test]
+    fn the_reconnect_delay_only_resets_after_a_stable_connection() {
+        // A server that accepts and drops at once: the delay keeps growing.
+        let mut b = RECONNECT_BASE_MS;
+        for _ in 0..10 {
+            b = next_backoff_ms(b, Duration::from_millis(50));
+        }
+        assert_eq!(b, RECONNECT_MAX_MS);
+        // A connection that stayed up a minute: back to the short delay.
+        assert_eq!(next_backoff_ms(RECONNECT_MAX_MS, STABLE_AFTER), RECONNECT_BASE_MS);
+    }
+
+    #[test]
+    fn feed_alerts_are_throttled_while_it_flaps() {
+        let t0 = Instant::now();
+        assert!(feed_alert_due(None, t0));
+        assert!(!feed_alert_due(Some(t0), t0 + Duration::from_secs(60)));
+        assert!(feed_alert_due(Some(t0), t0 + FEED_ALERT_EVERY));
+    }
 }
 
 #[cfg(test)]
