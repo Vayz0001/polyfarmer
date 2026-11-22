@@ -83,6 +83,9 @@ pub struct AppState {
     /// Legs whose order was just taken down for a re-peg: their next placement
     /// is announced as "Order replaced" (`engine::runner`).
     pub repegging: HashSet<String>,
+    /// The market feed dropped and hasn't reconnected: books are cleared and
+    /// nothing is placed (`placer::begin_place`) until it's back.
+    pub feed_down: bool,
 }
 
 impl AppState {
@@ -110,6 +113,7 @@ impl AppState {
             low_balance_since: HashMap::new(),
             low_balance_paused: HashSet::new(),
             repegging: HashSet::new(),
+            feed_down: false,
         }
     }
 }
@@ -180,7 +184,11 @@ pub fn spawn(
             };
 
             info!("WS connected");
-            state.write().await.ws_connected = true;
+            {
+                let mut s = state.write().await;
+                s.ws_connected = true;
+                s.feed_down = false;
+            }
             alerter.info("WS connected");
 
             let (mut write, mut read) = ws_stream.split();
@@ -303,11 +311,16 @@ pub fn spawn(
                 break;
             }
 
-            // Collect live and in-flight-cancel order IDs before any state mutation.
-            // Include Cancelling because a cancel may not have completed before the disconnect —
-            // re-cancelling is idempotent and prevents orphaned orders.
+            // Block placement first, then collect the orders to cancel — in one
+            // step, so nothing can be placed between the two. The books are
+            // stale from here on and are rebuilt from snapshots on reconnect.
+            // Cancelling ones are included: a cancel may not have completed before
+            // the disconnect, and re-cancelling is idempotent.
             let live_order_ids: Vec<String> = {
-                let s = state.read().await;
+                let mut s = state.write().await;
+                s.feed_down = true;
+                s.books.clear();
+                s.snapshotted.clear();
                 s.order_status
                     .values()
                     .filter_map(|status| match status {
@@ -350,7 +363,7 @@ pub fn spawn(
             if answered {
                 let resolved = {
                     let mut s = state.write().await;
-                    let resolved = reset_after_bulk_cancel(&mut s, &remaining);
+                    let resolved = reset_after_bulk_cancel(&mut s, &live_order_ids, &remaining);
                     // Books will be rebuilt from snapshots on reconnect
                     s.snapshotted.clear();
                     s.books.clear();
@@ -382,27 +395,33 @@ pub fn spawn(
     });
 }
 
-/// After a reconnect's bulk cancel, given the orders still open:
-/// - a leg whose order is confirmed gone returns to Idle (and, if it had a live
-///   order, loses its placement-failure count: the order did get on the book);
-/// - a leg whose order is still open is kept `Cancelling` it, so nothing is
-///   placed beside it and the 30 s timer keeps cancelling it;
-/// - an in-flight placement is freed (it cancels its own order when it lands).
+/// After a reconnect's bulk cancel of `requested`, given the ones still open.
+/// Only legs whose order was **in the request** are touched — an order that
+/// appeared meanwhile (a placement that landed during the cancel) is left as it
+/// is, tracked; resetting it would forget it and let the leg place a second one.
+/// - order confirmed gone → Idle (and, if it was live, its placement-failure
+///   count is cleared: the order did get on the book);
+/// - order still open → kept `Cancelling` it, so nothing is placed beside it and
+///   the 30 s timer keeps cancelling it;
+/// - a placement in flight is freed (it cancels its own order when it lands).
 ///
 /// Returns the labels of stuck cancels this confirmed that had already alerted.
-pub fn reset_after_bulk_cancel(s: &mut AppState, still_open: &[String]) -> Vec<String> {
+pub fn reset_after_bulk_cancel(s: &mut AppState, requested: &[String], still_open: &[String]) -> Vec<String> {
     let mut had_live: HashSet<String> = HashSet::new();
     let mut freed: HashSet<String> = HashSet::new();
     for (id, status) in s.order_status.iter_mut() {
-        let open = match status {
-            OrderStatus::Live { order_id, .. } | OrderStatus::Cancelling { order_id, .. } => {
-                still_open.contains(order_id).then(|| order_id.clone())
-            }
+        let order = match status {
+            OrderStatus::Live { order_id, .. } | OrderStatus::Cancelling { order_id, .. } => Some(order_id.clone()),
             _ => None,
         };
-        if let Some(order_id) = open {
-            *status = OrderStatus::Cancelling { order_id, since: std::time::Instant::now() };
-            continue;
+        if let Some(order_id) = &order {
+            if !requested.contains(order_id) {
+                continue; // not part of this cancel: leave it alone
+            }
+            if still_open.contains(order_id) {
+                *status = OrderStatus::Cancelling { order_id: order_id.clone(), since: std::time::Instant::now() };
+                continue;
+            }
         }
         if matches!(status, OrderStatus::Live { .. }) {
             had_live.insert(id.clone());
@@ -609,7 +628,8 @@ mod bulk_cancel_tests {
         s.place_failures.insert("stuck".into(), 2);
         s.cancel_failures.insert("was_cancelling".into(), ("o3".into(), placer::CANCEL_ALERT_AFTER));
 
-        let resolved = reset_after_bulk_cancel(&mut s, &["o2".to_string()]);
+        let requested: Vec<String> = ["o1", "o2", "o3"].map(String::from).to_vec();
+        let resolved = reset_after_bulk_cancel(&mut s, &requested, &["o2".to_string()]);
 
         assert_eq!(s.order_status.get("gone"), Some(&OrderStatus::Idle));
         assert!(
@@ -621,6 +641,28 @@ mod bulk_cancel_tests {
         assert_eq!(s.place_failures.get("stuck"), Some(&2), "unchanged while still open");
         assert_eq!(resolved, vec!["was_cancelling".to_string()], "the alerted stuck cancel is reported once");
         assert!(s.cancel_failures.is_empty());
+    }
+
+    /// The bug: an order placed while the bulk cancel was running wasn't in the
+    /// request, but the reset set its leg Idle anyway — forgetting the order and
+    /// letting the leg place a second one beside it.
+    #[test]
+    fn an_order_placed_during_the_cancel_stays_tracked() {
+        let mut s = AppState::new(PathBuf::from("unused.json"));
+        let live = |id: &str| OrderStatus::Live { order_id: id.into(), price: dec!(0.3) };
+        s.order_status.insert("old".into(), live("o1"));
+        s.order_status.insert("landed".into(), live("o-new")); // placed after the request was sent
+        s.order_status.insert(
+            "cancelling_new".into(),
+            OrderStatus::Cancelling { order_id: "o-x".into(), since: std::time::Instant::now() },
+        );
+        reset_after_bulk_cancel(&mut s, &["o1".to_string()], &[]);
+        assert_eq!(s.order_status.get("old"), Some(&OrderStatus::Idle), "its order was cancelled");
+        assert_eq!(s.order_status.get("landed"), Some(&live("o-new")), "not in the request: still tracked");
+        assert!(
+            matches!(s.order_status.get("cancelling_new"), Some(OrderStatus::Cancelling { order_id, .. }) if order_id == "o-x"),
+            "a cancel started meanwhile is left to finish"
+        );
     }
 }
 

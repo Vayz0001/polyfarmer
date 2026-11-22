@@ -291,7 +291,7 @@ pub fn aligned(price: Decimal, tick: Decimal) -> bool {
 /// and any retry delay over. Marks it `Placing` so concurrent events do not
 /// place twice, and returns the attempt id that now owns it.
 pub fn begin_place(s: &mut AppState, config_id: &str, price: Decimal, now: Instant) -> Option<u64> {
-    if s.heartbeat_paused {
+    if s.heartbeat_paused || s.feed_down {
         return None;
     }
     if s.place_retry_at.get(config_id).is_some_and(|at| now < *at) {
@@ -898,6 +898,19 @@ mod tests {
         assert!(is_low_balance("not enough balance / allowance"));
         assert!(is_low_balance("PolyApi: Not Enough Balance"));
         assert!(!is_low_balance("invalid tick size"));
+    }
+
+    /// While the market feed is down (books cleared, bulk cancel in progress),
+    /// nothing is placed — not even from a decision made just before the drop.
+    #[tokio::test]
+    async fn nothing_is_placed_while_the_feed_is_down() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let mut s = e.state.write().await;
+        s.feed_down = true;
+        assert_eq!(begin_place(&mut s, "a", dec!(0.2), Instant::now()), None);
+        assert_eq!(s.order_status.get("a"), None, "untouched");
+        s.feed_down = false;
+        assert!(begin_place(&mut s, "a", dec!(0.2), Instant::now()).is_some());
     }
 
     #[tokio::test]
