@@ -55,6 +55,10 @@ pub trait OrderApi: Send + Sync + 'static {
     /// once the order is confirmed off the book (cancelled, filled or never
     /// existed), `Err` when that could not be established.
     fn cancel_verified(&self, order_id: &str) -> impl Future<Output = Result<bool>> + Send;
+    /// IDs of our open orders on one token (all pages).
+    fn open_orders(&self, token_id: &str) -> impl Future<Output = Result<Vec<String>>> + Send;
+    /// Cancel several orders; returns the IDs still open afterwards.
+    fn cancel_many(&self, order_ids: &[String]) -> impl Future<Output = Result<Vec<String>>> + Send;
 }
 
 impl OrderApi for Executor {
@@ -78,6 +82,12 @@ impl OrderApi for Executor {
     fn cancel_verified(&self, order_id: &str) -> impl Future<Output = Result<bool>> + Send {
         self.cancel_order_verified(order_id)
     }
+    fn open_orders(&self, token_id: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
+        self.fetch_open_order_ids(token_id)
+    }
+    fn cancel_many(&self, order_ids: &[String]) -> impl Future<Output = Result<Vec<String>>> + Send {
+        self.cancel_orders(order_ids)
+    }
 }
 
 /// A cancel still unconfirmed after this long is retried by the 30 s timer.
@@ -91,6 +101,97 @@ const CANCEL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(20);
 pub const CANCEL_ALERT_AFTER: u32 = 3;
 /// After a first "not enough balance", wait this long and try once more: a fill
 /// that is still settling can lock collateral for a few seconds.
+/// After an unclear placement, wait this long before checking the market's open
+/// orders, so an order that was accepted has time to show up.
+const RECONCILE_AFTER_UNCLEAR: Duration = Duration::from_secs(2);
+
+/// Check one market's open orders against what the legs track, and cancel any
+/// that no leg tracks: an order from an unclear placement, an orphan whose
+/// cancel failed, or a leftover of a removed leg. (The startup check does the
+/// same for every farmed market.) Never touches a market while a placement on
+/// it is in flight, so an order that is just landing isn't mistaken for a
+/// stray one. Clears the market's "check before placing" mark once it's clean.
+/// Returns how many orders it cancelled.
+pub async fn reconcile<A: OrderApi>(api: &A, state: &RwLock<AppState>, alerter: &Alerter, token: &str) -> usize {
+    {
+        let mut s = state.write().await;
+        if s.heartbeat_paused || !s.reconciling.insert(token.to_string()) {
+            return 0; // Polymarket unreachable, or already being checked
+        }
+    }
+    let cancelled = reconcile_inner(api, state, alerter, token).await;
+    state.write().await.reconciling.remove(token);
+    cancelled
+}
+
+async fn reconcile_inner<A: OrderApi>(api: &A, state: &RwLock<AppState>, alerter: &Alerter, token: &str) -> usize {
+    let placing = |s: &AppState| {
+        s.configs
+            .iter()
+            .any(|c| c.token_id == token && matches!(s.order_status.get(&c.id), Some(OrderStatus::Placing { .. })))
+    };
+    if placing(&*state.read().await) {
+        return 0;
+    }
+    let open = match api.open_orders(token).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            warn!("Order check for token {}…: couldn't list open orders: {e}", token.get(..8).unwrap_or(token));
+            return 0;
+        }
+    };
+    // Decide under the lock, after listing: an order that became tracked
+    // meanwhile is excluded; a placement started meanwhile defers the check.
+    let (stray, label) = {
+        let mut s = state.write().await;
+        if placing(&s) {
+            return 0;
+        }
+        let tracked: std::collections::HashSet<&str> = s
+            .configs
+            .iter()
+            .filter(|c| c.token_id == token)
+            .filter_map(|c| match s.order_status.get(&c.id) {
+                Some(OrderStatus::Live { order_id, .. } | OrderStatus::Cancelling { order_id, .. }) => {
+                    Some(order_id.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        let stray: Vec<String> = open.into_iter().filter(|id| !tracked.contains(id.as_str())).collect();
+        if stray.is_empty() {
+            s.reconcile_tokens.remove(token);
+            return 0;
+        }
+        let label = s.configs.iter().find(|c| c.token_id == token).map(|c| c.label.clone());
+        (stray, label.unwrap_or_else(|| format!("token {}…", token.get(..8).unwrap_or(token))))
+    };
+    match api.cancel_many(&stray).await {
+        Ok(still_open) => {
+            let n = stray.len() - still_open.len();
+            if n > 0 {
+                alerter.warn(format!(
+                    "Cancelled {n} order(s) on '{label}' that no leg was tracking (from a placement that timed out, \
+                     a failed cancel, or placed by hand)."
+                ));
+            }
+            if still_open.is_empty() {
+                state.write().await.reconcile_tokens.remove(token);
+            } else {
+                warn!(
+                    "Order check on '{label}': {} order(s) still open — retrying on the next check",
+                    still_open.len()
+                );
+            }
+            n
+        }
+        Err(e) => {
+            warn!("Order check on '{label}': cancelling {} untracked order(s) failed: {e}", stray.len());
+            0
+        }
+    }
+}
+
 /// Placement outages in a row for one leg before the user is told (once).
 const OUTAGE_ALERT_AFTER: u32 = 5;
 pub const LOW_BALANCE_RETRY: Duration = Duration::from_secs(15);
@@ -296,6 +397,10 @@ pub fn aligned(price: Decimal, tick: Decimal) -> bool {
 /// place twice, and returns the attempt id that now owns it.
 pub fn begin_place(s: &mut AppState, config_id: &str, price: Decimal, now: Instant) -> Option<u64> {
     if s.heartbeat_paused || s.feed_down || s.stopping {
+        return None;
+    }
+    // A placement on this market went unclear: its open orders are checked first.
+    if s.configs.iter().any(|c| c.id == config_id && s.reconcile_tokens.contains(&c.token_id)) {
         return None;
     }
     if s.place_retry_at.get(config_id).is_some_and(|at| now < *at) {
@@ -550,6 +655,19 @@ pub async fn run_place<A: OrderApi>(
         }
         Err(e) => {
             let msg = e.to_string();
+            // A network error, timeout or 5xx may come after the order reached
+            // Polymarket. Check that market's open orders before any leg there
+            // places again, so an order that did land isn't left untracked
+            // beside a second one.
+            if is_transient(&msg) {
+                state.write().await.reconcile_tokens.insert(token_id.clone());
+                let (api, state, alerter, token) =
+                    (Arc::clone(&api), Arc::clone(&state), Arc::clone(&alerter), token_id.clone());
+                tokio::spawn(async move {
+                    tokio::time::sleep(RECONCILE_AFTER_UNCLEAR).await;
+                    reconcile(&*api, &state, &alerter, &token).await;
+                });
+            }
             // Not enough funds (or collateral briefly locked by a settling fill):
             // retry once, then pause the leg and say so. Never a "failure".
             if is_low_balance(&msg) {
@@ -831,7 +949,9 @@ mod tests {
             api.script(Err(err));
             let n = i as u32 + 1;
             assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Outage { tries: n }));
-            tokio::time::advance(retry_delay(n) + Duration::from_millis(10)).await;
+            // Wait out the backoff; meanwhile the market's order check runs
+            // (an unclear placement blocks the leg until it has).
+            tokio::time::sleep(retry_delay(n) + Duration::from_millis(10)).await;
         }
         {
             let s = e.state.read().await;
@@ -841,6 +961,81 @@ mod tests {
         // Back up: placed, and the outage count is cleared.
         assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Placed));
         assert!(e.state.read().await.place_outage.is_empty());
+    }
+
+    /// The order check cancels only what no leg tracks, and clears the
+    /// market's "check before placing" mark once it's clean.
+    #[tokio::test]
+    async fn the_order_check_cancels_only_untracked_orders() {
+        let e = env(vec![leg("a", dec!(0.01)), leg("b", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        {
+            let mut s = e.state.write().await;
+            s.order_status.insert("a".into(), OrderStatus::Live { order_id: "mine-a".into(), price: dec!(0.2) });
+            s.order_status.insert(
+                "b".into(),
+                OrderStatus::Cancelling { order_id: "mine-b".into(), since: std::time::Instant::now() },
+            );
+            s.reconcile_tokens.insert(TOKEN.into());
+        }
+        api.open
+            .lock()
+            .unwrap()
+            .insert(TOKEN.into(), ["mine-a", "mine-b", "stray-1", "stray-2"].map(String::from).to_vec());
+        assert_eq!(reconcile(&*api, &e.state, &e.alerter, TOKEN).await, 2);
+        assert_eq!(*api.bulk_cancelled.lock().unwrap(), vec!["stray-1".to_string(), "stray-2".to_string()]);
+        let s = e.state.read().await;
+        assert!(s.reconcile_tokens.is_empty() && s.reconciling.is_empty());
+        assert_eq!(s.order_status.get("a"), Some(&OrderStatus::Live { order_id: "mine-a".into(), price: dec!(0.2) }));
+        drop(s);
+        assert!(alerts(&e).contains("Cancelled 2 order(s) on 'leg a' that no leg was tracking"));
+        // Clean now: nothing more to do.
+        assert_eq!(reconcile(&*api, &e.state, &e.alerter, TOKEN).await, 0);
+    }
+
+    /// A market with a placement in flight is left alone (its order may be
+    /// landing and not tracked yet); a failed listing changes nothing.
+    #[tokio::test]
+    async fn the_order_check_never_touches_a_landing_order_and_survives_errors() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        api.open.lock().unwrap().insert(TOKEN.into(), vec!["landing".into()]);
+        {
+            let mut s = e.state.write().await;
+            s.order_status.insert("a".into(), OrderStatus::Placing { price: dec!(0.2) });
+            s.reconcile_tokens.insert(TOKEN.into());
+        }
+        assert_eq!(reconcile(&*api, &e.state, &e.alerter, TOKEN).await, 0);
+        assert!(api.bulk_cancelled.lock().unwrap().is_empty());
+        assert!(e.state.read().await.reconcile_tokens.contains(TOKEN), "still to check");
+
+        e.state.write().await.order_status.insert("a".into(), OrderStatus::Idle);
+        *api.list_fails.lock().unwrap() = true;
+        assert_eq!(reconcile(&*api, &e.state, &e.alerter, TOKEN).await, 0);
+        assert!(e.state.read().await.reconcile_tokens.contains(TOKEN), "unknown: still to check");
+        assert!(e.state.read().await.reconciling.is_empty(), "the check slot is freed");
+    }
+
+    /// The bug behind it: a placement that times out (or hits a network
+    /// error / 5xx) may still have reached Polymarket. Its leg must not place
+    /// again until that market's open orders are checked — then the stray order
+    /// is cancelled and placing resumes.
+    #[tokio::test(start_paused = true)]
+    async fn an_unclear_placement_blocks_the_market_until_its_orders_are_checked() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        api.script(Err("placing the order timed out after 15s"));
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Outage { tries: 1 }));
+        // It did land, though.
+        api.open.lock().unwrap().insert(TOKEN.into(), vec!["landed-anyway".into()]);
+        let later = Instant::now() + Duration::from_secs(60);
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), later).await, None, "blocked until checked");
+        // The check runs shortly after: the stray order is cancelled, placing resumes.
+        tokio::time::sleep(RECONCILE_AFTER_UNCLEAR + Duration::from_millis(50)).await;
+        assert_eq!(*api.bulk_cancelled.lock().unwrap(), vec!["landed-anyway".to_string()]);
+        assert!(e.state.read().await.reconcile_tokens.is_empty());
+        let later = Instant::now() + Duration::from_secs(60);
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), later).await, Some(Outcome::Placed));
     }
 
     #[test]

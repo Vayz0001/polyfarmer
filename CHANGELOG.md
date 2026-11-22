@@ -56,6 +56,13 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: calls to Polymarket can no longer hang forever, and stray orders are cleaned up.** The Polymarket
+  library sets no time limit, so a stalled connection could freeze the heartbeat watchdog, leave a leg "placing"
+  for good, or block a shutdown or Remove. Every call now has a limit (5 to 30 seconds); a timeout counts as an
+  outage. A placement that times out or hits a network error may still have gone through, so the bot now checks
+  that market's open orders before placing there again. Every 30 seconds it also checks each market it farms and
+  **cancels any open order no leg is tracking** (from a placement that timed out, a failed cancel, or one placed by
+  hand on that market), with an alert.
 - **Engine: shutdown leaves no orders behind.** Stopping the bot cancelled the orders it was tracking at that
   moment, but an order still being placed could land just after and stay up once the bot had exited. A stop signal
   arriving while the bot was busy starting could also be missed, so it kept trading until the service killed it. Now

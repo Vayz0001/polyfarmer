@@ -19,6 +19,32 @@ const CLOB_URL: &str = "https://clob.polymarket.com";
 const POLYGON_CHAIN_ID: u64 = 137;
 const TERMINAL_CURSOR: &str = "LTE="; // base64("-1") — signals end of pagination
 const RETRY_ATTEMPTS: u32 = 3;
+
+// Time limits on calls to Polymarket. The SDK's HTTP client has none, so a
+// stalled connection would otherwise wait forever: a hung heartbeat would never
+// count as a failure, a hung placement would leave its leg "Placing" for good,
+// and a hung cancel would block a shutdown or a Remove. Each retry attempt gets
+// its own limit. A timeout's message says "timed out", which the placer treats
+// as an outage (placer::is_transient), not a rejection.
+const HEARTBEAT_LIMIT: Duration = Duration::from_secs(5);
+const CANCEL_LIMIT: Duration = Duration::from_secs(10);
+const LIST_LIMIT: Duration = Duration::from_secs(10);
+const PLACE_LIMIT: Duration = Duration::from_secs(15);
+const READ_LIMIT: Duration = Duration::from_secs(10);
+const REWARDS_LIMIT: Duration = Duration::from_secs(20);
+const SIGN_IN_LIMIT: Duration = Duration::from_secs(30);
+
+/// Run one call to Polymarket with a time limit.
+async fn bounded<T, E, F>(what: &str, limit: Duration, call: F) -> Result<T>
+where
+    F: std::future::Future<Output = std::result::Result<T, E>>,
+    E: Into<eyre::Report>,
+{
+    match tokio::time::timeout(limit, call).await {
+        Ok(r) => r.map_err(Into::into),
+        Err(_) => Err(eyre::eyre!("{what} timed out after {}s", limit.as_secs())),
+    }
+}
 const RETRY_BASE_MS: u64 = 200;
 
 /// Our token ids are decimal strings; the SDK takes a typed U256.
@@ -73,7 +99,7 @@ impl Executor {
             SignatureType::Eoa => auth.signature_type(SignatureType::Eoa),
             other => auth.funder(proxy_wallet).signature_type(other),
         };
-        let client = auth.authenticate().await?;
+        let client = bounded("signing in to Polymarket", SIGN_IN_LIMIT, auth.authenticate()).await?;
 
         info!("Authenticated with Polymarket CLOB ({sig_type:?})");
         Ok(Self { client, signer })
@@ -92,7 +118,10 @@ impl Executor {
     /// per token for the life of the process, so it can be stale.
     pub async fn sdk_tick(&self, token_id: &str) -> Result<Decimal> {
         let token = parse_token(token_id)?;
-        Ok(self.client.tick_size(token).await?.minimum_tick_size.as_decimal())
+        Ok(bounded("reading the tick size", READ_LIMIT, self.client.tick_size(token))
+            .await?
+            .minimum_tick_size
+            .as_decimal())
     }
 
     /// Read the current tick size from Polymarket, replacing the SDK's cached
@@ -102,7 +131,10 @@ impl Executor {
     pub async fn refresh_tick(&self, token_id: &str) -> Result<Decimal> {
         let token = parse_token(token_id)?;
         self.client.invalidate_internal_caches();
-        Ok(self.client.tick_size(token).await?.minimum_tick_size.as_decimal())
+        Ok(bounded("reading the tick size", READ_LIMIT, self.client.tick_size(token))
+            .await?
+            .minimum_tick_size
+            .as_decimal())
     }
 
     /// Tell the order library about a tick size we learned elsewhere (the
@@ -126,11 +158,21 @@ impl Executor {
         // tick although it is 0.21. Drop trailing zeros first.
         let price = price.normalize();
 
-        let order =
-            self.client.limit_order().token_id(token_id_u256).price(price).size(size).side(Side::Buy).build().await?;
-
-        let signed = self.client.sign(&self.signer, order).await?;
-        let response = self.client.post_order(signed).await?;
+        // One limit over building (may read market info), signing and posting.
+        let response = bounded("placing the order", PLACE_LIMIT, async {
+            let order = self
+                .client
+                .limit_order()
+                .token_id(token_id_u256)
+                .price(price)
+                .size(size)
+                .side(Side::Buy)
+                .build()
+                .await?;
+            let signed = self.client.sign(&self.signer, order).await?;
+            Ok::<_, eyre::Report>(self.client.post_order(signed).await?)
+        })
+        .await?;
         let order_id = accepted_order_id(response.success, &response.order_id, response.error_msg.as_deref())?;
 
         info!("Order placed: {} @ {} size {}", order_id, price, size);
@@ -146,7 +188,7 @@ impl Executor {
             // Use the bulk endpoint — the singular DELETE /order endpoint returns
             // "can't be found" even for live orders (confirmed Polymarket bug).
             // The bulk endpoint (DELETE /orders) works correctly.
-            match self.client.cancel_orders(&[order_id]).await {
+            match bounded("cancelling the order", CANCEL_LIMIT, self.client.cancel_orders(&[order_id])).await {
                 Ok(response) => {
                     let id_lower = order_id.to_lowercase();
                     let cancelled = response.canceled.iter().any(|id| id.to_lowercase() == id_lower);
@@ -188,7 +230,7 @@ impl Executor {
                 }
             }
         }
-        Err(last_err.unwrap().into())
+        Err(last_err.unwrap())
     }
 
     /// Cancel an order and verify the result via GET /order when the cancel
@@ -210,7 +252,11 @@ impl Executor {
             return Ok(true);
         }
         info!("cancel_order ambiguous for {} — verifying via GET /order", order_id);
-        match self.client.order(order_id).await {
+        let looked = match tokio::time::timeout(CANCEL_LIMIT, self.client.order(order_id)).await {
+            Ok(r) => r,
+            Err(_) => return Err(eyre::eyre!("checking order {order_id} timed out after {}s", CANCEL_LIMIT.as_secs())),
+        };
+        match looked {
             Err(e) if is_not_found(&e) => {
                 info!("Order {} confirmed gone via GET /order", order_id);
                 Ok(true)
@@ -252,7 +298,7 @@ impl Executor {
         let ids_ref: Vec<&str> = order_ids.iter().map(|s| s.as_str()).collect();
         let mut last_err = None;
         for attempt in 1..=RETRY_ATTEMPTS {
-            match self.client.cancel_orders(&ids_ref).await {
+            match bounded("cancelling orders", CANCEL_LIMIT, self.client.cancel_orders(&ids_ref)).await {
                 Ok(response) => {
                     for id in &response.canceled {
                         info!("Cancelled order {}", id);
@@ -275,12 +321,12 @@ impl Executor {
                 }
             }
         }
-        Err(last_err.unwrap().into())
+        Err(last_err.unwrap())
     }
 
     /// Fetch all open order IDs for a single token_id, handling pagination.
     /// Retries each page fetch on transient errors.
-    async fn fetch_open_order_ids(&self, token_id: &str) -> Result<Vec<String>> {
+    pub async fn fetch_open_order_ids(&self, token_id: &str) -> Result<Vec<String>> {
         use polymarket_client_sdk_v2::clob::types::request::OrdersRequest;
         // SDK V2: asset_id is a typed U256; parse our decimal-string token id.
         let asset_id = U256::from_str(token_id).map_err(|e| eyre::eyre!("invalid token_id {token_id}: {e}"))?;
@@ -292,7 +338,7 @@ impl Executor {
             let mut last_err = None;
             let page = 'retry: {
                 for attempt in 1..=RETRY_ATTEMPTS {
-                    match self.client.orders(&req, cursor.clone()).await {
+                    match bounded("listing open orders", LIST_LIMIT, self.client.orders(&req, cursor.clone())).await {
                         Ok(p) => break 'retry p,
                         Err(e) => {
                             warn!("orders() attempt {}/{}: {}", attempt, RETRY_ATTEMPTS, e);
@@ -357,7 +403,7 @@ impl Executor {
     /// 3 consecutive failures trigger selective cancel of bot-managed orders as a safety net.
     /// Note: GTC orders do NOT expire without this call — it is purely a watchdog.
     pub async fn send_heartbeat(&self) -> Result<()> {
-        self.client.api_keys().await?;
+        bounded("the heartbeat", HEARTBEAT_LIMIT, self.client.api_keys()).await?;
         Ok(())
     }
 
@@ -369,7 +415,7 @@ impl Executor {
     /// Batch scoring check — one call for the whole markets table instead of
     /// one per row.
     pub async fn are_orders_scoring(&self, order_ids: &[&str]) -> Result<HashMap<String, bool>> {
-        Ok(self.client.are_orders_scoring(order_ids).await?)
+        bounded("checking scoring", READ_LIMIT, self.client.are_orders_scoring(order_ids)).await
     }
 
     /// Your reward-eligible markets with both the market's reward config and
@@ -407,7 +453,12 @@ impl Executor {
         let mut kept = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..MAX_PAGES {
-            let page = self.client.user_earnings_and_markets_config(&request, cursor.clone()).await?;
+            let page = bounded(
+                "reading rewards",
+                REWARDS_LIMIT,
+                self.client.user_earnings_and_markets_config(&request, cursor.clone()),
+            )
+            .await?;
             let reached_end = page.data.iter().any(|e| !relevant(e));
             kept.extend(page.data.into_iter().filter(relevant));
             if reached_end || page.next_cursor == TERMINAL_CURSOR {
@@ -424,7 +475,7 @@ impl Executor {
         use polymarket_client_sdk_v2::clob::types::request::BalanceAllowanceRequest;
         use polymarket_client_sdk_v2::clob::types::AssetType;
         let req = BalanceAllowanceRequest::builder().asset_type(AssetType::Collateral).build();
-        let resp = self.client.balance_allowance(req).await?;
+        let resp = bounded("reading the balance", READ_LIMIT, self.client.balance_allowance(req)).await?;
         Ok(resp.balance / Decimal::from(1_000_000u32))
     }
 }
@@ -570,6 +621,19 @@ mod verify_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A call to Polymarket that never answers ends at its limit, with an
+    /// error the placer treats as an outage (not a rejection).
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_call_times_out_as_an_outage() {
+        let stalled = std::future::pending::<std::result::Result<(), eyre::Report>>();
+        let err = bounded("the heartbeat", HEARTBEAT_LIMIT, stalled).await.unwrap_err().to_string();
+        assert_eq!(err, "the heartbeat timed out after 5s");
+        assert!(crate::engine::placer::is_transient(&err));
+        // A quick answer passes through, errors included.
+        assert_eq!(bounded("x", READ_LIMIT, async { Ok::<_, eyre::Report>(7) }).await.unwrap(), 7);
+        assert!(bounded("x", READ_LIMIT, async { Err::<(), _>(eyre::eyre!("nope")) }).await.is_err());
+    }
 
     #[test]
     fn a_rejected_reply_is_an_error_not_a_placed_order() {

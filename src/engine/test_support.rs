@@ -39,6 +39,12 @@ pub(crate) struct Fake {
     pub(crate) verify: Mutex<VecDeque<std::result::Result<bool, String>>>,
     /// Makes `cancel_verified` hang (to exercise the timeout).
     pub(crate) verify_hangs: Mutex<bool>,
+    /// Open orders per token, as `open_orders` reports them.
+    pub(crate) open: Mutex<std::collections::HashMap<String, Vec<String>>>,
+    /// Makes `open_orders` fail (network).
+    pub(crate) list_fails: Mutex<bool>,
+    /// Orders cancelled through `cancel_many`.
+    pub(crate) bulk_cancelled: Mutex<Vec<String>>,
 }
 
 impl Fake {
@@ -54,6 +60,9 @@ impl Fake {
             cancelled: Mutex::new(Vec::new()),
             verify: Mutex::new(VecDeque::new()),
             verify_hangs: Mutex::new(false),
+            open: Mutex::new(std::collections::HashMap::new()),
+            list_fails: Mutex::new(false),
+            bulk_cancelled: Mutex::new(Vec::new()),
         })
     }
     pub(crate) fn script(&self, r: std::result::Result<(), &str>) {
@@ -111,6 +120,20 @@ impl OrderApi for Fake {
             Some(Err(e)) => Err(eyre::eyre!(e)),
             None => Ok(true),
         }
+    }
+    async fn open_orders(&self, token_id: &str) -> Result<Vec<String>> {
+        if *self.list_fails.lock().unwrap() {
+            return Err(eyre::eyre!("Internal: error sending request"));
+        }
+        Ok(self.open.lock().unwrap().get(token_id).cloned().unwrap_or_default())
+    }
+    async fn cancel_many(&self, order_ids: &[String]) -> Result<Vec<String>> {
+        let mut open = self.open.lock().unwrap();
+        for ids in open.values_mut() {
+            ids.retain(|id| !order_ids.contains(id));
+        }
+        self.bulk_cancelled.lock().unwrap().extend(order_ids.iter().cloned());
+        Ok(Vec::new())
     }
 }
 
