@@ -40,7 +40,7 @@ fn load_markets_inner(path: &Path) -> Result<Vec<MarketConfig>> {
 }
 
 /// Write market configs back to disk atomically (temp + rename).
-/// Called by the Rust bot when auto-removing a broken market after repeated failures.
+/// Called by the engine (auto-pause, tick change, pause after rejections) and the dashboard.
 pub fn save_markets(path: &Path, configs: &[MarketConfig]) -> Result<()> {
     let data = serde_json::to_string_pretty(configs)? + "\n";
     crate::fsutil::write_private_atomic(path, data.as_bytes())

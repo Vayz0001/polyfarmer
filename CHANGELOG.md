@@ -56,6 +56,11 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: a leg is never deleted automatically any more.** Three failed placements in a row used to remove the
+  leg from your markets for good, and network blips, timeouts and Polymarket being busy (5xx, rate limits) counted
+  as failures, so a short outage could wipe every leg. Now outages only back off (2 seconds doubling to a minute)
+  and never count, with one alert if they keep happening; three real rejections in a row **pause** the leg (saved)
+  with an alert giving Polymarket's reason. Fix it in Edit and Resume.
 - **Engine: an order Polymarket rejects is no longer treated as placed.** Polymarket can answer a placement with
   "success: false" and no order id. The bot took that as a placed order, so the leg showed Live on an order that
   didn't exist and then stayed stuck "cancelling" it. It's now a rejection with Polymarket's reason; a refusal for

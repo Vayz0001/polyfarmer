@@ -1973,6 +1973,7 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool, restart_from: Opt
             // nor the two-sided rule's back-off (engine::pairing).
             s.place_retry_at.remove(id);
             s.place_failures.remove(id);
+            s.place_outage.remove(id);
             s.pair_retry_at.remove(id);
             s.pair_pulls.remove(id);
             s.pair_alone_since.remove(id);

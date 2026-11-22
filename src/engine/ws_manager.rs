@@ -48,7 +48,7 @@ pub struct AppState {
     /// Unconfirmed cancel retries per leg: (order id, failed tries). The count
     /// restarts whenever the leg is cancelling a different order.
     pub cancel_failures: HashMap<String, (String, u32)>,
-    /// Path to markets.json — needed to save after auto-removing a broken market
+    /// Path to markets.json — saved by engine-side changes (auto-pause, tick change, pause after rejections)
     pub markets_file: PathBuf,
     /// Set by heartbeat after 3 consecutive failures + order cancel.
     /// Prevents new placements until heartbeat recovers.
@@ -86,6 +86,9 @@ pub struct AppState {
     /// The market feed dropped and hasn't reconnected: books are cleared and
     /// nothing is placed (`placer::begin_place`) until it's back.
     pub feed_down: bool,
+    /// Placement failures in a row that were outages (network, 5xx, 429), not
+    /// rejections: they only back off (`placer::outage`).
+    pub place_outage: HashMap<String, u32>,
 }
 
 impl AppState {
@@ -114,6 +117,7 @@ impl AppState {
             low_balance_paused: HashSet::new(),
             repegging: HashSet::new(),
             feed_down: false,
+            place_outage: HashMap::new(),
         }
     }
 }

@@ -8,11 +8,13 @@
 //!   Before each order we compare the two; on a mismatch we read the real tick
 //!   from Polymarket, adopt it, and either place or re-quote. A tick change is
 //!   never counted as a placement failure.
-//! * **Backoff.** A real failure delays the next attempt (2 s, 4 s, … up to a
+//! * **Backoff.** A failure delays the next attempt (2 s, 4 s, … up to a
 //!   minute) instead of retrying on the next book update, so a burst of book
-//!   events cannot use up the failure budget in milliseconds.
-//! * **Auto-remove.** After `MAX_PLACE_FAILURES` consecutive real failures the
-//!   leg is removed, as before.
+//!   events cannot use up the failure budget in milliseconds. An outage
+//!   (network, timeout, 5xx, 429) only backs off and is never counted.
+//! * **Pause after rejections.** After `MAX_PLACE_FAILURES` real rejections in
+//!   a row the leg is paused and saved, with an alert giving the reason. A leg
+//!   is never deleted by the engine.
 //!
 //! It also holds the cancel and auto-pause steps both callers share: a leg is
 //! freed (back to Idle, so it may quote again) only once Polymarket confirms
@@ -40,7 +42,7 @@ const RETRY_BASE: Duration = Duration::from_secs(2);
 const RETRY_MAX: Duration = Duration::from_secs(60);
 
 /// The exchange calls placement needs. `Executor` is the real one; tests use a
-/// fake so the whole flow (tick refresh, backoff, auto-remove) runs offline.
+/// fake so the whole flow (tick refresh, backoff, pause after rejections) runs offline.
 pub trait OrderApi: Send + Sync + 'static {
     /// Tick size the order library will validate against (may be cached).
     fn sdk_tick(&self, token_id: &str) -> impl Future<Output = Result<Decimal>> + Send;
@@ -89,6 +91,8 @@ const CANCEL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(20);
 pub const CANCEL_ALERT_AFTER: u32 = 3;
 /// After a first "not enough balance", wait this long and try once more: a fill
 /// that is still settling can lock collateral for a few seconds.
+/// Placement outages in a row for one leg before the user is told (once).
+const OUTAGE_ALERT_AFTER: u32 = 5;
 pub const LOW_BALANCE_RETRY: Duration = Duration::from_secs(15);
 /// A second "not enough balance" within this window pauses the leg.
 const LOW_BALANCE_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
@@ -102,7 +106,7 @@ pub fn is_low_balance(msg: &str) -> bool {
 /// it). The first time: retry once after [`LOW_BALANCE_RETRY`]. Again within
 /// [`LOW_BALANCE_WINDOW`]: pause the leg (saved), mark it for the dashboard
 /// ("No balance") and alert once. `cost` is the order's dollar value, for the
-/// message. Never counts as a placement failure, so it can't auto-remove a leg.
+/// message. Never counts as a placement failure.
 pub async fn low_balance(state: &RwLock<AppState>, alerter: &Alerter, config_id: &str, cost: Decimal) -> Outcome {
     let mut s = state.write().await;
     let now = std::time::Instant::now();
@@ -429,7 +433,12 @@ pub enum Outcome {
     Failed {
         failures: u32,
     },
-    AutoRemoved,
+    /// Rejected [`MAX_PLACE_FAILURES`] times in a row: the leg was paused.
+    PausedAfterRejections,
+    /// A network/Polymarket outage, not counted as a failure.
+    Outage {
+        tries: u32,
+    },
     /// Something reset the slot while we were placing (pause, remove, reconnect).
     Superseded,
 }
@@ -528,6 +537,7 @@ pub async fn run_place<A: OrderApi>(
             s.place_failures.remove(&config_id);
             s.place_retry_at.remove(&config_id);
             s.low_balance_since.remove(&config_id);
+            s.place_outage.remove(&config_id);
             let replaced = s.repegging.remove(&config_id);
             let (label, token_label) = names(&s, &config_id);
             drop(s);
@@ -572,55 +582,89 @@ pub async fn run_place<A: OrderApi>(
     }
 }
 
-/// Count a real failure: back off, and auto-remove the leg at the limit.
-async fn fail(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &str, attempt: u64, msg: String) -> Outcome {
-    error!("Place order failed: {msg}");
-    alerter.error(format!("Order placement failed: {msg}"));
-    let (failures, remove) = {
+/// A placement failure that says nothing about the order itself: the network,
+/// a timeout, or Polymarket busy or down (5xx, 429, session sync). The SDK
+/// reports network errors as `Internal: …` and HTTP ones as `Status: error(503
+/// …)`; a 4xx or a validation error is a real rejection.
+pub fn is_transient(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    m.starts_with("internal:")
+        || m.starts_with("synchronization")
+        || m.contains("error(5")
+        || m.contains("error(429")
+        || m.contains("timed out")
+        || m.contains("timeout")
+        || m.contains("connection")
+        || m.contains("error sending request")
+}
+
+/// An outage, not the order's fault: retry with a growing wait (2 s doubling
+/// to a minute), never counted as a failure, so it can't pause the leg. One
+/// alert if it keeps happening.
+async fn outage(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &str, attempt: u64, msg: &str) -> Outcome {
+    let (n, label) = {
         let mut s = state.write().await;
         if !release(&mut s, config_id, attempt) {
             return Outcome::Superseded;
         }
-        let failures = {
-            let f = s.place_failures.entry(config_id.to_string()).or_insert(0);
-            *f += 1;
-            *f
+        let n = {
+            let n = s.place_outage.entry(config_id.to_string()).or_insert(0);
+            *n += 1;
+            *n
         };
-        s.place_retry_at.insert(config_id.to_string(), Instant::now() + retry_delay(failures));
-        if failures < MAX_PLACE_FAILURES {
-            (failures, None)
-        } else {
-            let (label, _) = names(&s, config_id);
-            let remaining: Vec<_> = s.configs.iter().filter(|c| c.id != config_id).cloned().collect();
-            (failures, Some((label, remaining, s.markets_file.clone())))
-        }
+        s.place_retry_at.insert(config_id.to_string(), Instant::now() + retry_delay(n));
+        (n, names(&s, config_id).0)
     };
-    let Some((label, remaining, file)) = remove else {
-        return Outcome::Failed { failures };
-    };
-    match save_markets(&file, &remaining) {
-        Ok(()) => {
-            let mut s = state.write().await;
-            s.configs.retain(|c| c.id != config_id);
-            s.order_status.remove(config_id);
-            s.place_failures.remove(config_id);
-            s.place_retry_at.remove(config_id);
-            s.place_attempt.remove(config_id);
-            s.cancel_failures.remove(config_id);
-            drop(s);
-            alerter.error(format!(
-                "Market '{label}' auto-removed after {MAX_PLACE_FAILURES} consecutive placement failures"
-            ));
-            Outcome::AutoRemoved
-        }
-        Err(e) => {
-            error!("Failed to save markets after auto-remove of '{label}': {e}");
-            alerter.error(format!(
-                "Market '{label}' hit {MAX_PLACE_FAILURES} failures but save failed — will retry on next failure: {e}"
-            ));
-            Outcome::Failed { failures }
-        }
+    warn!("Placement for '{label}' failed for a network/Polymarket reason ({n} in a row) — retrying: {msg}");
+    if n == OUTAGE_ALERT_AFTER {
+        alerter.warn(format!(
+            "Can't place · {label}\nPolymarket or the network keeps failing ({msg}). Still retrying every minute."
+        ));
     }
+    Outcome::Outage { tries: n }
+}
+
+/// A real rejection: back off, and after [`MAX_PLACE_FAILURES`] in a row pause
+/// the leg (saved, under the lock) and say why. Never deletes it: a leg's
+/// settings are the user's, and a rejection is usually fixable (size, price,
+/// funds) — before, three in a row removed the leg for good.
+async fn fail(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &str, attempt: u64, msg: String) -> Outcome {
+    if is_transient(&msg) {
+        return outage(state, alerter, config_id, attempt, &msg).await;
+    }
+    error!("Place order failed: {msg}");
+    alerter.error(format!("Order placement failed: {msg}"));
+    let mut s = state.write().await;
+    if !release(&mut s, config_id, attempt) {
+        return Outcome::Superseded;
+    }
+    let failures = {
+        let f = s.place_failures.entry(config_id.to_string()).or_insert(0);
+        *f += 1;
+        *f
+    };
+    s.place_retry_at.insert(config_id.to_string(), Instant::now() + retry_delay(failures));
+    if failures < MAX_PLACE_FAILURES {
+        return Outcome::Failed { failures };
+    }
+    let Some(cfg) = s.configs.iter_mut().find(|c| c.id == config_id) else { return Outcome::Superseded };
+    cfg.paused = true;
+    let label = cfg.label.clone();
+    s.place_failures.remove(config_id);
+    s.place_retry_at.remove(config_id);
+    let saved = save_markets(&s.markets_file, &s.configs);
+    drop(s);
+    if let Err(e) = &saved {
+        error!("Could not save the pause of '{label}' after {MAX_PLACE_FAILURES} rejected placements: {e}");
+        alerter.error(format!(
+            "'{label}' is paused but the pause could not be saved: {e}\nIt would resume after a restart."
+        ));
+    }
+    alerter.error(format!(
+        "Paused · {label}\n{MAX_PLACE_FAILURES} placements in a row were rejected. Last reason: {msg}\nFix the leg \
+         (Edit) and Resume."
+    ));
+    Outcome::PausedAfterRejections
 }
 
 #[cfg(test)]
@@ -721,7 +765,7 @@ mod tests {
         assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Placed));
     }
 
-    // ── part 3: backoff and auto-remove ──────────────────────────────────
+    // ── part 3: backoff, outages and pause after rejections ─────────────
 
     #[test]
     fn retry_delay_doubles_and_is_capped() {
@@ -733,13 +777,15 @@ mod tests {
         assert_eq!(retry_delay(0), Duration::from_secs(2));
     }
 
+    /// Three real rejections in a row (spaced by the backoff) pause the leg and
+    /// save that — it used to be deleted for good. Other legs are untouched.
     #[tokio::test(start_paused = true)]
-    async fn failures_back_off_and_the_leg_is_removed_only_after_three_spaced_attempts() {
+    async fn rejections_back_off_and_the_leg_is_paused_not_removed_after_three() {
         use tokio::time::advance;
         let e = env(vec![leg("a", dec!(0.01)), leg("keep", dec!(0.01))]);
         let api = Fake::new(dec!(0.01), dec!(0.01));
         for _ in 0..3 {
-            api.script(Err("upstream error 500"));
+            api.script(Err("Status: error(400 Bad Request) making POST call to /order with invalid amount"));
         }
         let try_now = || attempt(&e, &api, "a", dec!(0.21), Instant::now());
         assert_eq!(try_now().await, Some(Outcome::Failed { failures: 1 }));
@@ -753,20 +799,76 @@ mod tests {
         advance(Duration::from_secs(3)).await;
         assert_eq!(try_now().await, None, "the second delay is 4 s");
         advance(Duration::from_millis(1100)).await;
-        assert_eq!(try_now().await, Some(Outcome::AutoRemoved));
+        assert_eq!(try_now().await, Some(Outcome::PausedAfterRejections));
         let s = e.state.read().await;
-        assert_eq!(s.configs.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["keep"]);
-        assert!(!s.order_status.contains_key("a") && !s.place_failures.contains_key("a"));
-        assert!(!s.place_retry_at.contains_key("a"), "no leftover entries");
+        assert_eq!(s.configs.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["a", "keep"], "nothing deleted");
+        assert!(s.configs[0].paused && !s.configs[1].paused);
+        assert!(!s.place_failures.contains_key("a") && !s.place_retry_at.contains_key("a"), "a fresh start on Resume");
         drop(s);
-        assert_eq!(saved_ticks(&e).len(), 1, "removal saved");
+        let saved: Vec<MarketConfig> =
+            serde_json::from_str(&std::fs::read_to_string(e.dir.join("markets.json")).unwrap()).unwrap();
+        assert!(saved.len() == 2 && saved[0].paused, "the pause is saved");
+        let text = alerts(&e);
+        assert!(text.contains("Paused · leg a") && text.contains("invalid amount"), "{text}");
+    }
+
+    /// Network errors, timeouts, 5xx and 429 say nothing about the order: they
+    /// back off (2 s doubling to a minute) but never count, so an outage can't
+    /// pause or delete legs. One alert if it keeps happening.
+    #[tokio::test(start_paused = true)]
+    async fn an_outage_backs_off_without_counting() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        let errors = [
+            "Internal: error sending request for url (https://clob.polymarket.com/order)",
+            "Status: error(503 Service Unavailable) making POST call to /order with ",
+            "Status: error(429 Too Many Requests) making POST call to /order with ",
+            "operation timed out",
+            "Status: error(502 Bad Gateway) making POST call to /order with ",
+            "connection reset by peer",
+        ];
+        for (i, err) in errors.iter().enumerate() {
+            api.script(Err(err));
+            let n = i as u32 + 1;
+            assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Outage { tries: n }));
+            tokio::time::advance(retry_delay(n) + Duration::from_millis(10)).await;
+        }
+        {
+            let s = e.state.read().await;
+            assert!(s.place_failures.is_empty() && !s.configs[0].paused, "never counted, never paused");
+        }
+        assert_eq!(alerts(&e).matches("Can't place · leg a").count(), 1, "told once");
+        // Back up: placed, and the outage count is cleared.
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Placed));
+        assert!(e.state.read().await.place_outage.is_empty());
+    }
+
+    #[test]
+    fn outages_and_rejections_are_told_apart() {
+        for t in [
+            "Internal: error sending request",
+            "Status: error(500 Internal Server Error) making POST call",
+            "Status: error(429 Too Many Requests) making POST call",
+            "Synchronization: …",
+            "request timed out",
+        ] {
+            assert!(is_transient(t), "{t}");
+        }
+        for r in [
+            "Status: error(400 Bad Request) making POST call to /order with invalid order",
+            "Validation: invalid: price 0.205 has 3 decimal places",
+            "order rejected: order size below minimum",
+            "Geoblock: trading restricted in your region",
+        ] {
+            assert!(!is_transient(r), "{r}");
+        }
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_success_clears_the_failure_count_and_the_delay() {
         let e = env(vec![leg("a", dec!(0.01))]);
         let api = Fake::new(dec!(0.01), dec!(0.01));
-        api.script(Err("timeout"));
+        api.script(Err("Status: error(400 Bad Request) making POST call to /order with invalid"));
         assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Failed { failures: 1 }));
         tokio::time::advance(Duration::from_secs(3)).await;
         assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Placed));
@@ -777,7 +879,7 @@ mod tests {
     /// "Not enough balance": the first time it retries once after a short wait
     /// (collateral can be locked while a fill settles); again within the window
     /// it pauses the leg, saves that, marks it for the dashboard and alerts once.
-    /// It is never a placement failure, so it can't auto-remove the leg.
+    /// It is never a placement failure.
     #[tokio::test]
     async fn not_enough_balance_retries_once_then_pauses() {
         let e = env(vec![leg("a", dec!(0.01))]);
@@ -964,12 +1066,15 @@ mod tests {
         assert!(matches!(e.state.read().await.order_status.get("a"), Some(OrderStatus::Placing { .. })));
     }
 
+    /// The tick couldn't be read because the network failed: nothing is placed
+    /// on an unknown tick, and it's an outage (retried), not a rejection.
     #[tokio::test]
-    async fn an_unreadable_tick_counts_as_a_failure() {
+    async fn an_unreadable_tick_is_an_outage_not_a_failure() {
         let e = env(vec![leg("a", dec!(0.001))]);
         let api = Fake::new(dec!(0.01), dec!(0.001));
         *api.refresh_fails.lock().unwrap() = true;
-        assert_eq!(attempt(&e, &api, "a", dec!(0.213), Instant::now()).await, Some(Outcome::Failed { failures: 1 }));
+        assert_eq!(attempt(&e, &api, "a", dec!(0.213), Instant::now()).await, Some(Outcome::Outage { tries: 1 }));
+        assert!(e.state.read().await.place_failures.is_empty(), "not counted");
         assert!(api.placed.lock().unwrap().is_empty(), "nothing placed on an unknown tick");
         assert_eq!(e.state.read().await.configs[0].tick_size, dec!(0.001), "config untouched");
     }
@@ -998,8 +1103,10 @@ mod tests {
         assert_eq!(*api.refreshes.lock().unwrap(), 1, "no request once they agree");
     }
 
+    /// If saving the pause fails, the leg is still paused now and the user is
+    /// told it would resume after a restart.
     #[tokio::test(start_paused = true)]
-    async fn auto_remove_keeps_the_leg_if_the_save_fails() {
+    async fn a_pause_after_rejections_that_cannot_be_saved_is_reported() {
         let e = env(vec![leg("a", dec!(0.01))]);
         // Make the save fail: markets.json becomes a directory.
         let file = e.dir.join("markets.json");
@@ -1007,14 +1114,17 @@ mod tests {
         std::fs::create_dir(&file).unwrap();
         let api = Fake::new(dec!(0.01), dec!(0.01));
         for _ in 0..3 {
-            api.script(Err("upstream error 500"));
+            api.script(Err("Status: error(400 Bad Request) making POST call to /order with nope"));
         }
         for n in 1..=2 {
             assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Failed { failures: n }));
             tokio::time::advance(Duration::from_secs(61)).await;
         }
-        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Failed { failures: 3 }));
-        assert_eq!(e.state.read().await.configs.len(), 1, "memory and disk stay in step");
+        assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::PausedAfterRejections));
+        let s = e.state.read().await;
+        assert!(s.configs.len() == 1 && s.configs[0].paused);
+        drop(s);
+        assert!(alerts(&e).contains("could not be saved"));
     }
 
     #[tokio::test]
