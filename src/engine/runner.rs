@@ -429,4 +429,16 @@ mod tests {
         assert_eq!(*api.placed.lock().unwrap(), vec![dec!(0.28)]);
         assert!(alerts(&e).contains("Order replaced · leg a"));
     }
+
+    /// The race behind it: a Place is decided, then the leg is paused on the
+    /// dashboard before the runner gets to it. Nothing may reach Polymarket.
+    #[tokio::test]
+    async fn a_place_decided_before_a_pause_places_nothing() {
+        let (e, api, n) = setup(vec![leg("a", dec!(0.01))]);
+        let decided = vec![d("a", QuoteAction::Place { price: dec!(0.20) })];
+        e.state.write().await.configs[0].paused = true; // the pause lands in between
+        run(&e, &api, &n, decided).await;
+        assert!(api.placed.lock().unwrap().is_empty());
+        assert_eq!(e.state.read().await.order_status.get("a"), None);
+    }
 }

@@ -399,8 +399,16 @@ pub fn begin_place(s: &mut AppState, config_id: &str, price: Decimal, now: Insta
     if s.heartbeat_paused || s.feed_down || s.stopping {
         return None;
     }
+    // Re-check the leg itself at claim time: the decision may be a moment old,
+    // and the leg paused (dashboard, auto-pause, "No balance"), expired or
+    // removed since. Placing then would put an order on a stopped leg, and a
+    // removed leg would be left with a "Placing" status nothing clears.
+    let c = s.configs.iter().find(|c| c.id == config_id)?;
+    if c.paused || c.expires_at <= chrono::Utc::now() || s.low_balance_paused.contains(config_id) {
+        return None;
+    }
     // A placement on this market went unclear: its open orders are checked first.
-    if s.configs.iter().any(|c| c.id == config_id && s.reconcile_tokens.contains(&c.token_id)) {
+    if s.reconcile_tokens.contains(&c.token_id) {
         return None;
     }
     if s.place_retry_at.get(config_id).is_some_and(|at| now < *at) {
@@ -1195,6 +1203,29 @@ mod tests {
         assert!(is_low_balance("not enough balance / allowance"));
         assert!(is_low_balance("PolyApi: Not Enough Balance"));
         assert!(!is_low_balance("invalid tick size"));
+    }
+
+    /// A decision made a moment ago must not place on a leg that has since been
+    /// paused, expired or removed (the claim re-checks the leg itself).
+    #[tokio::test]
+    async fn the_claim_rechecks_a_paused_expired_or_removed_leg() {
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let mut s = e.state.write().await;
+        let claim = |s: &mut AppState, id: &str| begin_place(s, id, dec!(0.2), Instant::now());
+        s.configs[0].paused = true;
+        assert_eq!(claim(&mut s, "a"), None, "paused since the decision");
+        s.configs[0].paused = false;
+        s.low_balance_paused.insert("a".into());
+        assert_eq!(claim(&mut s, "a"), None, "stopped for lack of funds");
+        s.low_balance_paused.clear();
+        s.configs[0].expires_at = chrono::Utc::now() - chrono::Duration::seconds(1);
+        assert_eq!(claim(&mut s, "a"), None, "expired");
+        assert_eq!(s.order_status.get("a"), None, "none of these left a status behind");
+        // Removed: no phantom "Placing" entry for a leg that no longer exists.
+        assert_eq!(claim(&mut s, "gone"), None);
+        assert!(!s.order_status.contains_key("gone"));
+        s.configs[0].expires_at = chrono::Utc::now() + chrono::Duration::hours(1);
+        assert!(claim(&mut s, "a").is_some(), "a live leg still places");
     }
 
     /// While the market feed is down (books cleared, bulk cancel in progress),
