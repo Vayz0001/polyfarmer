@@ -56,6 +56,11 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: a reconnect no longer forgets an order placed while it was cancelling.** After the market feed dropped,
+  the bot cancelled its orders and then reset every leg, including one whose order landed during that cancel, so
+  the order was forgotten and the leg could place a second one beside it. Now placement stops the moment the feed
+  drops (its order books are cleared until it reconnects), and only the legs whose orders were in the cancel are
+  reset. The heartbeat's cancel works the same way, and pauses placement before cancelling instead of after.
 - **Engine: a re-peg's new order gets the same checks as any other.** Moving an order cancelled the old one and
   placed the new one straight away at "best bid − distance", skipping the "Depth ahead" check, Polymarket's
   two-sided rule, tick handling, retries and the "No balance" handling. Now, once the old order is confirmed gone,

@@ -56,8 +56,11 @@ pub fn spawn(
 
                                 // Include Cancelling — the in-flight cancel may not have
                                 // completed before the CLOB became unreachable; re-cancel is idempotent.
+                                // Pause placement first, in the same step as collecting the
+                                // orders, so nothing is placed while they're being cancelled.
                                 let live_order_ids: Vec<String> = {
-                                    let s = state.read().await;
+                                    let mut s = state.write().await;
+                                    s.heartbeat_paused = true;
                                     s.order_status.values().filter_map(|status| {
                                         match status {
                                             OrderStatus::Live { order_id, .. } |
@@ -74,7 +77,12 @@ pub fn spawn(
                                         // cancelling it (placer::confirm_stuck_cancel).
                                         let mut s = state.write().await;
                                         for status in s.order_status.values_mut() {
+                                            // Only orders in this cancel request: one placed
+                                            // meanwhile stays tracked.
                                             if let OrderStatus::Live { order_id, .. } = status {
+                                                if !live_order_ids.contains(order_id) {
+                                                    continue;
+                                                }
                                                 *status = if still_open.contains(order_id) {
                                                     OrderStatus::Cancelling {
                                                         order_id: order_id.clone(),
