@@ -56,6 +56,11 @@ anything may change between releases.
 
 ### Fixed
 
+- **Engine: the startup safety check no longer skips a market it couldn't read.** At start, the bot lists and
+  cancels any open orders on the markets it farms. If listing one market failed, it was only logged and the bot
+  started anyway, trading beside that market's old orders. Now that counts as a failed check: what was found is
+  still cancelled, and the start is retried. Reading a market's orders also stops after 50 pages instead of
+  possibly looping forever.
 - **Engine: a reconnect no longer forgets an order placed while it was cancelling.** After the market feed dropped,
   the bot cancelled its orders and then reset every leg, including one whose order landed during that cancel, so
   the order was forgotten and the leg could place a second one beside it. Now placement stops the moment the feed
