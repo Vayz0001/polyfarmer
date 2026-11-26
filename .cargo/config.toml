@@ -7,3 +7,8 @@
 # instead. Every other platform ignores this setting. To build the assembly from source regardless, install
 # NASM and set AWS_LC_SYS_PREBUILT_NASM=0 in your environment (an environment value wins over this file).
 AWS_LC_SYS_PREBUILT_NASM = "1"
+
+# Supply chain: never resolve a crate version published less than 7 days ago
+# (needs Rust 1.100 or newer; older cargo ignores it with a warning).
+[registry]
+global-min-publish-age = "7 days"

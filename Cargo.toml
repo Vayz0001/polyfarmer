@@ -66,3 +66,9 @@ libc = "0.2"
 tower = { version = "0.5", features = ["util"] }
 # paused clock for backoff tests (same tokio, test builds only)
 tokio = { version = "1", features = ["test-util"] }
+
+# `unsafe` is denied everywhere; the few places that need raw libc calls carry a
+# narrow #[allow(unsafe_code)] with the reason. Stricter clippy lints (unwrap, expect,
+# panic, print) are being turned on module by module: see AGENTS.md.
+[lints.rust]
+unsafe_code = "deny"
