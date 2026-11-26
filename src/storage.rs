@@ -185,6 +185,8 @@ mod tail_tests {
 }
 
 #[cfg(all(test, unix))]
+// Tests set the process umask through libc to prove files are created private.
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
     use crate::types::Alert;

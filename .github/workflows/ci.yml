@@ -37,6 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0 # gitleaks scans the whole history
           persist-credentials: false
 
       - name: Install Rust (stable)
@@ -44,15 +45,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: Formatting
-        run: cargo fmt --all --check
+      # Pinned release, checked against its published SHA-256 before it runs.
+      - name: Install gitleaks
+        run: |
+          curl -sSfL -o gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks && sudo mv gitleaks /usr/local/bin/ && rm gitleaks.tgz
 
-      # --locked: fail if Cargo.lock is out of date instead of silently changing it.
-      - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
-
-      - name: Tests
-        run: cargo test --locked
+      # The same script contributors and agents run locally: formatting, clippy -D warnings,
+      # cargo test --locked, shellcheck and gitleaks. (cargo-deny runs in its own job below.)
+      - name: ./check
+        run: ./check
 
   # The same build, lints and tests on the other systems we support. Kept as its own job
   # (not a matrix on the one above) so the required check name above never changes.

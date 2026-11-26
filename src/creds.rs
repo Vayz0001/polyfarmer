@@ -336,6 +336,8 @@ impl WalletCreds {
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+// Tests set the process umask through libc to prove files are created private.
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
 

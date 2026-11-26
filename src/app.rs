@@ -33,6 +33,8 @@ const START_RETRY: Duration = Duration::from_secs(10);
 /// No core files, and (on Linux) not dumpable, which also stops other processes
 /// of the same user from attaching with ptrace or reading `/proc/<pid>/mem`.
 #[cfg(unix)]
+// The one place product code needs `unsafe`: these settings exist only as raw libc calls.
+#[allow(unsafe_code)]
 fn harden_process() {
     let no_core = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
     // SAFETY: plain syscalls with valid arguments; no memory is shared or retained.
@@ -632,6 +634,8 @@ mod link_tests {
 }
 
 #[cfg(all(test, unix))]
+// Tests raise SIGTERM and read process limits through libc.
+#[allow(unsafe_code)]
 mod tests {
     use super::{AppState, OrderStatus, RwLock};
     use std::time::Duration;

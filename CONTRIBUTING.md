@@ -42,7 +42,10 @@ the same checks run on your branch.
 
 ## Checks that must pass
 
-Run these before you push. They are the exact checks CI runs:
+Run `./check` before you push. It is the one command that decides "passes": CI runs the same script.
+It runs steps 1 to 3 below, then `shellcheck` and the `gitleaks` secret scan (each skipped with a note if
+it isn't installed), and `cargo deny check` if cargo-deny is installed (CI runs it as a separate job).
+Step 4 is part of step 3. To run the steps one by one:
 
 ```bash
 # 1. Rust code formatting
@@ -62,7 +65,9 @@ cargo deny check
 ```
 
 `cargo fmt --all` fixes formatting for you (settings are in `rustfmt.toml`). `Cargo.lock` is
-committed; commit it with any dependency change.
+committed; commit it with any dependency change. Cargo won't pick a crate version published less than
+7 days ago (`.cargo/config.toml`, Rust 1.100 or newer).
+
 ## How the code is laid out
 
 | Path | What lives there |

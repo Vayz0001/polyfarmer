@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# ./check: the one command that decides "passes" for this repo.
+# You run it, the agent runs it before it says done, CI runs it. Keep all three on this script.
+# Sections for stacks this repo doesn't have are skipped automatically; delete them if you like.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+step() { printf '\n== %s\n' "$*"; }
+have() { command -v "$1" >/dev/null 2>&1; }
+need() { have "$1" || { echo "missing tool: $1 ($2)"; exit 1; }; }
+
+# --- TypeScript / JavaScript ----------------------------------------------
+if [ -f package.json ]; then
+  if [ -f bun.lock ] || [ -f bun.lockb ]; then pm=bun; x=(bun x)
+  elif [ -f pnpm-lock.yaml ]; then pm=pnpm; x=(pnpm exec)
+  else pm=npm; x=(npx --no-install); fi
+  need "$pm" "package manager"
+  colors=(); [ -t 1 ] || colors=(--colors=off) # plain text for agents and CI logs
+  step "format + lint (biome)"; "${x[@]}" biome ci "${colors[@]}" .
+  if [ -f tsconfig.json ]; then step "types (tsc)"; "${x[@]}" tsc --noEmit; fi
+  if grep -q '"test"[[:space:]]*:' package.json; then step "tests"; "$pm" run test; fi
+  step "advisories ($pm audit)"; "$pm" audit
+fi
+
+# --- Rust -------------------------------------------------------------------
+if [ -f Cargo.toml ]; then
+  need cargo "Rust toolchain"
+  step "format (rustfmt)"; cargo fmt --all --check
+  step "lint (clippy)"; cargo clippy --all-targets --locked -- -D warnings
+  step "tests"; cargo test --locked
+  if have cargo-deny; then step "dependencies (cargo-deny)"; cargo deny check
+  else echo "skip: cargo-deny not installed here (CI runs it)"; fi
+fi
+
+# --- Python (uv) ------------------------------------------------------------
+if [ -f pyproject.toml ]; then
+  need uv "Python via uv"
+  step "format (ruff)"; uv run ruff format --check .
+  step "lint (ruff)"; uv run ruff check .
+  step "types (basedpyright)"; uv run basedpyright
+  step "tests (pytest)"; uv run pytest -q
+fi
+
+# --- Go ---------------------------------------------------------------------
+if [ -f go.mod ]; then
+  need go "Go toolchain"
+  step "format (gofmt)"
+  unformatted=$(gofmt -l .)
+  [ -z "$unformatted" ] || { echo "$unformatted"; echo "run: gofmt -w ."; exit 1; }
+  step "vet"; go vet ./...
+  need golangci-lint "golangci-lint v2"
+  step "lint (golangci-lint)"; golangci-lint run
+  step "tests"; go test ./...
+fi
+
+# --- Every repo ---------------------------------------------------------------
+if have shellcheck; then
+  step "shell scripts (shellcheck)"
+  git ls-files -z '*.sh' check | xargs -0 -r shellcheck
+fi
+if have gitleaks; then step "secrets (gitleaks)"; gitleaks git --redact .
+else echo "skip: gitleaks not installed here (CI runs it)"; fi
+
+# --- Repo-specific steps go here (e2e suites, builds) -----------------------
+
+printf '\nall checks passed\n'

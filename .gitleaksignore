@@ -1,0 +1,5 @@
+# Known false positives, each pinned to one commit, file and line.
+# tests/e2e.rs: a made-up test password ("correct-horse-battery-123") and a placeholder
+# private key ("0123456789abcdef" x4) used to drive the setup form. Neither is a real secret.
+3db765cbdacff78805aa4e84fef96cfd2a31bf86:tests/e2e.rs:generic-api-key:121
+3db765cbdacff78805aa4e84fef96cfd2a31bf86:tests/e2e.rs:generic-api-key:178

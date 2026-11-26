@@ -32,6 +32,16 @@ cargo test --test e2e --locked
 
 ---
 
+## Proof
+
+<!-- Commands you ran and their output. "Tests pass" on its own is not proof. -->
+- Bug fix, the test that reproduces it:
+  - On main (fails):
+  - With this change (passes):
+- `./check` (last lines):
+
+---
+
 ## UI Changes (Screenshots / Recordings)
 
 <!-- Mandatory if this PR touches templates/, assets/app.css, or assets/app.js. -->
@@ -43,8 +53,15 @@ cargo test --test e2e --locked
 
 ---
 
+## Risk
+
+<!-- What could break, what you didn't test, how to roll back. -->
+
+---
+
 ## Contributor Checklist
 
+- [ ] `./check` passes (it runs the formatting, Clippy, test and secret-scan checks below).
 - [ ] My code follows the code style and formatting (`cargo fmt --all --check` passes).
 - [ ] Clippy reports zero warnings (`cargo clippy --all-targets --locked -- -D warnings` passes).
 - [ ] All unit and integration tests pass (`cargo test --locked` passes).
