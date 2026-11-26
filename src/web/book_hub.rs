@@ -24,6 +24,7 @@ use tracing::{debug, info, warn};
 
 use crate::engine::orderbook::TokenBook;
 use crate::rewards::market_data::{snapshot_from_token_book, BookSnapshot};
+use crate::sync_ext::{LockExt, RwLockExt};
 use crate::types::{WsBookSnapshot, WsPriceChangeEvent};
 
 const WS_URL: &str = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
@@ -66,7 +67,7 @@ pub struct BookGuard {
 impl Drop for BookGuard {
     fn drop(&mut self) {
         let now_zero = {
-            let mut refs = self.inner.refs.lock().unwrap();
+            let mut refs = self.inner.refs.lock_or_recover();
             match refs.get_mut(&self.token) {
                 Some(n) if *n > 1 => {
                     *n -= 1;
@@ -88,7 +89,7 @@ impl Drop for BookGuard {
         rt.spawn(async move {
             tokio::time::sleep(UNSUBSCRIBE_GRACE).await;
             // Re-acquired during the grace period → keep it.
-            if inner.refs.lock().unwrap().contains_key(&token) {
+            if inner.refs.lock_or_recover().contains_key(&token) {
                 return;
             }
             if let Some(tx) = inner.cmd_tx.get() {
@@ -129,7 +130,7 @@ impl BookHub {
     /// Start (or join) watching `token`'s book. Keep the guard while watching.
     pub fn acquire(&self, token: &str) -> BookGuard {
         let first = {
-            let mut refs = self.inner.refs.lock().unwrap();
+            let mut refs = self.inner.refs.lock_or_recover();
             let n = refs.entry(token.to_string()).or_insert(0);
             *n += 1;
             *n == 1
@@ -147,10 +148,10 @@ impl BookHub {
 
     /// Current live book for `token`, once its snapshot has arrived.
     pub fn snapshot(&self, token: &str, tick_size: Decimal) -> Option<BookSnapshot> {
-        if !self.inner.snapshotted.read().unwrap().contains(token) {
+        if !self.inner.snapshotted.read_or_recover().contains(token) {
             return None;
         }
-        let books = self.inner.books.read().unwrap();
+        let books = self.inner.books.read_or_recover();
         books.get(token).map(|b| snapshot_from_token_book(b, tick_size))
     }
 }
@@ -160,7 +161,7 @@ impl BookHub {
 async fn run(inner: Arc<Inner>, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
     let mut backoff_ms = RECONNECT_BASE_MS;
     loop {
-        let wanted: Vec<String> = inner.refs.lock().unwrap().keys().cloned().collect();
+        let wanted: Vec<String> = inner.refs.lock_or_recover().keys().cloned().collect();
         if wanted.is_empty() {
             // Idle: block until someone subscribes (or the hub is dropped).
             match cmd_rx.recv().await {
@@ -242,21 +243,21 @@ async fn run(inner: Arc<Inner>, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
             }
         }
         // Books are stale until the next snapshot; viewers fall back to REST.
-        inner.snapshotted.write().unwrap().clear();
+        inner.snapshotted.write_or_recover().clear();
         debug!("book hub: disconnected");
     }
 }
 
 fn forget(inner: &Inner, token: &str) {
-    inner.books.write().unwrap().remove(token);
-    inner.snapshotted.write().unwrap().remove(token);
+    inner.books.write_or_recover().remove(token);
+    inner.snapshotted.write_or_recover().remove(token);
 }
 
 fn apply_snapshot(inner: &Inner, snap: &WsBookSnapshot) {
-    let mut books = inner.books.write().unwrap();
+    let mut books = inner.books.write_or_recover();
     let book = books.entry(snap.asset_id.clone()).or_default();
     book.apply_snapshot(snap); // derives top of book from the levels
-    inner.snapshotted.write().unwrap().insert(snap.asset_id.clone());
+    inner.snapshotted.write_or_recover().insert(snap.asset_id.clone());
 }
 
 fn handle_message(inner: &Inner, text: &str) {
@@ -270,8 +271,8 @@ fn handle_message(inner: &Inner, text: &str) {
 
     if value.get("event_type").and_then(Value::as_str) == Some("price_change") {
         if let Ok(ev) = serde_json::from_value::<WsPriceChangeEvent>(value.clone()) {
-            let snapshotted = inner.snapshotted.read().unwrap().clone();
-            let mut books = inner.books.write().unwrap();
+            let snapshotted = inner.snapshotted.read_or_recover().clone();
+            let mut books = inner.books.write_or_recover();
             for change in &ev.price_changes {
                 if !snapshotted.contains(&change.asset_id) {
                     continue;

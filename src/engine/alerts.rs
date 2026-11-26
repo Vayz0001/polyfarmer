@@ -1,4 +1,5 @@
 use crate::storage::append_alert;
+use crate::sync_ext::LockExt;
 use crate::types::Alert;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -50,7 +51,7 @@ impl Alerter {
         // Suppress an identical message repeated within DEDUP_WINDOW (the
         // dual-path engine can emit the same alert twice for one action).
         {
-            let mut last = self.last.lock().unwrap();
+            let mut last = self.last.lock_or_recover();
             let now = Instant::now();
             if let Some((msg, t)) = last.as_ref() {
                 if *msg == alert.message && now.duration_since(*t) < DEDUP_WINDOW {
@@ -64,7 +65,7 @@ impl Alerter {
         let _ = self.tx.send(alert.clone());
 
         // Drain buffered alerts first so ordering is preserved
-        let mut buf = self.buffer.lock().unwrap();
+        let mut buf = self.buffer.lock_or_recover();
         while let Some(buffered) = buf.front() {
             match append_alert(&self.path, buffered) {
                 Ok(_) => {
