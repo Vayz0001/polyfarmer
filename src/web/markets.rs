@@ -1209,7 +1209,7 @@ pub async fn start_farming(
     }
 
     let mut resp = Html(String::new()).into_response();
-    resp.headers_mut().insert("HX-Redirect", "/markets".parse().expect("static header value"));
+    resp.headers_mut().insert("HX-Redirect", axum::http::HeaderValue::from_static("/markets"));
     resp
 }
 
@@ -1760,7 +1760,7 @@ pub async fn edit_submit(
     state.quote_nudge.notify_one();
 
     let mut resp = Html(String::new()).into_response();
-    resp.headers_mut().insert("HX-Trigger", r#"{"pf-saved":"Changes saved"}"#.parse().expect("static header value"));
+    resp.headers_mut().insert("HX-Trigger", axum::http::HeaderValue::from_static(r#"{"pf-saved":"Changes saved"}"#));
     resp
 }
 
