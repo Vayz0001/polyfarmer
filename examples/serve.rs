@@ -9,10 +9,17 @@
 //!     reward history. Nothing is traded. Uses `data-demo/` (password: demo-password).
 //!     Optional: DEMO_WALLET=0x… to show that wallet's public positions/fills.
 
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "the demo prints its URL, password and setup code for the user"
+)]
+
 use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{Duration, Utc};
+use eyre::{OptionExt, WrapErr};
 use polyfarmer::cache::TtlCache;
 use polyfarmer::creds::CredentialStore;
 use polyfarmer::engine::orderbook::TokenBook;
@@ -27,10 +34,10 @@ use rust_decimal_macros::dec;
 use tokio::sync::RwLock;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> eyre::Result<()> {
     let demo = std::env::var("DEMO").is_ok_and(|v| v == "1");
     let dir = if demo { "data-demo" } else { "data" };
-    let store = CredentialStore::open(dir).expect("open credential store");
+    let store = CredentialStore::open(dir).wrap_err("open credential store")?;
 
     let engine = Arc::new(RwLock::new(AppState::new(format!("{dir}/markets.json").into())));
     let (alert_tx, _) = tokio::sync::broadcast::channel(64);
@@ -54,7 +61,7 @@ async fn main() {
     }
 
     if demo {
-        seed_demo(&state, dir).await;
+        seed_demo(&state, dir).await?;
     } else if !state.store.is_initialized() {
         if let Some(code) = state.store.setup_code() {
             println!("\n  first run — setup code: {code}");
@@ -65,20 +72,20 @@ async fn main() {
     polyfarmer::web::prewarm_browse();
 
     let bind = std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());
-    let listener = tokio::net::TcpListener::bind(&bind).await.expect("bind");
+    let listener = tokio::net::TcpListener::bind(&bind).await.wrap_err("bind")?;
     println!("dashboard preview → http://{bind}");
     let svc = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
-    axum::serve(listener, svc).await.expect("serve");
+    axum::serve(listener, svc).await.wrap_err("serve")
 }
 
-async fn seed_demo(state: &WebState, dir: &str) {
+async fn seed_demo(state: &WebState, dir: &str) -> eyre::Result<()> {
     if !state.store.is_initialized() {
-        state.store.set_password("demo-password").expect("set password");
+        state.store.set_password("demo-password").wrap_err("set password")?;
     }
     if !state.store.has_wallet() {
         // A throwaway key, never used to trade — only so pages render as configured.
         let key = format!("0x{}", hex::encode(rand::random::<[u8; 32]>()));
-        state.store.set_wallet(&key, "0x0000000000000000000000000000000000000001").expect("set wallet");
+        state.store.set_wallet(&key, "0x0000000000000000000000000000000000000001").wrap_err("set wallet")?;
     }
     // DEMO_WALLET=<address> shows that wallet's real public payouts and rank;
     // without it the Rewards page gets sample data.
@@ -161,7 +168,7 @@ async fn seed_demo(state: &WebState, dir: &str) {
     }
 
     if sample_rewards {
-        seed_sample_rewards(state).await;
+        seed_sample_rewards(state).await?;
     }
 
     // Sample alerts (only once per demo dir).
@@ -210,24 +217,26 @@ async fn seed_demo(state: &WebState, dir: &str) {
             s.last_heartbeat_ok = Some(Instant::now());
         }
     });
+    Ok(())
 }
 
 const DEMO_ADDRESS: &str = "0x00000000000000000000000000000000000000de";
 
 /// 30 days of payouts, today's per-market earnings for the demo farms (plus one
 /// removed market that paid), and a leaderboard rank.
-async fn seed_sample_rewards(state: &WebState) {
+async fn seed_sample_rewards(state: &WebState) -> eyre::Result<()> {
     let today = Utc::now().date_naive();
-    let payouts: Vec<_> = (1..=30)
+    let payouts = (1..=30)
         .map(|d: i64| {
-            let paid = (today - Duration::days(d - 1)).and_hms_opt(0, 0, 10).unwrap().and_utc();
+            let paid =
+                (today - Duration::days(d - 1)).and_hms_opt(0, 0, 10).ok_or_eyre("sample payout time")?.and_utc();
             let usd = Decimal::from((d * 37) % 23 + 4) / dec!(3) + dec!(1.25);
             serde_json::from_value(serde_json::json!({
                 "timestamp": paid.timestamp(), "type": "REWARD", "usdc_size": usd.round_dp(4).to_string(),
             }))
-            .unwrap()
+            .wrap_err("sample payout")
         })
-        .collect();
+        .collect::<eyre::Result<Vec<_>>>()?;
     state.caches.reward_payouts.put(DEMO_ADDRESS, payouts);
 
     let zero = format!("0x{}", "0".repeat(40));
@@ -240,7 +249,7 @@ async fn seed_sample_rewards(state: &WebState) {
             "rewards_config": [{ "asset_address": zero, "start_date": "2026-01-01", "end_date": "2099-01-01",
                                  "rate_per_day": pool, "total_rewards": "0" }],
         }))
-        .unwrap()
+        .wrap_err("sample reward market")
     };
     let mut seen = Vec::new();
     let mut entries = Vec::new();
@@ -254,11 +263,12 @@ async fn seed_sample_rewards(state: &WebState) {
             [("4.12", "1.8312"), ("2.50", "0.9120"), ("0", "0"), ("0", "0.4400"), ("0", "0.1200")][seen.len() % 5];
         seen.push(c.condition_id.clone());
         let slug = c.url.rsplit('/').next().unwrap_or_default();
-        entries.push(entry(&c.condition_id, &c.label, slug, pct, earned, "250"));
+        entries.push(entry(&c.condition_id, &c.label, slug, pct, earned, "250")?);
     }
-    entries.push(entry(&format!("0x{}", "ab".repeat(32)), "A market you removed today", "", "0", "0.2150", "100"));
+    entries.push(entry(&format!("0x{}", "ab".repeat(32)), "A market you removed today", "", "0", "0.2150", "100")?);
     state.caches.reward_markets.put(&today.to_string(), Arc::new(entries));
     state.caches.lp_rank.put(DEMO_ADDRESS, LpRank::Ranked { rank: 1_482, total: 171_709 });
+    Ok(())
 }
 
 fn to_token_book(b: &market_data::BookSnapshot) -> TokenBook {
