@@ -132,8 +132,8 @@ mod tests {
     fn tmp() -> PathBuf {
         std::env::temp_dir().join(format!("pf-fsutil-{}", uuid::Uuid::new_v4()))
     }
-    fn mode(p: &Path) -> u32 {
-        fs::metadata(p).unwrap().permissions().mode() & 0o777
+    fn mode(p: &Path) -> std::io::Result<u32> {
+        Ok(fs::metadata(p)?.permissions().mode() & 0o777)
     }
 
     #[test]
@@ -141,15 +141,15 @@ mod tests {
         let base = tmp();
         let nested = base.join("a").join("b");
         create_private_dir(&nested).unwrap();
-        assert_eq!(mode(&nested), 0o700);
-        assert_eq!(mode(&base), 0o700, "parents we had to create are private too");
+        assert_eq!(mode(&nested).unwrap(), 0o700);
+        assert_eq!(mode(&base).unwrap(), 0o700, "parents we had to create are private too");
 
         // An existing, wider directory is NOT chmod-ed (only warned about).
         let shared = tmp();
         fs::create_dir_all(&shared).unwrap();
         fs::set_permissions(&shared, fs::Permissions::from_mode(0o755)).unwrap();
         create_private_dir(&shared).unwrap();
-        assert_eq!(mode(&shared), 0o755);
+        assert_eq!(mode(&shared).unwrap(), 0o755);
         let _ = fs::remove_dir_all(&base);
         let _ = fs::remove_dir_all(&shared);
     }
@@ -193,13 +193,13 @@ mod tests {
         let res = write_private_atomic(&path, b"first");
         unsafe { libc::umask(old) };
         res.unwrap();
-        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(&path).unwrap(), 0o600);
         assert_eq!(fs::read(&path).unwrap(), b"first");
 
         // Replacing keeps it private and leaves no temp file behind.
         write_private_atomic(&path, b"second").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"second");
-        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(&path).unwrap(), 0o600);
         assert!(!dir.join("secret.bin.tmp").exists());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -227,7 +227,7 @@ mod tests {
         drop(f);
         open_private_append(&path).unwrap().write_all(b"two\n").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "one\ntwo\n");
-        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(&path).unwrap(), 0o600);
         let _ = fs::remove_dir_all(&dir);
     }
 }

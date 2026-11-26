@@ -192,8 +192,8 @@ mod tests {
     use crate::types::Alert;
     use std::os::unix::fs::PermissionsExt;
 
-    fn mode(p: &Path) -> u32 {
-        fs::metadata(p).unwrap().permissions().mode() & 0o777
+    fn mode(p: &Path) -> std::io::Result<u32> {
+        Ok(fs::metadata(p)?.permissions().mode() & 0o777)
     }
 
     /// State files hold market names, API error text and earnings — private by
@@ -211,7 +211,7 @@ mod tests {
         r2.unwrap();
 
         for f in ["markets.json", "alerts.json"] {
-            assert_eq!(mode(&dir.join(f)), 0o600, "{f}");
+            assert_eq!(mode(&dir.join(f)).unwrap(), 0o600, "{f}");
         }
         // Still readable by the app, and appends keep working.
         append_alert(&dir.join("alerts.json"), &Alert::warn("second")).unwrap();
