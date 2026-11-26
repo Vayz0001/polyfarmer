@@ -16,8 +16,13 @@ use serde::Deserialize;
 const DATA_API: &str = "https://data-api.polymarket.com/v2";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-static HTTP: LazyLock<reqwest::Client> =
-    LazyLock::new(|| reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("static reqwest config"));
+/// Holds the build error text instead of panicking; each request reports it.
+static HTTP: LazyLock<Result<reqwest::Client, String>> =
+    LazyLock::new(|| reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().map_err(|e| e.to_string()));
+
+fn http() -> Result<&'static reqwest::Client> {
+    HTTP.as_ref().map_err(|e| eyre::eyre!("HTTP client unavailable: {e}"))
+}
 
 #[derive(Debug, Deserialize)]
 struct Page<T> {
@@ -120,8 +125,9 @@ pub async fn reward_payouts(user: &str) -> Result<Vec<Activity>> {
     let mut all: Vec<Activity> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut cursor: Option<String> = None;
+    let http = http()?;
     for _ in 0..REWARD_MAX_PAGES {
-        let mut req = HTTP.get(format!("{DATA_API}/activity")).query(&[
+        let mut req = http.get(format!("{DATA_API}/activity")).query(&[
             ("user", user),
             ("type", "REWARD"),
             ("limit", &REWARD_PAGE_LIMIT.to_string()),
@@ -187,7 +193,7 @@ struct ValueData {
 
 /// Open positions for `user`, largest current value first (up to `limit`).
 pub async fn positions(user: &str, limit: u32) -> Result<Vec<Position>> {
-    let resp = HTTP
+    let resp = http()?
         .get(format!("{DATA_API}/positions"))
         .query(&[("user", user), ("limit", &limit.to_string())])
         .send()
@@ -201,13 +207,13 @@ pub async fn positions(user: &str, limit: u32) -> Result<Vec<Position>> {
 
 /// Marked value of all open positions, in USDC.
 pub async fn value(user: &str) -> Result<Decimal> {
-    let resp = HTTP.get(format!("{DATA_API}/value")).query(&[("user", user)]).send().await?.error_for_status()?;
+    let resp = http()?.get(format!("{DATA_API}/value")).query(&[("user", user)]).send().await?.error_for_status()?;
     Ok(resp.json::<ValueResp>().await?.data.value)
 }
 
 /// Most recent wallet activity (newest first), up to `limit` entries.
 pub async fn activity(user: &str, limit: u32) -> Result<Vec<Activity>> {
-    let resp = HTTP
+    let resp = http()?
         .get(format!("{DATA_API}/activity"))
         .query(&[("user", user), ("limit", &limit.to_string())])
         .send()

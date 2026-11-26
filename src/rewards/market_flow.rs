@@ -32,13 +32,14 @@ pub const TRADES_SHOWN: u32 = 10;
 pub const TRADE_FILTERS: [u32; 4] = [100, 1_000, 10_000, 100_000];
 pub const DEFAULT_TRADE_FILTER: u32 = 100;
 
-static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
+/// Holds the build error text instead of panicking; each request reports it.
+static HTTP: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         // Stay on Polymarket's API host.
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .expect("static reqwest config")
+        .map_err(|e| e.to_string())
 });
 
 /// One holder of one outcome.
@@ -151,7 +152,8 @@ pub fn trade_filter(usd: Option<u32>) -> u32 {
 }
 
 async fn get_json<T: DeserializeOwned>(path: &str, query: &[(&str, String)]) -> Result<T> {
-    let mut resp = HTTP.get(format!("{DATA_API}/{path}")).query(query).send().await?;
+    let http = HTTP.as_ref().map_err(|e| eyre!("HTTP client unavailable: {e}"))?;
+    let mut resp = http.get(format!("{DATA_API}/{path}")).query(query).send().await?;
     if !resp.status().is_success() {
         return Err(eyre!("Polymarket answered HTTP {}", resp.status().as_u16()));
     }

@@ -27,10 +27,14 @@ use crate::engine::orderbook::TokenBook;
 const CLOB_URL: &str = "https://clob.polymarket.com";
 
 /// Cached unauthenticated client (connection reuse across the ~1.5s book polls).
-/// `Client::new` is sync + only fails on a bad URL — a static const URL — so the
-/// `expect` can't fire in practice.
-static CLIENT: LazyLock<Client> =
-    LazyLock::new(|| Client::new(CLOB_URL, ClobConfig::default()).expect("valid CLOB URL"));
+/// `Client::new` is sync and only fails on a bad URL; it holds the error text
+/// instead of panicking and each read reports it.
+static CLIENT: LazyLock<Result<Client, String>> =
+    LazyLock::new(|| Client::new(CLOB_URL, ClobConfig::default()).map_err(|e| e.to_string()));
+
+fn client() -> Result<&'static Client> {
+    CLIENT.as_ref().map_err(|e| eyre::eyre!("CLOB client unavailable: {e}"))
+}
 
 fn token_u256(token_id: &str) -> Result<U256> {
     U256::from_str(token_id).map_err(|e| eyre::eyre!("invalid token_id {token_id}: {e}"))
@@ -41,7 +45,7 @@ fn token_u256(token_id: &str) -> Result<U256> {
 /// Authoritative midpoint (the API uses last-trade when the spread is wide).
 pub async fn fetch_midpoint(token_id: &str) -> Result<Decimal> {
     let req = MidpointRequest::builder().token_id(token_u256(token_id)?).build();
-    Ok(CLIENT.midpoint(&req).await?.mid)
+    Ok(client()?.midpoint(&req).await?.mid)
 }
 
 /// One unix-second timestamped price point per `(t, p)`.
@@ -59,7 +63,7 @@ pub async fn fetch_history(token_id: &str, interval: Interval) -> Result<Vec<(i6
         .time_range(interval)
         .maybe_fidelity(fidelity)
         .build();
-    Ok(CLIENT.price_history(&req).await?.history.into_iter().map(|p| (p.t, p.p)).collect())
+    Ok(client()?.price_history(&req).await?.history.into_iter().map(|p| (p.t, p.p)).collect())
 }
 
 /// A normalized snapshot of one token's book — bids sorted best-first
@@ -76,7 +80,7 @@ pub struct BookSnapshot {
 
 pub async fn fetch_book(token_id: &str) -> Result<BookSnapshot> {
     let req = OrderBookSummaryRequest::builder().token_id(token_u256(token_id)?).build();
-    let resp = CLIENT.order_book(&req).await?;
+    let resp = client()?.order_book(&req).await?;
 
     let mut bids: Vec<(Decimal, Decimal)> = resp.bids.iter().map(|l| (l.price, l.size)).collect();
     let mut asks: Vec<(Decimal, Decimal)> = resp.asks.iter().map(|l| (l.price, l.size)).collect();

@@ -190,10 +190,10 @@ async fn resolve_event(slug: &str) -> Result<Resolved> {
         .filter(|mr| valid_slug(&mr.market_slug))
         .collect();
     sort_candidates(&mut refs, slug);
-    match refs.len() {
-        0 => Err(eyre::eyre!("No open markets on this page")),
-        1 => Ok(Resolved::Single(Box::new(refs.pop().unwrap()))),
-        _ => Ok(Resolved::Multiple(refs)),
+    match <[MarketRef; 1]>::try_from(refs) {
+        Ok([only]) => Ok(Resolved::Single(Box::new(only))),
+        Err(refs) if refs.is_empty() => Err(eyre::eyre!("No open markets on this page")),
+        Err(refs) => Ok(Resolved::Multiple(refs)),
     }
 }
 

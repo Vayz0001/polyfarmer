@@ -62,12 +62,13 @@ pub struct BrowseQuery {
 }
 
 /// One shared client (connection pool + TLS config) for every browse request.
-static HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-    reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("static reqwest config")
-});
+/// Holds the build error text instead of panicking; each request reports it.
+static HTTP: std::sync::LazyLock<Result<reqwest::Client, String>> =
+    std::sync::LazyLock::new(|| reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().map_err(|e| e.to_string()));
 
 pub async fn browse(query: &BrowseQuery) -> Result<RewardsMultiResponse> {
-    let mut req = HTTP.get(REWARDS_MULTI_URL);
+    let http = HTTP.as_ref().map_err(|e| eyre::eyre!("HTTP client unavailable: {e}"))?;
+    let mut req = http.get(REWARDS_MULTI_URL);
     if let Some(q) = &query.q {
         req = req.query(&[("q", q)]);
     }
