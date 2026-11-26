@@ -16,6 +16,7 @@ use crate::engine::executor::Executor;
 use crate::engine::ws_manager::AppState;
 use crate::rewards::lp_rank::{self, LpRank};
 use crate::rewards::portfolio::{Activity, Position};
+use crate::sync_ext::RwLockExt;
 use crate::types::{Alert, WsCommand};
 
 use super::book_hub::BookHub;
@@ -190,10 +191,10 @@ impl WebState {
 
     /// The configured Polymarket wallet address, if known.
     pub fn wallet_address(&self) -> Option<String> {
-        self.proxy_wallet.read().unwrap().clone()
+        self.proxy_wallet.read_or_recover().clone()
     }
 
     pub fn set_wallet_address(&self, addr: Option<String>) {
-        *self.proxy_wallet.write().unwrap() = addr;
+        *self.proxy_wallet.write_or_recover() = addr;
     }
 }

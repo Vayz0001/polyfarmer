@@ -11,6 +11,7 @@ pub mod engine;
 pub mod fsutil;
 pub mod rewards;
 pub mod storage;
+mod sync_ext;
 pub mod types;
 pub mod wallet_detect;
 pub mod web;
