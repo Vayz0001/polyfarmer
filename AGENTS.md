@@ -22,7 +22,7 @@ Self-hosted bot that farms Polymarket liquidity rewards. It trades real money: i
 - `alloy`, `reqwest` and `polymarket_client_sdk_v2` majors are pinned on purpose (the SDK needs them).
 - The ignore entries in `deny.toml` and `.cargo/audit.toml` are documented decisions, each with a reason. Don't add or remove one without asking.
 - `unsafe` is denied. The only exceptions are `harden_process` in `src/app.rs` and test modules that call libc; each carries a narrow `#[allow(unsafe_code)]` with the reason.
-- Stricter clippy lints are on a ratchet: `unwrap_used`, `expect_used`, `panic`, `print_stdout` and `print_stderr` are not in `Cargo.toml` yet. Don't add new uses outside tests. When a module is clean, add `#![deny(clippy::unwrap_used, clippy::expect_used)]` at its top; when all are clean, move the lints to `Cargo.toml`.
+- Clippy `unwrap_used`, `expect_used`, `panic`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout` and `print_stderr` are denied in `Cargo.toml` for all code outside tests (`clippy.toml` lets tests use them). Never add `#[allow]` or `#[expect]` for them without the owner's approval. The only exception is the documented print `#![expect]` in `examples/serve.rs`.
 - `.gitleaksignore` lists two made-up test values in `tests/e2e.rs`. Anything else gitleaks finds is real until proven otherwise.
 
 ## Live testing with the test wallet

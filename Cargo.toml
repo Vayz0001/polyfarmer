@@ -68,7 +68,18 @@ tower = { version = "0.5", features = ["util"] }
 tokio = { version = "1", features = ["test-util"] }
 
 # `unsafe` is denied everywhere; the few places that need raw libc calls carry a
-# narrow #[allow(unsafe_code)] with the reason. Stricter clippy lints (unwrap, expect,
-# panic, print) are being turned on module by module: see AGENTS.md.
+# narrow #[allow(unsafe_code)] with the reason. The clippy lints below are denied for all
+# code outside tests (clippy.toml lets tests unwrap, expect, panic and print); the demo
+# example has one documented #![expect] for printing. See AGENTS.md.
 [lints.rust]
 unsafe_code = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
