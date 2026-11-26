@@ -23,11 +23,10 @@
 //! even if our local derivation constants go stale again: we only ever
 //! surface candidates that actually exist on-chain.
 
-use alloy::primitives::{keccak256, Address};
+use alloy::primitives::{address, keccak256, Address};
 use eyre::{eyre, Result};
 use polymarket_client_sdk_v2::{derive_proxy_wallet, derive_safe_wallet, POLYGON};
 use serde_json::{json, Value};
-use std::str::FromStr;
 use std::time::Duration;
 
 /// Default public Polygon RPC endpoints, tried in order until one responds.
@@ -35,9 +34,9 @@ use std::time::Duration;
 pub const DEFAULT_RPC_URLS: &[&str] =
     &["https://polygon-bor-rpc.publicnode.com", "https://polygon.drpc.org", "https://polygon.meowrpc.com"];
 
-const DEPOSIT_WALLET_FACTORY: &str = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07";
-const DEPOSIT_WALLET_BEACON: &str = "0x7A18EDfe055488A3128f01F563e5B479D92ffc3a";
-const DEPOSIT_WALLET_LEGACY_IMPL: &str = "0x58ca52ebe0dadfdf531cde7062e76746de4db1eb";
+const DEPOSIT_WALLET_FACTORY: Address = address!("0x00000000000Fb5C9ADea0298D729A0CB3823Cc07");
+const DEPOSIT_WALLET_BEACON: Address = address!("0x7A18EDfe055488A3128f01F563e5B479D92ffc3a");
+const DEPOSIT_WALLET_LEGACY_IMPL: Address = address!("0x58ca52ebe0dadfdf531cde7062e76746de4db1eb");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WalletKind {
@@ -106,9 +105,14 @@ const PER_REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 const TOTAL_BUDGET: Duration = Duration::from_secs(9);
 
 /// One shared client for every RPC call (clones are cheap handles to the same pool).
-static RPC_HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-    reqwest::Client::builder().timeout(PER_REQUEST_TIMEOUT).build().expect("static reqwest config")
+/// Holds the build error text instead of panicking; see [`rpc_http`].
+static RPC_HTTP: std::sync::LazyLock<Result<reqwest::Client, String>> = std::sync::LazyLock::new(|| {
+    reqwest::Client::builder().timeout(PER_REQUEST_TIMEOUT).build().map_err(|e| e.to_string())
 });
+
+fn rpc_http() -> Result<reqwest::Client> {
+    RPC_HTTP.as_ref().cloned().map_err(|e| eyre!("HTTP client unavailable: {e}"))
+}
 
 // ── Minimal JSON-RPC client ───────────────────────────────────────────────────
 
@@ -124,7 +128,7 @@ impl Rpc {
     /// sequential so a handful of dead/slow endpoints — or no network at
     /// all — resolve in one timeout window, not one-per-candidate.
     async fn connect(configured: Option<&str>) -> Result<Self> {
-        let client = RPC_HTTP.clone();
+        let client = rpc_http()?;
 
         let mut urls: Vec<String> = Vec::new();
         if let Some(u) = configured {
@@ -191,7 +195,7 @@ pub async fn pusd_balance(owner: Address, configured_rpc: Option<&str>) -> Resul
     data.extend_from_slice(&BALANCE_OF_SELECTOR);
     data.extend_from_slice(&left_pad_32(owner));
 
-    let client = RPC_HTTP.clone();
+    let client = rpc_http()?;
     let urls = configured_rpc.into_iter().chain(DEFAULT_RPC_URLS.iter().copied());
     let mut last_err = eyre!("no RPC configured");
     for url in urls {
@@ -214,7 +218,9 @@ fn parse_token_amount(hex_result: &str, decimals: u32) -> Result<rust_decimal::D
         return Err(eyre!("balanceOf result too short"));
     }
     // Balances fit comfortably in u128 (≈3.4e38 base units).
-    let raw = u128::from_be_bytes(bytes[16..32].try_into().expect("16 bytes"));
+    let mut low = [0u8; 16];
+    low.copy_from_slice(&bytes[16..32]);
+    let raw = u128::from_be_bytes(low);
     if bytes[..16].iter().any(|b| *b != 0) {
         return Err(eyre!("balance out of range"));
     }
@@ -247,7 +253,7 @@ pub async fn detect_wallets(eoa: Address, configured_rpc: Option<&str>) -> Resul
 pub async fn deposit_wallet_check(addr: Address, configured_rpc: Option<&str>) -> Result<bool> {
     // selector for eip712Domain()  (ERC-5267)
     const EIP712_DOMAIN_SELECTOR: [u8; 4] = [0x84, 0xb0, 0x19, 0x6e];
-    let client = RPC_HTTP.clone();
+    let client = rpc_http()?;
     let mut last_err = eyre!("no RPC configured");
     for url in configured_rpc.into_iter().chain(DEFAULT_RPC_URLS.iter().copied()) {
         let rpc = Rpc { client: client.clone(), url: url.to_string() };
@@ -277,16 +283,12 @@ async fn detect_wallets_inner(eoa: Address, configured_rpc: Option<&str>) -> Res
     let rpc = Rpc::connect(configured_rpc).await?;
     let wallet_id = left_pad_32(eoa);
 
-    let beacon = Address::from_str(DEPOSIT_WALLET_BEACON).expect("valid constant");
-    let legacy_impl = Address::from_str(DEPOSIT_WALLET_LEGACY_IMPL).expect("valid constant");
-    let factory = Address::from_str(DEPOSIT_WALLET_FACTORY).expect("valid constant");
-
     // Both Deposit Wallet shapes checked concurrently, not sequentially.
-    let deposit_wallet_futs = [legacy_impl, beacon].into_iter().map(|implementation| {
+    let deposit_wallet_futs = [DEPOSIT_WALLET_LEGACY_IMPL, DEPOSIT_WALLET_BEACON].into_iter().map(|implementation| {
         let rpc = &rpc;
         let data = predict_wallet_calldata(implementation, wallet_id);
         async move {
-            let result = rpc.eth_call(factory, &data).await.ok()?;
+            let result = rpc.eth_call(DEPOSIT_WALLET_FACTORY, &data).await.ok()?;
             decode_address_result(&result).ok().map(|addr| (addr, WalletKind::DepositWallet))
         }
     });
@@ -319,6 +321,7 @@ async fn detect_wallets_inner(eoa: Address, configured_rpc: Option<&str>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     /// A revert is a definite "not a Deposit Wallet"; a network or server
     /// error is not an answer at all (the engine start retries instead of
