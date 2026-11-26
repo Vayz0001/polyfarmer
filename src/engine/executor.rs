@@ -19,6 +19,8 @@ const CLOB_URL: &str = "https://clob.polymarket.com";
 const POLYGON_CHAIN_ID: u64 = 137;
 const TERMINAL_CURSOR: &str = "LTE="; // base64("-1") — signals end of pagination
 const RETRY_ATTEMPTS: u32 = 3;
+// The retry loops below make at least one attempt, so `last_err` is always set when they give up.
+const _: () = assert!(RETRY_ATTEMPTS >= 1);
 
 // Time limits on calls to Polymarket. The SDK's HTTP client has none, so a
 // stalled connection would otherwise wait forever: a hung heartbeat would never
@@ -241,7 +243,7 @@ impl Executor {
                 }
             }
         }
-        Err(last_err.unwrap())
+        Err(last_err.unwrap_or_else(|| eyre::eyre!("no attempt was made")))
     }
 
     /// Cancel an order and verify the result via GET /order when the cancel
@@ -332,7 +334,7 @@ impl Executor {
                 }
             }
         }
-        Err(last_err.unwrap())
+        Err(last_err.unwrap_or_else(|| eyre::eyre!("no attempt was made")))
     }
 
     /// Fetch all open order IDs for a single token_id, handling pagination.
@@ -360,7 +362,7 @@ impl Executor {
                         }
                     }
                 }
-                return Err(eyre::eyre!("{}", last_err.unwrap()));
+                return Err(eyre::eyre!("{}", last_err.unwrap_or_else(|| eyre::eyre!("no attempt was made"))));
             };
             for order in &page.data {
                 ids.push(order.id.clone());
