@@ -34,13 +34,14 @@ const LIST_TIMEOUT: Duration = Duration::from_secs(180);
 /// can't fill memory).
 const MAX_LIST_BYTES: usize = 64 << 20;
 
-static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
+/// Holds the build error text instead of panicking; each request reports it.
+static HTTP: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
     reqwest::Client::builder()
         .user_agent(concat!("polyfarmer/", env!("CARGO_PKG_VERSION"), " (+https://github.com/Vayz0001/polyfarmer)"))
         // Stay on their host: a redirect could point the download anywhere.
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .expect("static reqwest config")
+        .map_err(|e| e.to_string())
 });
 
 #[derive(Debug, Clone, PartialEq)]
@@ -184,7 +185,8 @@ fn valid_data_path(p: &str) -> bool {
 /// server claims about its size. With `gzip`, asks for a gzipped body; the
 /// bool says whether it came back gzipped (plain is fine too).
 async fn download(url: &str, timeout: Duration, max: usize, gzip: bool) -> Result<(Vec<u8>, bool)> {
-    let mut req = HTTP.get(url).timeout(timeout);
+    let http = HTTP.as_ref().map_err(|e| eyre!("HTTP client unavailable: {e}"))?;
+    let mut req = http.get(url).timeout(timeout);
     if gzip {
         req = req.header(reqwest::header::ACCEPT_ENCODING, "gzip");
     }
