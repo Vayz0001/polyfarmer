@@ -372,7 +372,7 @@ fn leg_row(
         }
     };
     let status_title = match status_label {
-        "Paused" => "Paused: no order. Resume to quote again.",
+        "Paused" => "Paused: no order. Resume to quote again. If the bot paused it, Activity says why.",
         "Pausing" => "Paused: cancelling the order, waiting for Polymarket to confirm it's gone.",
         "Live" => "Your order is resting on the book.",
         "Placing" => "Placing the order on Polymarket…",
