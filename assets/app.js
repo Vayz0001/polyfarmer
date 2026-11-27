@@ -176,9 +176,22 @@
   // Alerts the reopened stream delivers meanwhile wait, so none shows twice
   // and the feeds stay in order. The cutoff is in server time (the Date
   // header, whole seconds) and reaches back a little further; rows the tab
-  // already has are skipped.
-  // Live alerts are held until the catch-up ends, so it gets a time limit.
-  var CATCH_UP_SLACK_MS = 3000, CATCH_UP_TIMEOUT_MS = 10000;
+  // already has are skipped. The log is read only once the reopened stream
+  // is open (the server subscribes before it answers), so an alert can't fall
+  // between the two.
+  // Live alerts are held until the catch-up ends, so it gets a time limit;
+  // a stream that never opens delays it by STREAM_OPEN_WAIT_MS at most.
+  var CATCH_UP_SLACK_MS = 3000, CATCH_UP_TIMEOUT_MS = 10000, STREAM_OPEN_WAIT_MS = 5000;
+  // How many alerts /activity/recent returns at most (WINDOW_LIMIT in src/web/activity.rs).
+  var CATCH_UP_LOG_ROWS = 100;
+  function whenOpen(es, ms) {
+    return new Promise(function (resolve) {
+      if (es.readyState === EventSource.OPEN) { resolve(); return; }
+      var timer = setTimeout(done, ms);
+      function done() { clearTimeout(timer); es.removeEventListener("open", done); resolve(); }
+      es.addEventListener("open", done);
+    });
+  }
   function rowAlert(row) {
     var title = $(".feed-title", row), body = $(".feed-body", row), tone = /\btone-(\w+)/.exec(row.className);
     return {
@@ -187,19 +200,27 @@
       ts: $(".feed-time", row).getAttribute("data-ts")
     };
   }
-  function catchUpAlerts(since) {
+  function catchUpAlerts(es, since) {
     var held = (heldAlerts = []);
-    fetchFragmentResponse("/activity/recent", AbortSignal.timeout(CATCH_UP_TIMEOUT_MS)).then(function (r) {
+    whenOpen(es, STREAM_OPEN_WAIT_MS).then(function () {
+      return fetchFragmentResponse("/activity/recent", AbortSignal.timeout(CATCH_UP_TIMEOUT_MS));
+    }).then(function (r) {
       var serverNow = Date.parse(r.headers.get("Date") || "");
       if (!r.ok || isNaN(serverNow)) throw new Error("alert log unavailable");
       var cutoff = serverNow - (Date.now() - since) - CATCH_UP_SLACK_MS;
       return r.text().then(function (html) {
         var doc = new DOMParser().parseFromString(html, "text/html");
-        $$(".feed-row", doc).map(rowAlert)
+        var logged = $$(".feed-row", doc).map(rowAlert);
+        logged
           // Ones the stream already brought are shown from there, as live alerts.
           .filter(function (a) { return Date.parse(a.ts) > cutoff && !held.some(function (h) { return h.ts === a.ts; }); })
           .reverse()   // the log is newest first; feeds take them oldest first
           .forEach(function (a) { showAlert(a, false); });
+        // A full read whose oldest row is still after the cutoff: older missed ones didn't fit.
+        var oldest = logged[logged.length - 1];
+        if (logged.length >= CATCH_UP_LOG_ROWS && Date.parse(oldest.ts) > cutoff) {
+          toast("Some alerts may be missing", "Many alerts arrived while this tab was in the background, so only the newest " + CATCH_UP_LOG_ROWS + " are shown. Reload the page to see them all.", "caution", -1);
+        }
       });
     }).catch(function (e) {
       if (e.message !== "session ended") toast("Couldn't load the alerts you missed", "Alerts sent while this tab was in the background may be missing. Reload the page to see them.", "caution", -1);
@@ -227,7 +248,7 @@
     if (!streamsOff || document.visibilityState === "hidden") return;
     streamsOff = false;
     connectEvents();
-    if (eventsEs) catchUpAlerts(hiddenAt);
+    if (eventsEs) catchUpAlerts(eventsEs, hiddenAt);
     if (window.htmx) htmx.trigger(document.body, "pf:state");
     if (MV) { mvFetchBook(); mvConnect(); }
   }

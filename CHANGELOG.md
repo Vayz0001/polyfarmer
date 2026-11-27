@@ -59,7 +59,8 @@ anything may change between releases.
 - **Several dashboard tabs open no longer make pages and buttons hang.** Each open page kept one or two live-update
   connections, and over plain http a browser allows only 6 per server, so three market tabs used them all. A
   background tab now closes its live updates and reopens them, with a refresh, when you come back to it. Alerts
-  sent while it was in the background then show up in its feeds and on the bell, once each.
+  sent while it was in the background then show up in its feeds and on the bell, once each; if very many arrived,
+  the page says so.
 - **Security: many wrong passwords sent at once no longer get around the login lockout.** Each guess is now
   counted before the password is checked, so a burst gets no more tries than the same guesses one at a time. This
   also applies to the setup code and to the current password when changing it. Only 4 password checks run at once.
