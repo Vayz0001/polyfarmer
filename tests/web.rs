@@ -2278,3 +2278,112 @@ async fn htmx_requests_on_first_run_send_the_whole_page_to_welcome() {
     assert_eq!(res.status(), StatusCode::SEE_OTHER, "non-htmx requests keep the plain redirect");
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/welcome");
 }
+
+// ── Parallel guessing can't outrun the attempt limiter ──────────────────────────
+
+const BURST: usize = 50;
+
+/// Send `BURST` requests built by `make` at the same instant; returns the bodies.
+async fn burst(app: &Router, make: impl Fn() -> Request<Body>) -> Vec<String> {
+    let start = Arc::new(tokio::sync::Barrier::new(BURST));
+    let mut set = tokio::task::JoinSet::new();
+    for _ in 0..BURST {
+        let (app, req, start) = (app.clone(), make(), Arc::clone(&start));
+        set.spawn(async move {
+            start.wait().await;
+            body_string(app.oneshot(req).await.unwrap()).await
+        });
+    }
+    set.join_all().await
+}
+
+/// Fire bursts of wrong guesses until one is refused entirely; returns how many
+/// guesses were actually tried (answered `wrong`). Every other answer must be the
+/// lockout message.
+async fn guesses_before_lockout(app: &Router, wrong: &str, make: impl Fn() -> Request<Body>) -> usize {
+    let mut tried = 0;
+    for _ in 0..20 {
+        let bodies = burst(app, &make).await;
+        let wrong_now = bodies.iter().filter(|b| b.contains(wrong)).count();
+        for b in bodies.iter().filter(|b| !b.contains(wrong)) {
+            assert!(b.contains("Too many attempts"), "neither a tried guess nor the lockout: {b}");
+        }
+        tried += wrong_now;
+        if wrong_now == 0 {
+            return tried;
+        }
+    }
+    panic!("the lockout never engaged ({tried} guesses tried)");
+}
+
+fn form_post(uri: &str, cookie: &str, body: String, ip: Option<&str>) -> Request<Body> {
+    let mut req = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::COOKIE, cookie)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .unwrap();
+    if let Some(ip) = ip {
+        req.extensions_mut().insert(peer(ip));
+    }
+    req
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn parallel_wrong_passwords_get_no_more_guesses_than_sequential_ones() {
+    let (app, pw) = test_app();
+    let res = app.clone().oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
+    let cookie = session_cookie(&res).unwrap();
+    let csrf = extract_csrf(&body_string(res).await);
+
+    // Proxied (no peer address): the same 15 guesses as one at a time, then locked.
+    let tried = guesses_before_lockout(&app, "Incorrect password", || {
+        form_post("/login", &cookie, format!("csrf={csrf}&password=definitely-wrong"), None)
+    })
+    .await;
+    assert_eq!(tried, 15, "guesses hashed before the lockout");
+    let res = app.clone().oneshot(form_post("/login", &cookie, format!("csrf={csrf}&password={pw}"), None)).await;
+    assert!(body_string(res.unwrap()).await.contains("Too many attempts"), "locked, even for the right password");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn parallel_wrong_passwords_from_one_ip_lock_only_that_ip_after_five() {
+    let (app, pw) = test_app();
+    let res = app.clone().oneshot(Request::builder().uri("/login").body(Body::empty()).unwrap()).await.unwrap();
+    let cookie = session_cookie(&res).unwrap();
+    let csrf = extract_csrf(&body_string(res).await);
+
+    let tried = guesses_before_lockout(&app, "Incorrect password", || {
+        form_post("/login", &cookie, format!("csrf={csrf}&password=definitely-wrong"), Some("203.0.113.7"))
+    })
+    .await;
+    assert_eq!(tried, 5, "guesses hashed before that IP was locked");
+    let res = post_login_from(&app, "203.0.113.99", &cookie, &csrf, &pw).await;
+    assert!(res.status().is_redirection(), "another IP still signs in, got {}", res.status());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn parallel_wrong_current_passwords_are_throttled_like_login() {
+    let (app, pw) = test_app();
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let form =
+        format!("csrf={csrf}&current=definitely-wrong&password=a-brand-new-password&confirm=a-brand-new-password");
+    let tried = guesses_before_lockout(&app, "Current password is incorrect", || {
+        form_post("/setup/password", &cookie, form.clone(), None)
+    })
+    .await;
+    assert_eq!(tried, 15, "re-authentication guesses hashed before the lockout");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn parallel_wrong_setup_codes_are_throttled_like_sequential_ones() {
+    let (app, _) = test_app_uninit_with_code();
+    let (cookie, csrf, _) = welcome_page(&app, "/welcome").await;
+    let pw = "supersecret-pass-1";
+    let tried = guesses_before_lockout(&app, "Setup code is incorrect", || {
+        form_post("/welcome", &cookie, format!("csrf={csrf}&code=zzzz-zzzz&password={pw}&confirm={pw}"), None)
+    })
+    .await;
+    assert_eq!(tried, 15, "setup-code guesses checked before the lockout");
+}
