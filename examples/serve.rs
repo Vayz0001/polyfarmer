@@ -291,3 +291,20 @@ fn to_token_book(b: &market_data::BookSnapshot) -> TokenBook {
     tb.best_ask = b.best_ask;
     tb
 }
+
+#[cfg(test)]
+mod tests {
+    use super::data_dir;
+
+    #[test]
+    fn plain_preview_does_not_open_the_bots_data_folder() {
+        // `data` is the real bot's default DATA_DIR (wallet, password, markets.json).
+        assert_ne!(data_dir(false), "data");
+        assert_eq!(data_dir(false), "data-preview");
+    }
+
+    #[test]
+    fn demo_preview_uses_the_demo_folder() {
+        assert_eq!(data_dir(true), "data-demo");
+    }
+}
