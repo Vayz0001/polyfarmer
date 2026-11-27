@@ -96,7 +96,7 @@ Pick your system:
 3. Download and run Polyfarmer.
 
    ```bash
-   git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
+   git clone --branch v0.1.1 https://github.com/Vayz0001/polyfarmer.git
    cd polyfarmer
    cargo run --release
    ```
@@ -127,7 +127,7 @@ Pick your system:
    setup link, and you continue with [First run](#first-run).
 
    ```bash
-   git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
+   git clone --branch v0.1.1 https://github.com/Vayz0001/polyfarmer.git
    cd polyfarmer
    cargo run --release
    ```
@@ -151,7 +151,7 @@ Pick your system:
    setup link, and you continue with [First run](#first-run).
 
    ```powershell
-   git clone --branch v0.1.0 https://github.com/Vayz0001/polyfarmer.git
+   git clone --branch v0.1.1 https://github.com/Vayz0001/polyfarmer.git
    cd polyfarmer
    cargo run --release
    ```
@@ -171,7 +171,7 @@ Pick your system:
 
 The first build takes a few minutes. Later starts are instant.
 
-These steps install the latest release (`v0.1.0`), the version that has been released and described in the
+These steps install the latest release (`v0.1.1`), the version that has been released and described in the
 [changelog](CHANGELOG.md). Git may print a note about a "detached HEAD": that is expected on a release.
 
 ### Updating
