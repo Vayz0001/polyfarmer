@@ -7,6 +7,8 @@ anything may change between releases.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-27
+
 ### Added
 
 - On a market's page, **Trades** and **Top holders** can be minimized to their title bar (the chevron next to the
@@ -415,5 +417,6 @@ The first public beta.
 - The daily reward snapshot file (`data/reward_history.json`) and its `REWARD_HISTORY_FILE` setting; history comes
   from Polymarket's payout records instead. An existing file is simply no longer read.
 
-[Unreleased]: https://github.com/Vayz0001/polyfarmer/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Vayz0001/polyfarmer/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Vayz0001/polyfarmer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Vayz0001/polyfarmer/releases/tag/v0.1.0
