@@ -1,6 +1,6 @@
 [package]
 name = "polyfarmer"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Self-hosted bot that farms LP rewards on Polymarket. Your keys never leave your machine."
 license = "MIT"
