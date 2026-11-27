@@ -15,7 +15,7 @@ use axum::Form;
 use chrono::Utc;
 use futures_util::stream::Stream;
 use polymarket_client_sdk_v2::clob::types::Interval;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -23,6 +23,7 @@ use tokio::sync::RwLock;
 use tower_sessions::Session;
 
 use crate::cache::TtlCache;
+use crate::engine::executor::Executor;
 use crate::engine::placer::OrderApi;
 use crate::engine::ws_manager::AppState;
 use crate::rewards::gamma_resolve::{self, MarketRef};
@@ -1146,7 +1147,48 @@ fn start_configs(
     for cfg in &configs {
         cfg.validate()?;
     }
+    // Polymarket rejects an order under the book's minimum size. When several
+    // legs fall short, name the one needing the most, so its fix covers both.
+    let books = std::iter::once(book).chain(other_book);
+    let shortfall = configs
+        .iter()
+        .zip(books)
+        .filter_map(|(cfg, book)| min_order_shortfall(cfg, book))
+        .max_by_key(|(needed_usd, _)| *needed_usd);
+    if let Some((_, refusal)) = shortfall {
+        return Err(refusal);
+    }
     Ok(configs)
+}
+
+/// The per-side size `cfg` needs to meet `book`'s minimum order, and why its
+/// own is too small, when it is. Shares are counted as the engine sizes the
+/// order, at the price the leg rests at. A minimum of 0 means none is known
+/// (only books built from the live feed lack one; Start reads the REST book).
+fn min_order_shortfall(cfg: &MarketConfig, book: &market_data::BookSnapshot) -> Option<(Decimal, String)> {
+    let min_shares = book.min_order_size;
+    if min_shares <= dec!(0) {
+        return None;
+    }
+    let rest = other_side_price(book.best_bid?, cfg.distance, cfg.tick_size)?;
+    // `rest` is above 0, the only price `shares_from_usd` refuses.
+    let shares = Executor::shares_from_usd(cfg.order_size, rest).ok()?;
+    if shares >= min_shares {
+        return None;
+    }
+    let needed_usd = (min_shares * rest).round_dp_with_strategy(2, RoundingStrategy::AwayFromZero);
+    Some((
+        needed_usd,
+        format!(
+            "Too small for this market: ${:.2} per side is {} shares of {} at {}¢; Polymarket's minimum order is {} \
+             shares. Use at least ${needed_usd:.2} per side.",
+            cfg.order_size,
+            shares.round_dp_with_strategy(1, RoundingStrategy::ToZero),
+            cfg.token_label,
+            (rest * dec!(100)).normalize(),
+            min_shares.normalize()
+        ),
+    ))
 }
 
 fn render_start_error(message: &str) -> Response {
