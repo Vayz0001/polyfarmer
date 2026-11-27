@@ -17,13 +17,14 @@
   // GET an HTML fragment the way htmx does. Once the session has ended the
   // server answers with HX-Redirect and no body: the whole page goes there and
   // the promise rejects, so the caller's catch runs and nothing is inserted.
-  function fetchFragment(url) {
-    return fetch(url, { headers: { "HX-Request": "true" } }).then(function (r) {
+  function fetchFragmentResponse(url, signal) {
+    return fetch(url, { headers: { "HX-Request": "true" }, signal: signal }).then(function (r) {
       var dest = r.headers.get("HX-Redirect");
       if (dest) { location.href = dest; throw new Error("session ended"); }
-      return r.text();
+      return r;
     });
   }
+  function fetchFragment(url) { return fetchFragmentResponse(url).then(function (r) { return r.text(); }); }
   // Older than a week: the date, and (where there's room) the time of day,
   // which the day headings above a feed don't give.
   function relTime(iso, withTime) {
@@ -77,13 +78,19 @@
   }
 
   // ── toasts ──────────────────────────────────────────────────────────────
-  function toast(title, body, tone, ttl) {
+  // link (optional): { href, text }, shown after the body.
+  function toast(title, body, tone, ttl, link) {
     var wrap = $("#pf-toasts"); if (!wrap) return;
     var el = document.createElement("div");
     el.className = "toast tone-" + (tone || "pos");
     el.innerHTML = '<span class="bar"></span><div><div class="t">' + esc(title) + "</div>" +
-      (body ? '<div class="b">' + esc(body) + "</div>" : "") + "</div>" +
+      (body || link ? '<div class="b">' + esc(body) + "</div>" : "") + "</div>" +
       '<button class="btn ghost icon x" aria-label="Dismiss"><svg class="i sm"><use href="#i-x"/></svg></button>';
+    if (link) {
+      var a = document.createElement("a");
+      a.href = link.href; a.textContent = link.text;
+      $(".b", el).append(body ? " " : "", a);
+    }
     function dismiss() { el.classList.remove("show"); setTimeout(function () { el.remove(); }, 220); }
     el.onclick = dismiss;
     wrap.appendChild(el);
@@ -139,22 +146,128 @@
   }
 
   // ── live events (one SSE stream: alerts + state changes) ───────────────
-  var stateTimer = null;
+  var stateTimer = null, eventsEs = null, heldAlerts = null;
+  // Every alert the tab has handled has a row in #pf-win-feed (live rows are
+  // added there even before the Alerts window is first loaded), so a row with
+  // the same timestamp means "already here".
+  function alertShown(ts) {
+    return $$(".pf-feed .feed-time[data-ts]").some(function (el) { return el.getAttribute("data-ts") === ts; });
+  }
+  function showAlert(a, live) {
+    if (alertShown(a.ts)) return;
+    var parts = splitMsg(a.message);
+    if (live && shouldToast(a)) toast(parts[0], parts[1], a.tone, a.level === "error" ? 12000 : 6000);
+    prependFeeds(a);
+    bumpBell(a);
+  }
   function connectEvents() {
-    if (!window.EventSource || !$("#status-strip")) return;
-    var es = new EventSource("/events");
+    if (eventsEs || !window.EventSource || !$("#status-strip")) return;
+    var es = (eventsEs = new EventSource("/events"));
     es.addEventListener("alert", function (e) {
       var a; try { a = JSON.parse(e.data); } catch (_) { return; }
-      var parts = splitMsg(a.message);
-      if (shouldToast(a)) toast(parts[0], parts[1], a.tone, a.level === "error" ? 12000 : 6000);
-      prependFeeds(a);
-      bumpBell(a);
+      if (heldAlerts) heldAlerts.push(a); else showAlert(a, true);
     });
     es.addEventListener("state", function () {
       // Coalesce bursts (a replace = cancel + place) into one refresh.
       clearTimeout(stateTimer);
       stateTimer = setTimeout(function () { if (window.htmx) htmx.trigger(document.body, "pf:state"); }, 250);
     });
+  }
+  function disconnectEvents() { if (eventsEs) { eventsEs.close(); eventsEs = null; } }
+
+  // Alerts sent while the tab was hidden never reached it: its stream was
+  // closed and /events has no replay. On return they are read back from the
+  // alert log (/activity/recent, the newest 100) and go to the feeds and the
+  // bell as if they had arrived live, without toasts (they are not new now).
+  // Alerts the reopened stream delivers meanwhile wait, so none shows twice
+  // and the feeds stay in order. The cutoff is in server time (the Date
+  // header, whole seconds) and reaches back a little further; rows the tab
+  // already has are skipped. The log is read only once the reopened stream
+  // is open (the server subscribes before it answers), so an alert can't fall
+  // between the two.
+  // Live alerts are held until the catch-up ends, so it gets a time limit;
+  // a stream that never opens delays it by STREAM_OPEN_WAIT_MS at most.
+  var CATCH_UP_SLACK_MS = 3000, CATCH_UP_TIMEOUT_MS = 10000, STREAM_OPEN_WAIT_MS = 5000;
+  // How many alerts the Activity page loads (FEED_LIMIT in src/web/activity.rs).
+  var ACTIVITY_PAGE_ROWS = 300;
+  function whenOpen(es, ms) {
+    return new Promise(function (resolve) {
+      if (es.readyState === EventSource.OPEN) { resolve(); return; }
+      var timer = setTimeout(done, ms);
+      function done() { clearTimeout(timer); es.removeEventListener("open", done); resolve(); }
+      es.addEventListener("open", done);
+    });
+  }
+  function rowAlert(row) {
+    var title = $(".feed-title", row), body = $(".feed-body", row), tone = /\btone-(\w+)/.exec(row.className);
+    return {
+      level: row.dataset.level, tone: tone && tone[1], category: row.dataset.cat,
+      message: title.textContent + (body ? "\n" + body.textContent : ""),
+      ts: $(".feed-time", row).getAttribute("data-ts")
+    };
+  }
+  function catchUpAlerts(es, since) {
+    var held = (heldAlerts = []);
+    whenOpen(es, STREAM_OPEN_WAIT_MS).then(function () {
+      return fetchFragmentResponse("/activity/recent", AbortSignal.timeout(CATCH_UP_TIMEOUT_MS));
+    }).then(function (r) {
+      var serverNow = Date.parse(r.headers.get("Date") || "");
+      if (!r.ok || isNaN(serverNow)) throw new Error("alert log unavailable");
+      var cutoff = serverNow - (Date.now() - since) - CATCH_UP_SLACK_MS;
+      return r.text().then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var logged = $$(".feed-row", doc).map(rowAlert);
+        logged
+          // Ones the stream already brought are shown from there, as live alerts.
+          .filter(function (a) { return Date.parse(a.ts) > cutoff && !held.some(function (h) { return h.ts === a.ts; }); })
+          .reverse()   // the log is newest first; feeds take them oldest first
+          .forEach(function (a) { showAlert(a, false); });
+        // The read doesn't reach back to the cutoff: older missed ones didn't
+        // fit (it is capped at 100) or were rotated out of the log file.
+        // An empty log has nothing to miss.
+        var oldest = logged[logged.length - 1];
+        if (oldest && Date.parse(oldest.ts) > cutoff) {
+          toast("Some alerts may be missing", "Not every alert sent while this tab was in the background could be loaded here.", "caution", -1,
+            { href: "/activity", text: "Open Activity to see up to " + ACTIVITY_PAGE_ROWS + " recent ones." });
+        }
+      });
+    }).catch(function (e) {
+      if (e.message !== "session ended") toast("Couldn't load the alerts you missed", "Alerts sent while this tab was in the background may be missing. Reload the page to see them.", "caution", -1);
+    }).then(function () {
+      if (heldAlerts === held) heldAlerts = null;   // otherwise a later catch-up owns the buffer
+      held.forEach(function (a) { showAlert(a, true); });
+    });
+  }
+
+  // ── live streams only while the tab is visible ──────────────────────────
+  // Over plain http a browser allows 6 connections per host, and an open
+  // stream holds one for as long as it lives: three market tabs (two streams
+  // each) would leave none for page loads or button clicks. A hidden tab
+  // closes its streams; when shown again it reopens them and refreshes what
+  // may have changed meanwhile.
+  var streamsOff = false, hiddenAt = 0;
+  function suspendStreams() {
+    if (streamsOff) return;
+    streamsOff = true;
+    hiddenAt = Date.now();
+    disconnectEvents();
+    if (MV) mvDisconnect();
+  }
+  function resumeStreams() {
+    if (!streamsOff || document.visibilityState === "hidden") return;
+    streamsOff = false;
+    connectEvents();
+    if (eventsEs) catchUpAlerts(eventsEs, hiddenAt);
+    if (window.htmx) htmx.trigger(document.body, "pf:state");
+    if (MV) { mvFetchBook(); mvConnect(); }
+  }
+  function initStreams() {
+    document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") suspendStreams(); else resumeStreams(); });
+    window.addEventListener("pagehide", suspendStreams);
+    window.addEventListener("pageshow", resumeStreams);   // back from the back/forward cache
+    if (document.visibilityState === "hidden") { streamsOff = true; hiddenAt = Date.now(); return; }   // opened in a background tab
+    connectEvents();
+    if (MV) mvConnect();
   }
 
   // ── alerts window (draggable, resizable, remembers position) ───────────
@@ -433,9 +546,7 @@
     mvCenterBook();
     mvSyncShares();
     mvUpdate(true);
-    mvConnect();
     if (MV.group) mvFetchBook();
-    window.addEventListener("pagehide", function () { if (MV.es) MV.es.close(); });
     // Keep keyboard focus when the panel is refreshed from under it (htmx
     // restores focus by id, so only a vanished element needs help).
     var posFocus = null;
@@ -661,6 +772,11 @@
     }, 8000);
   }
 
+  function mvDisconnect() {
+    if (MV.es) { MV.es.close(); MV.es = null; }
+    clearInterval(MV.fallbackTimer);
+  }
+
   function mvSyncGroup() { $$("#group button").forEach(function (b) { b.classList.toggle("selected", b.dataset.group === MV.group || (!MV.group && b === $("#group button"))); }); }
   function mvSetGroup(g) { MV.group = g; setPref("pf-group", g); mvSyncGroup(); mvFetchBook(); mvConnect(); }
 
@@ -878,8 +994,8 @@
     initModal();
     initDrawer();
     initWindow();
-    connectEvents();
     mvInit();
+    initStreams();
     syncExpiry();
     initPicker();
     startedToast();
