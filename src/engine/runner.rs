@@ -456,6 +456,53 @@ mod tests {
         assert!(alerts(&e).contains("Order replaced · leg a"));
     }
 
+    /// Two legs on one outcome. Leg a's order is being cancelled, and
+    /// Polymarket doesn't confirm it gone yet: it still rests in the book. It is
+    /// ours, so it is no protection for leg b. Before, a leg being cancelled
+    /// dropped out of our own orders, and b counted a's $500 as other people's
+    /// depth ahead and placed with only $100 of others in front.
+    #[tokio::test]
+    async fn an_order_being_cancelled_is_never_depth_ahead_of_another_leg() {
+        use crate::engine::orderbook::TokenBook;
+        let mut a = leg("a", dec!(0.01));
+        (a.distance, a.min_depth_between, a.order_size) = (dec!(0.01), dec!(50), dec!(500));
+        let mut b = leg("b", dec!(0.01));
+        (b.distance, b.min_depth_between) = (dec!(0.02), dec!(400));
+        let (e, api, n) = setup(vec![a, b]);
+        // Best bid 30¢ with $100 of other people's bids.
+        let mut book = TokenBook { best_bid: Some(dec!(0.30)), best_ask: Some(dec!(0.31)), ..Default::default() };
+        book.bids.insert(dec!(0.30), dec!(100) / dec!(0.30));
+        e.state.write().await.books.insert(TOKEN.into(), book);
+        let decide = |s: &mut AppState| crate::engine::pairing::decide(s, |_| true, tokio::time::Instant::now());
+        let action = |d: &[Decision], id: &str| d.iter().find(|x| x.config_id == id).map(|x| x.action.clone());
+
+        // a places $500 at 29¢; b (28¢, needs $400 ahead) waits.
+        let first = decide(&mut *e.state.write().await);
+        assert_eq!(action(&first, "a"), Some(QuoteAction::Place { price: dec!(0.29) }));
+        assert_eq!(action(&first, "b"), Some(QuoteAction::Hold));
+        run(&e, &api, &n, first).await;
+        assert!(matches!(e.state.read().await.order_status.get("a"), Some(OrderStatus::Live { .. })));
+        // The feed shows a's order at 29¢. Live, it is ours: b still waits.
+        e.state.write().await.books.get_mut(TOKEN).unwrap().bids.insert(dec!(0.29), dec!(500) / dec!(0.29));
+        assert_eq!(action(&decide(&mut *e.state.write().await), "b"), Some(QuoteAction::Hold));
+
+        // a is paused; Polymarket says its order is still on the book.
+        api.verify.lock().unwrap().push_back(Ok(false));
+        e.state.write().await.configs[0].paused = true;
+        let pause = decide(&mut *e.state.write().await);
+        run(&e, &api, &n, pause).await;
+        assert!(matches!(e.state.read().await.order_status.get("a"), Some(OrderStatus::Cancelling { .. })));
+        let d = decide(&mut *e.state.write().await);
+        assert_eq!(action(&d, "b"), Some(QuoteAction::Hold), "a's order still rests: only $100 of others ahead");
+
+        // a's size edited while its cancel is pending: the order in the book is still $500.
+        e.state.write().await.configs[0].order_size = dec!(50);
+        let d = decide(&mut *e.state.write().await);
+        assert_eq!(action(&d, "b"), Some(QuoteAction::Hold), "counted at the size it was placed with");
+        run(&e, &api, &n, d).await;
+        assert_eq!(*api.placed.lock().unwrap(), vec![dec!(0.29)], "b never placed");
+    }
+
     /// The race behind it: a Place is decided, then the leg is paused on the
     /// dashboard before the runner gets to it. Nothing may reach Polymarket.
     #[tokio::test]
