@@ -330,7 +330,9 @@
   document.addEventListener("htmx:afterRequest", function (e) {
     var d = e.detail;
     // (htmx follows HX-Redirect before it sets d.successful, so check the status.)
-    if (!d || !d.elt || d.elt.id !== "order-form" || !d.xhr || d.xhr.status < 200 || d.xhr.status >= 300 || !d.xhr.getResponseHeader("HX-Redirect")) return;
+    // Only the start's own target counts: a refused request (session ended) also
+    // carries HX-Redirect, to /login or /welcome, and added nothing.
+    if (!d || !d.elt || d.elt.id !== "order-form" || !d.xhr || d.xhr.status < 200 || d.xhr.status >= 300 || d.xhr.getResponseHeader("HX-Redirect") !== "/markets") return;
     var h = $(".mv-head h1");
     try { sessionStorage.setItem("pf-started", ((h && h.textContent) || "").trim().slice(0, 200)); } catch (_) {}
   });
