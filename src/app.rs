@@ -651,12 +651,26 @@ mod load_alert_tests {
         let mut no_token = bad_distance.clone();
         no_token.token_id = String::new();
         no_token.token_label = "NO".into();
-        let configs = [leg("ok", dec!(0.01)), bad_distance, no_token];
+        let mut bad_size = leg("s", dec!(0.01));
+        bad_size.order_size = dec!(0);
+        let mut bad_depth = leg("d", dec!(0.01));
+        bad_depth.min_depth_between = dec!(-1);
+        // Edit has no tick size field: remove, not edit.
+        let bad_tick = leg("t", dec!(0));
+        // The first problem shown is one Edit fixes, but the tick still needs a remove.
+        let mut bad_distance_and_tick = leg("dt", dec!(0));
+        bad_distance_and_tick.distance = dec!(0);
+        let configs =
+            [leg("ok", dec!(0.01)), bad_distance, no_token, bad_size, bad_depth, bad_tick, bad_distance_and_tick];
         assert_eq!(
             super::paused_on_load(&configs),
             [
                 "Paused on load: Le Pen (YES): distance must be > 0, got 0. Fix it in Edit, or remove it.",
                 "Paused on load: Le Pen (NO): token_id is empty. Remove it and add the market again.",
+                "Paused on load: leg s (Yes): order_size must be > 0, got 0. Fix it in Edit, or remove it.",
+                "Paused on load: leg d (Yes): min_depth_between must be >= 0, got -1. Fix it in Edit, or remove it.",
+                "Paused on load: leg t (Yes): tick_size must be > 0, got 0. Remove it and add the market again.",
+                "Paused on load: leg dt (Yes): distance must be > 0, got 0. Remove it and add the market again.",
             ]
         );
         assert!(super::paused_on_load(&[leg("ok", dec!(0.01))]).is_empty());

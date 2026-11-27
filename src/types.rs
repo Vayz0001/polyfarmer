@@ -71,8 +71,11 @@ impl MarketConfig {
     /// or `None` when the leg is valid.
     pub fn describe_problem(&self) -> Option<String> {
         let problem = self.problem()?;
-        // Edit can't set a token id: such a leg can only be added again.
-        let fix = if self.token_id.is_empty() {
+        // Edit sets size, distance and depth ahead, but not the token id or the
+        // tick size: a leg with either wrong can only be added again. Checked
+        // on the fields, not the first problem, so Edit is never offered for a
+        // leg it can't make valid.
+        let fix = if self.token_id.is_empty() || self.tick_size <= rust_decimal::Decimal::ZERO {
             "Remove it and add the market again."
         } else {
             "Fix it in Edit, or remove it."
