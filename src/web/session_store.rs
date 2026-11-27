@@ -12,7 +12,9 @@
 //!   evict other anonymous visitors but never log the owner out;
 //! * a **periodic sweep** ([`BoundedSessionStore::spawn_sweeper`]) removes expired
 //!   records even when nobody is touching the store;
-//! * expired records are removed when they are loaded.
+//! * expired records are removed when they are loaded;
+//! * `save` never re-creates a deleted session, so logging out sticks even
+//!   while another request of that session is still running.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -134,9 +136,16 @@ impl SessionStore for BoundedSessionStore {
         Ok(())
     }
 
+    /// Updates a session that is still stored; never adds one. With
+    /// `always_save`, every request saves its own copy of the session after the
+    /// response, so a request still running when logout (or a login's id
+    /// rotation) deleted the record would otherwise bring it back. New ids only
+    /// come in through `create`: tower-sessions calls it whenever the session
+    /// has no stored id (first visit, unknown cookie, after `cycle_id`).
     async fn save(&self, record: &Record) -> session_store::Result<()> {
-        let mut map = self.lock();
-        self.insert(&mut map, record.clone());
+        if let Some(stored) = self.lock().get_mut(&record.id) {
+            stored.clone_from(record);
+        }
         Ok(())
     }
 

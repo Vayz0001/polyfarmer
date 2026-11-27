@@ -56,6 +56,9 @@ anything may change between releases.
 
 ### Fixed
 
+- **Logging out now always ends the session.** If another page or panel of the same session was still loading
+  when you logged out, it saved the session again as it finished and the old login cookie worked again. Logging
+  out now sticks; a request still running finishes normally but can no longer restore the session.
 - **A market leg with an invalid value in `markets.json` (for example a distance of 0) is no longer dropped at
   startup.** It vanished from the dashboard, the next save deleted it and any order it had resting was no longer
   tracked. It now loads paused with an Activity alert saying what's wrong; Resume refuses until Edit fixes it.
