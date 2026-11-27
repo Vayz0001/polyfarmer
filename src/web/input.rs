@@ -80,9 +80,17 @@ pub fn depth_usd(s: &str) -> Result<Decimal, String> {
 /// Distance below the best bid, entered in cents, returned in price units.
 pub fn distance_cents(s: &str) -> Result<Decimal, String> {
     match decimal(s) {
-        Some(c) if c > dec!(0) && c <= MAX_DISTANCE_CENTS => Ok(c / dec!(100)),
-        _ => Err(format!("Distance must be between 0 and {MAX_DISTANCE_CENTS} cents.")),
+        Some(c) if distance_cents_in_range(c) => Ok(c / dec!(100)),
+        _ => Err(distance_out_of_range()),
     }
+}
+
+fn distance_cents_in_range(c: Decimal) -> bool {
+    c > dec!(0) && c <= MAX_DISTANCE_CENTS
+}
+
+fn distance_out_of_range() -> String {
+    format!("Distance must be between 0 and {MAX_DISTANCE_CENTS} cents.")
 }
 
 /// Optional auto-pause threshold in cents (blank = disabled), in price units.

@@ -1076,6 +1076,14 @@ struct StartFarmingResultTemplate {
     error: Option<String>,
 }
 
+/// How far below the best bid a Start at `price` rests, or why it can't start.
+fn start_distance(best_bid: Decimal, price: Decimal) -> Result<Decimal, String> {
+    if price >= best_bid {
+        return Err("Your price must be below the current best bid.".into());
+    }
+    Ok(best_bid - price)
+}
+
 fn render_start_error(message: &str) -> Response {
     render(&StartFarmingResultTemplate { error: Some(message.to_string()) }).into_response()
 }
@@ -1126,11 +1134,11 @@ pub async fn start_farming(
     let Some(best_bid_a) = book_a.best_bid else {
         return render_start_error("No live bids on this market right now.");
     };
-    if price >= best_bid_a {
-        return render_start_error("Your price must be below the current best bid.");
-    }
     // Both sides share this distance — applied to the other leg's own best bid.
-    let distance = best_bid_a - price;
+    let distance = match start_distance(best_bid_a, price) {
+        Ok(d) => d,
+        Err(e) => return render_start_error(&e),
+    };
     let per_side_size = if both_sides { order_size / dec!(2) } else { order_size };
 
     let make = |token_idx: usize, benchmark: Decimal| MarketConfig {
