@@ -145,7 +145,8 @@ Users install tagged releases; `main` is the development line.
 
 1. In a pull request: move the "Unreleased" entries in `CHANGELOG.md` under the new version and date, set
    `version` in `Cargo.toml`, and change the three `git clone --branch vX.Y.Z` lines in the README's Install
-   section to the new tag.
+   section to the new tag. On the website (`site/index.html`), change the hero badge (its release link and
+   version) and the three `git clone` lines too. `tests/docs.rs` fails until all of them match `Cargo.toml`.
 2. Merge it, wait for the checks on `main`, then on GitHub go to **Releases → Draft a new release**, create the
    tag `vX.Y.Z` on `main`, and publish it (as a pre-release while the version is 0.x).
 
