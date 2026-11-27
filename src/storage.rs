@@ -30,14 +30,17 @@ fn load_markets_inner(path: &Path) -> Result<Vec<MarketConfig>> {
     if raw.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let configs: Vec<MarketConfig> = serde_json::from_str(&raw)?;
-    let (valid, invalid): (Vec<_>, Vec<_>) = configs.into_iter().partition(|c| c.validate().is_ok());
-    for c in &invalid {
+    let mut configs: Vec<MarketConfig> = serde_json::from_str(&raw)?;
+    // An invalid leg is kept, paused, never dropped: dropping it would delete it
+    // from the file at the next save and lose track of any order it has resting.
+    // The engine never quotes a paused leg; Resume refuses until it is fixed.
+    for c in &mut configs {
         if let Err(e) = c.validate() {
-            tracing::warn!("Skipping invalid market config: {}", e);
+            tracing::warn!("Invalid market config, loaded paused: {}", e);
+            c.paused = true;
         }
     }
-    Ok(valid)
+    Ok(configs)
 }
 
 /// Write market configs back to disk atomically (temp + rename).
@@ -223,5 +226,45 @@ mod tests {
         assert_eq!(read_recent_alerts(&dir.join("alerts.json"), 10).len(), 2);
         assert!(load_markets(&dir.join("markets.json")).unwrap().is_empty());
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod load_tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    fn leg(id: &str, token_id: &str, distance: rust_decimal::Decimal) -> MarketConfig {
+        MarketConfig {
+            id: id.into(),
+            url: "https://polymarket.com/event/e/m".into(),
+            label: "Le Pen".into(),
+            condition_id: "0xabc".into(),
+            token_id: token_id.into(),
+            token_label: "YES".into(),
+            tick_size: dec!(0.01),
+            distance,
+            min_depth_between: dec!(0),
+            order_size: dec!(10),
+            expires_at: chrono::Utc::now() + chrono::Duration::days(1),
+            paused: false,
+            benchmark_bid: None,
+            max_volatility: None,
+        }
+    }
+
+    /// A leg that fails validation is kept, paused, instead of vanishing: the
+    /// next save would delete it for good and leave any resting order untracked.
+    #[test]
+    fn an_invalid_leg_is_loaded_paused_not_dropped() {
+        let path = std::env::temp_dir().join(format!("pf-markets-{}.json", uuid::Uuid::new_v4()));
+        save_markets(&path, &[leg("good", "123", dec!(0.02)), leg("bad", "456", dec!(0))]).unwrap();
+        let loaded = load_markets(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        let ids: Vec<&str> = loaded.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["good", "bad"], "both legs kept, in file order");
+        assert!(!loaded[0].paused, "a valid leg is untouched");
+        assert!(loaded[1].paused, "the invalid leg is paused");
+        assert_eq!(loaded[1].distance, dec!(0), "its values are kept as they were, for Edit to fix");
     }
 }

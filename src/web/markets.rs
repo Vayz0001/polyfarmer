@@ -1699,7 +1699,14 @@ pub async fn edit_submit(
     let (token, old_vol) = {
         let s = state.engine.read().await;
         match s.configs.iter().find(|c| c.id == id) {
-            Some(c) => (c.token_id.clone(), c.max_volatility),
+            Some(c) => match c.describe_problem() {
+                // No token to look up a best bid for, and Edit can't set one.
+                Some(problem) if c.token_id.is_empty() => {
+                    drop(s);
+                    return fail(problem).await;
+                }
+                _ => (c.token_id.clone(), c.max_volatility),
+            },
             None => return fail("This market leg no longer exists.".into()).await,
         }
     };
@@ -2019,6 +2026,14 @@ async fn pause_resume(
     if !verify_csrf(&session, &form.csrf).await {
         return reply(&state, &session, &form.view, Some("Invalid session — reload the page.".into())).await;
     }
+    // A leg loaded paused for an invalid value stays paused until Edit fixes
+    // it. Checked before anything else, so nothing changes or is saved, and no
+    // best bid is looked up for a leg without a token.
+    if !pausing {
+        if let Some(problem) = invalid_leg(&state, &ids).await {
+            return reply(&state, &session, &form.view, Some(format!("Can't resume {problem}"))).await;
+        }
+    }
     // Read every restart price before resuming anything, so a group resume
     // resumes all its legs or none (a lone leg would only wait on the
     // two-sided rule).
@@ -2037,6 +2052,12 @@ async fn pause_resume(
         }
     }
     reply(&state, &session, &form.view, flash).await
+}
+
+/// The first of `ids` whose values are invalid, described for the user.
+async fn invalid_leg(state: &WebState, ids: &[String]) -> Option<String> {
+    let s = state.engine.read().await;
+    s.configs.iter().filter(|c| ids.contains(&c.id)).find_map(|c| c.describe_problem())
 }
 
 pub async fn pause_market(

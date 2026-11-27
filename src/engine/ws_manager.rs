@@ -171,6 +171,20 @@ impl AppState {
             repeg_retry_at: HashMap::new(),
         }
     }
+
+    /// The tokens the legs farm, each once: what the feed subscribes to and
+    /// what the startup, timer and shutdown checks list open orders on. An
+    /// empty token id (an invalid leg, loaded paused) is left out: it names no
+    /// market, and the order library would read it as token 0.
+    pub fn farmed_tokens(&self) -> Vec<String> {
+        self.configs
+            .iter()
+            .filter(|c| !c.token_id.is_empty())
+            .map(|c| c.token_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
 }
 
 /// Spawn the WS manager.
@@ -202,10 +216,7 @@ pub fn spawn(
             }
 
             // Collect currently subscribed token_ids from state
-            let token_ids: Vec<String> = {
-                let s = state.read().await;
-                s.configs.iter().map(|c| c.token_id.clone()).collect::<HashSet<_>>().into_iter().collect()
-            };
+            let token_ids: Vec<String> = state.read().await.farmed_tokens();
 
             // Don't connect until we have at least one market — the server
             // immediately drops connections that send no subscription.
@@ -809,5 +820,37 @@ mod tick_event_tests {
         ] {
             assert_eq!(parse_tick_size_change(&v), None, "{v}");
         }
+    }
+}
+
+#[cfg(test)]
+mod farmed_tokens_tests {
+    use super::AppState;
+    use crate::engine::test_support::{leg, TOKEN};
+    use rust_decimal_macros::dec;
+
+    /// A leg loaded paused because its token id is empty must never reach
+    /// Polymarket as token "": not in the feed's subscription, nor in the
+    /// startup, timer or shutdown order checks (all built from this list).
+    #[test]
+    fn an_empty_token_id_is_never_farmed() {
+        let mut s = AppState::new("unused.json".into());
+        let mut no_token = leg("none", dec!(0.01));
+        no_token.token_id = String::new();
+        no_token.paused = true;
+        s.configs = vec![no_token.clone()];
+        assert!(s.farmed_tokens().is_empty(), "nothing to subscribe to or cancel on");
+
+        // Other invalid values keep their token: its stray orders are still found and cancelled.
+        let mut bad_distance = leg("bad", dec!(0.01));
+        bad_distance.token_id = "456".into();
+        bad_distance.distance = dec!(0);
+        bad_distance.paused = true;
+        s.configs = vec![leg("a", dec!(0.01)), no_token, bad_distance, leg("b", dec!(0.01))];
+        let mut tokens = s.farmed_tokens();
+        tokens.sort();
+        let mut want = vec![TOKEN.to_string(), "456".to_string()];
+        want.sort();
+        assert_eq!(tokens, want, "each token once, the empty one left out");
     }
 }

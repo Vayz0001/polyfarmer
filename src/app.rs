@@ -84,6 +84,7 @@ pub async fn run() -> Result<()> {
     // markets/orders even before the wallet is configured (engine idle until then).
     let initial_configs = load_markets(&config.markets_file)?;
     info!("Loaded {} market configs", initial_configs.len());
+    let load_alerts = paused_on_load(&initial_configs);
     let state = Arc::new(RwLock::new({
         let mut s = AppState::new(config.markets_file.clone());
         for cfg in &initial_configs {
@@ -97,6 +98,9 @@ pub async fn run() -> Result<()> {
     // endpoint subscribes. Buffered so a briefly-slow client doesn't block.
     let (alert_tx, _) = tokio::sync::broadcast::channel::<crate::types::Alert>(256);
     let alerter = Arc::new(Alerter::new(&config.alerts_file, alert_tx.clone()));
+    for message in load_alerts {
+        alerter.warn(message);
+    }
 
     // Lets the dashboard poke the quote loop to re-evaluate immediately (e.g.
     // right after a resume) instead of waiting for the next tick.
@@ -219,10 +223,7 @@ pub async fn run() -> Result<()> {
         };
 
         // ── Startup safety: cancel any open orders on tracked markets ─────────
-        let startup_tokens: Vec<String> = {
-            let s = state.read().await;
-            s.configs.iter().map(|c| c.token_id.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect()
-        };
+        let startup_tokens: Vec<String> = state.read().await.farmed_tokens();
         if let Err(e) = executor.cancel_orders_for_tokens(&startup_tokens).await {
             error!("Startup cancel failed — refusing to trade with potentially open orders: {}", e);
             if !failure_alerted {
@@ -371,10 +372,7 @@ pub async fn run() -> Result<()> {
 
     // 4. Sweep every farmed market for any open order the list above missed:
     //    one that landed after it, or an orphan. Same check as at startup.
-    let tokens: Vec<String> = {
-        let s = state.read().await;
-        s.configs.iter().map(|c| c.token_id.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect()
-    };
+    let tokens: Vec<String> = state.read().await.farmed_tokens();
     match tokio::time::timeout(SHUTDOWN_CANCEL_LIMIT, executor.cancel_orders_for_tokens(&tokens)).await {
         Ok(Ok(())) => info!("Shutdown sweep: no open orders left on farmed markets"),
         Ok(Err(e)) => {
@@ -392,6 +390,11 @@ pub async fn run() -> Result<()> {
 }
 
 // ── Boot helpers ────────────────────────────────────────────────────────────
+
+/// One Activity alert per leg that `load_markets` paused for an invalid value.
+fn paused_on_load(configs: &[crate::types::MarketConfig]) -> Vec<String> {
+    configs.iter().filter_map(|c| c.describe_problem()).map(|d| format!("Paused on load: {d}")).collect()
+}
 
 /// What to tell the user when signing in to Polymarket fails. `chain` is the full error text.
 fn start_failure_hint(chain: &str) -> &'static str {
@@ -607,8 +610,7 @@ async fn evaluate_all_markets(
 
     // Check every farmed market's open orders against what the legs track, and
     // cancel any stray ones (placer::reconcile; one check per market at a time).
-    let tokens: std::collections::HashSet<String> =
-        state.read().await.configs.iter().map(|c| c.token_id.clone()).collect();
+    let tokens = state.read().await.farmed_tokens();
     for token in tokens {
         let (exec, st, al) = (Arc::clone(executor), Arc::clone(state), Arc::clone(alerter));
         tokio::spawn(async move {
@@ -630,6 +632,48 @@ mod link_tests {
     fn setup_link_uses_a_reachable_host() {
         assert_eq!(setup_link("127.0.0.1:8080", "abcd-efgh"), "http://127.0.0.1:8080/welcome?code=abcd-efgh");
         assert_eq!(setup_link("0.0.0.0:8080", "abcd-efgh"), "http://localhost:8080/welcome?code=abcd-efgh");
+    }
+}
+
+#[cfg(test)]
+mod load_alert_tests {
+    use crate::engine::test_support::leg;
+    use rust_decimal_macros::dec;
+
+    /// Each leg loaded paused for an invalid value gets an Activity alert that
+    /// names it and says how to fix it; valid legs get none.
+    #[test]
+    fn each_leg_paused_on_load_gets_an_alert() {
+        let mut bad_distance = leg("a", dec!(0.01));
+        bad_distance.label = "Le Pen".into();
+        bad_distance.token_label = "YES".into();
+        bad_distance.distance = dec!(0);
+        let mut no_token = bad_distance.clone();
+        no_token.token_id = String::new();
+        no_token.token_label = "NO".into();
+        let mut bad_size = leg("s", dec!(0.01));
+        bad_size.order_size = dec!(0);
+        let mut bad_depth = leg("d", dec!(0.01));
+        bad_depth.min_depth_between = dec!(-1);
+        // Edit has no tick size field: remove, not edit.
+        let bad_tick = leg("t", dec!(0));
+        // The first problem shown is one Edit fixes, but the tick still needs a remove.
+        let mut bad_distance_and_tick = leg("dt", dec!(0));
+        bad_distance_and_tick.distance = dec!(0);
+        let configs =
+            [leg("ok", dec!(0.01)), bad_distance, no_token, bad_size, bad_depth, bad_tick, bad_distance_and_tick];
+        assert_eq!(
+            super::paused_on_load(&configs),
+            [
+                "Paused on load: Le Pen (YES): distance must be > 0, got 0. Fix it in Edit, or remove it.",
+                "Paused on load: Le Pen (NO): token_id is empty. Remove it and add the market again.",
+                "Paused on load: leg s (Yes): order_size must be > 0, got 0. Fix it in Edit, or remove it.",
+                "Paused on load: leg d (Yes): min_depth_between must be >= 0, got -1. Fix it in Edit, or remove it.",
+                "Paused on load: leg t (Yes): tick_size must be > 0, got 0. Remove it and add the market again.",
+                "Paused on load: leg dt (Yes): distance must be > 0, got 0. Remove it and add the market again.",
+            ]
+        );
+        assert!(super::paused_on_load(&[leg("ok", dec!(0.01))]).is_empty());
     }
 }
 
