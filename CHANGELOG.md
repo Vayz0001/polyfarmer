@@ -56,6 +56,10 @@ anything may change between releases.
 
 ### Fixed
 
+- **The bot now reacts to a full order book from Polymarket straight away.** After a trade Polymarket can resend
+  the whole book instead of a price change; the bot updated its copy but only re-checked its orders on the next
+  price change or the 30-second check, so an order whose bids ahead had just been eaten (or a leg past its
+  auto-pause limit) stayed exposed meanwhile. It also starts quoting as soon as the books arrive after connecting.
 - **Several dashboard tabs open no longer make pages and buttons hang.** Each open page kept one or two live-update
   connections, and over plain http a browser allows only 6 per server, so three market tabs used them all. A
   background tab now closes its live updates and reopens them, with a refresh, when you come back to it. Alerts

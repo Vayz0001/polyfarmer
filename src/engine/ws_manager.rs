@@ -604,25 +604,31 @@ async fn handle_book_message<A: OrderApi>(
     nudge: &Arc<tokio::sync::Notify>,
 ) -> bool {
     // Full book snapshots: an array on subscribe, single `book` objects later
-    // (after trades). Both replace the token's book.
+    // (after trades). Both replace the token's book, and are acted on like a
+    // price change: a trade can sweep the bids ahead of us with no price_change.
     let snapshots = TokenBook::snapshots_in(value);
     if !snapshots.is_empty() {
-        let mut s = state.write().await;
-        for snap in snapshots {
-            let asset_id = snap.asset_id.clone();
-            let book = s.books.entry(asset_id.clone()).or_default();
-            book.apply_snapshot(&snap);
-            let (best_bid, best_ask, n_bids, n_asks) = (book.best_bid, book.best_ask, book.bids.len(), book.asks.len());
-            s.snapshotted.insert(asset_id.clone());
-            info!(
-                "Book snapshot: {}... | best_bid={:?} best_ask={:?} bids={} asks={}",
-                asset_id.get(..8).unwrap_or(&asset_id),
-                best_bid,
-                best_ask,
-                n_bids,
-                n_asks
-            );
+        let affected_tokens: HashSet<String> = snapshots.iter().map(|snap| snap.asset_id.clone()).collect();
+        {
+            let mut s = state.write().await;
+            for snap in snapshots {
+                let asset_id = snap.asset_id.clone();
+                let book = s.books.entry(asset_id.clone()).or_default();
+                book.apply_snapshot(&snap);
+                let (best_bid, best_ask, n_bids, n_asks) =
+                    (book.best_bid, book.best_ask, book.bids.len(), book.asks.len());
+                s.snapshotted.insert(asset_id.clone());
+                info!(
+                    "Book snapshot: {}... | best_bid={:?} best_ask={:?} bids={} asks={}",
+                    asset_id.get(..8).unwrap_or(&asset_id),
+                    best_bid,
+                    best_ask,
+                    n_bids,
+                    n_asks
+                );
+            }
         }
+        decide_and_execute(&affected_tokens, state, api, alerter, nudge).await;
         return true;
     }
 
