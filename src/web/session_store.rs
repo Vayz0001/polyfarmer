@@ -193,6 +193,32 @@ mod tests {
         assert!(s.is_empty());
     }
 
+    /// tower-sessions saves each request's own copy of the session after the
+    /// response, so a request that was in flight during logout saves the old
+    /// record after `delete` removed it. That late save must not restore it.
+    #[tokio::test]
+    async fn a_late_save_does_not_bring_back_a_deleted_session() {
+        let s = BoundedSessionStore::new(10);
+        let mut owner = record(true, 3600);
+        s.create(&mut owner).await.unwrap();
+        let in_flight_copy = s.load(&owner.id).await.unwrap().unwrap();
+
+        s.delete(&owner.id).await.unwrap(); // logout
+        s.save(&in_flight_copy).await.unwrap(); // the slow request finishes
+
+        assert!(s.load(&owner.id).await.unwrap().is_none(), "logged-out session came back");
+        assert!(s.is_empty());
+    }
+
+    #[tokio::test]
+    async fn save_never_adds_an_id_the_store_did_not_create() {
+        let s = BoundedSessionStore::new(10);
+        let unknown = record(true, 3600);
+        s.save(&unknown).await.unwrap();
+        assert!(s.load(&unknown.id).await.unwrap().is_none());
+        assert!(s.is_empty());
+    }
+
     #[tokio::test]
     async fn expired_sessions_are_not_returned_and_are_removed_on_load() {
         let s = BoundedSessionStore::new(10);
