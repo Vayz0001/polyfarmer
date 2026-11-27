@@ -19,9 +19,11 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::RwLock;
 use tower_sessions::Session;
 
 use crate::cache::TtlCache;
+use crate::engine::placer::OrderApi;
 use crate::engine::ws_manager::AppState;
 use crate::rewards::gamma_resolve::{self, MarketRef};
 use crate::rewards::{market_data, market_flow, markets_browse};
@@ -1836,25 +1838,54 @@ pub async fn remove_market(
     if !verify_csrf(&session, &form.csrf).await {
         return reply(&state, &session, &form.view, Some("Invalid session — reload the page.".into())).await;
     }
+    // Set once at boot and never cleared, so one read serves the whole remove.
+    let handle = state.engine_handle.get().await;
+    match remove_leg(&state.engine, handle.as_ref().map(|(executor, _)| executor.as_ref()), &id).await {
+        Removal::Missing => reply(&state, &session, &form.view, None).await,
+        Removal::Kept(flash) => reply(&state, &session, &form.view, Some(flash)).await,
+        Removal::Removed { unsubscribe } => {
+            if !unsubscribe.is_empty() {
+                if let Some((_, ws_cmd_tx)) = &handle {
+                    let _ = ws_cmd_tx.send(WsCommand::Unsubscribe(unsubscribe)).await;
+                }
+            }
+            reply(&state, &session, &form.view, None).await
+        }
+    }
+}
 
+/// What a remove came to.
+#[derive(Debug)]
+enum Removal {
+    /// No such leg: it was already gone.
+    Missing,
+    /// Removed. `unsubscribe` lists its tokens that no other leg farms.
+    Removed { unsubscribe: Vec<String> },
+    /// Kept; the flash says why.
+    Kept(String),
+}
+
+/// The remove itself (see [`remove_market`]), against any [`OrderApi`] so
+/// tests can stand in for Polymarket. `api` is `None` while the engine isn't
+/// running.
+async fn remove_leg<A: OrderApi>(engine: &RwLock<AppState>, api: Option<&A>, id: &str) -> Removal {
     // 1. Pause in memory and take the leg's order, if any.
     let order_id = {
-        let mut s = state.engine.write().await;
+        let mut s = engine.write().await;
         if !s.configs.iter().any(|c| c.id == id) {
-            drop(s);
-            return reply(&state, &session, &form.view, None).await;
+            return Removal::Missing;
         }
         for c in s.configs.iter_mut().filter(|c| c.id == id) {
             c.paused = true;
         }
-        match s.order_status.get(&id) {
+        match s.order_status.get(id) {
             Some(OrderStatus::Live { order_id, .. }) | Some(OrderStatus::Cancelling { order_id, .. }) => {
                 Some(order_id.clone())
             }
             // An order still being placed is cancelled by the placing task when
             // it sees the status has moved on (see run_place in engine/placer.rs).
             Some(OrderStatus::Placing { .. }) => {
-                s.order_status.insert(id.clone(), OrderStatus::Idle);
+                s.order_status.insert(id.to_string(), OrderStatus::Idle);
                 None
             }
             _ => None,
@@ -1863,70 +1894,55 @@ pub async fn remove_market(
 
     // 2. Cancel it and confirm it is off the book.
     if let Some(order_id) = order_id {
-        let confirmed = match state.engine_handle.get().await {
-            Some((executor, _)) => executor.cancel_order_verified(&order_id).await,
+        let confirmed = match api {
+            Some(api) => api.cancel_verified(&order_id).await,
             None => Err(eyre::eyre!("the engine is not running")),
         };
         if let Err(why) = confirmed.and_then(|gone| if gone { Ok(()) } else { Err(eyre::eyre!("it is still live")) }) {
             tracing::warn!("Remove {id}: could not confirm cancel of {order_id}: {why}");
-            let flash = match persist_configs(&state).await {
+            let flash = match persist_configs(engine).await {
                 Ok(()) => format!(
                     "Couldn't cancel its order on Polymarket ({why}). The market is paused and kept so the order stays \
                      tracked — try removing it again."
                 ),
                 Err(e) => format!("Couldn't cancel its order on Polymarket ({why}), and saving failed: {e}"),
             };
-            return reply(&state, &session, &form.view, Some(flash)).await;
+            return Removal::Kept(flash);
         }
-        let mut s = state.engine.write().await;
-        s.order_status.insert(id.clone(), OrderStatus::Idle);
+        let mut s = engine.write().await;
+        s.order_status.insert(id.to_string(), OrderStatus::Idle);
     }
 
     // 3. Remove the leg.
-    let tokens_to_unsubscribe = {
-        let mut s = state.engine.write().await;
-        let removed: Vec<_> = s.configs.iter().filter(|c| c.id == id).cloned().collect();
-        s.configs.retain(|c| c.id != id);
-        s.order_status.remove(&id);
-        s.place_failures.remove(&id);
-        s.place_retry_at.remove(&id);
-        s.place_attempt.remove(&id);
-        s.cancel_failures.remove(&id);
-        let tokens_to_unsubscribe: Vec<String> = removed
-            .iter()
-            .map(|c| c.token_id.clone())
-            .filter(|tid| !s.configs.iter().any(|c| &c.token_id == tid))
-            .collect();
-        if let Err(e) = save_configs(&mut s) {
-            // Keep it (paused, no order) rather than lose it from the file.
-            for c in &removed {
-                s.order_status.insert(c.id.clone(), OrderStatus::Idle);
-            }
-            s.configs.extend(removed);
-            drop(s);
-            tracing::error!("Failed to save markets.json after remove: {}", e);
-            return reply(
-                &state,
-                &session,
-                &form.view,
-                Some(format!("Its order was cancelled, but saving failed: {e}")),
-            )
-            .await;
+    let mut s = engine.write().await;
+    let removed: Vec<_> = s.configs.iter().filter(|c| c.id == id).cloned().collect();
+    s.configs.retain(|c| c.id != id);
+    s.order_status.remove(id);
+    s.place_failures.remove(id);
+    s.place_retry_at.remove(id);
+    s.place_attempt.remove(id);
+    s.cancel_failures.remove(id);
+    let unsubscribe: Vec<String> = removed
+        .iter()
+        .map(|c| c.token_id.clone())
+        .filter(|tid| !s.configs.iter().any(|c| &c.token_id == tid))
+        .collect();
+    if let Err(e) = save_configs(&mut s) {
+        // Keep it (paused, no order) rather than lose it from the file.
+        for c in &removed {
+            s.order_status.insert(c.id.clone(), OrderStatus::Idle);
         }
-        tokens_to_unsubscribe
-    };
-
-    if !tokens_to_unsubscribe.is_empty() {
-        if let Some((_, ws_cmd_tx)) = state.engine_handle.get().await {
-            let _ = ws_cmd_tx.send(WsCommand::Unsubscribe(tokens_to_unsubscribe)).await;
-        }
+        s.configs.extend(removed);
+        drop(s);
+        tracing::error!("Failed to save markets.json after remove: {}", e);
+        return Removal::Kept(format!("Its order was cancelled, but saving failed: {e}"));
     }
-    reply(&state, &session, &form.view, None).await
+    Removal::Removed { unsubscribe }
 }
 
 /// Write the current market list to markets.json.
-async fn persist_configs(state: &WebState) -> Result<(), String> {
-    save_configs(&mut *state.engine.write().await).map_err(|e| e.to_string())
+async fn persist_configs(engine: &RwLock<AppState>) -> Result<(), String> {
+    save_configs(&mut *engine.write().await).map_err(|e| e.to_string())
 }
 
 /// Write the market list to markets.json, from the state itself: `&mut` means
