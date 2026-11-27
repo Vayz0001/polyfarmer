@@ -139,10 +139,10 @@
   }
 
   // ── live events (one SSE stream: alerts + state changes) ───────────────
-  var stateTimer = null;
+  var stateTimer = null, eventsEs = null;
   function connectEvents() {
-    if (!window.EventSource || !$("#status-strip")) return;
-    var es = new EventSource("/events");
+    if (eventsEs || !window.EventSource || !$("#status-strip")) return;
+    var es = (eventsEs = new EventSource("/events"));
     es.addEventListener("alert", function (e) {
       var a; try { a = JSON.parse(e.data); } catch (_) { return; }
       var parts = splitMsg(a.message);
@@ -155,6 +155,36 @@
       clearTimeout(stateTimer);
       stateTimer = setTimeout(function () { if (window.htmx) htmx.trigger(document.body, "pf:state"); }, 250);
     });
+  }
+  function disconnectEvents() { if (eventsEs) { eventsEs.close(); eventsEs = null; } }
+
+  // ── live streams only while the tab is visible ──────────────────────────
+  // Over plain http a browser allows 6 connections per host, and an open
+  // stream holds one for as long as it lives: three market tabs (two streams
+  // each) would leave none for page loads or button clicks. A hidden tab
+  // closes its streams; when shown again it reopens them and refreshes what
+  // may have changed meanwhile.
+  var streamsOff = false;
+  function suspendStreams() {
+    if (streamsOff) return;
+    streamsOff = true;
+    disconnectEvents();
+    if (MV) mvDisconnect();
+  }
+  function resumeStreams() {
+    if (!streamsOff || document.visibilityState === "hidden") return;
+    streamsOff = false;
+    connectEvents();
+    if (window.htmx) htmx.trigger(document.body, "pf:state");
+    if (MV) { mvFetchBook(); mvConnect(); }
+  }
+  function initStreams() {
+    document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") suspendStreams(); else resumeStreams(); });
+    window.addEventListener("pagehide", suspendStreams);
+    window.addEventListener("pageshow", resumeStreams);   // back from the back/forward cache
+    if (document.visibilityState === "hidden") { streamsOff = true; return; }   // opened in a background tab
+    connectEvents();
+    if (MV) mvConnect();
   }
 
   // ── alerts window (draggable, resizable, remembers position) ───────────
@@ -433,9 +463,7 @@
     mvCenterBook();
     mvSyncShares();
     mvUpdate(true);
-    mvConnect();
     if (MV.group) mvFetchBook();
-    window.addEventListener("pagehide", function () { if (MV.es) MV.es.close(); });
     // Keep keyboard focus when the panel is refreshed from under it (htmx
     // restores focus by id, so only a vanished element needs help).
     var posFocus = null;
@@ -661,6 +689,11 @@
     }, 8000);
   }
 
+  function mvDisconnect() {
+    if (MV.es) { MV.es.close(); MV.es = null; }
+    clearInterval(MV.fallbackTimer);
+  }
+
   function mvSyncGroup() { $$("#group button").forEach(function (b) { b.classList.toggle("selected", b.dataset.group === MV.group || (!MV.group && b === $("#group button"))); }); }
   function mvSetGroup(g) { MV.group = g; setPref("pf-group", g); mvSyncGroup(); mvFetchBook(); mvConnect(); }
 
@@ -878,8 +911,8 @@
     initModal();
     initDrawer();
     initWindow();
-    connectEvents();
     mvInit();
+    initStreams();
     syncExpiry();
     initPicker();
     startedToast();
