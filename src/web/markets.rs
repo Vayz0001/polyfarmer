@@ -2259,6 +2259,88 @@ mod tests {
         }
     }
 
+    fn book_at(best_bid: Decimal, min_order_size: Decimal) -> market_data::BookSnapshot {
+        market_data::BookSnapshot {
+            bids: vec![(best_bid, dec!(100))],
+            asks: vec![],
+            best_bid: Some(best_bid),
+            best_ask: None,
+            tick_size: dec!(0.01),
+            min_order_size,
+        }
+    }
+
+    fn start_settings(distance: Decimal, per_side: Decimal) -> StartSettings {
+        StartSettings {
+            distance,
+            min_depth_between: dec!(0),
+            order_size: per_side,
+            expires_at: Utc::now() + chrono::Duration::days(7),
+            max_volatility: None,
+        }
+    }
+
+    /// Polymarket rejects an order under the market's minimum size (5 shares
+    /// here), so Start refuses one before saving, checking each side at the
+    /// price it would rest at and naming the per-side size that would do.
+    #[test]
+    fn start_refuses_a_per_side_size_below_the_minimum_order() {
+        let mr = two_outcome_market();
+        // Both sides at $2 ($1 per side), 2¢ below 40¢ and 62¢ best bids: 38¢ and 60¢.
+        let (yes, no) = (book_at(dec!(0.40), dec!(5)), book_at(dec!(0.62), dec!(5)));
+        let refusal = start_configs(&mr, 0, &yes, Some(&no), &start_settings(dec!(0.02), dec!(1))).unwrap_err();
+        assert_eq!(
+            refusal,
+            "Too small for this market: $1.00 per side is 1.6 shares of No at 60¢; Polymarket's minimum order is 5 \
+             shares. Use at least $3.00 per side."
+        );
+
+        // One side is big enough, the other isn't: $2.50 is 6.5 Yes shares but 4.1 No shares.
+        let refusal = start_configs(&mr, 0, &yes, Some(&no), &start_settings(dec!(0.02), dec!(2.5))).unwrap_err();
+        assert!(refusal.contains("$2.50 per side is 4.1 shares of No at 60¢"), "{refusal}");
+        assert!(refusal.ends_with("Use at least $3.00 per side."), "{refusal}");
+
+        // One side only.
+        let refusal = start_configs(&mr, 0, &yes, None, &start_settings(dec!(0.02), dec!(1))).unwrap_err();
+        assert!(refusal.contains("$1.00 per side is 2.6 shares of Yes at 38¢"), "{refusal}");
+        assert!(refusal.ends_with("Use at least $1.90 per side."), "{refusal}");
+
+        // A decimal price: 38.25¢ on a 0.1¢ tick rests at 38.2¢.
+        let fine_tick = MarketRef { tick_size: dec!(0.001), ..two_outcome_market() };
+        let refusal =
+            start_configs(&fine_tick, 0, &book_at(dec!(0.402), dec!(5)), None, &start_settings(dec!(0.0195), dec!(1)))
+                .unwrap_err();
+        assert_eq!(
+            refusal,
+            "Too small for this market: $1.00 per side is 2.6 shares of Yes at 38.2¢; Polymarket's minimum order is 5 \
+             shares. Use at least $1.91 per side."
+        );
+    }
+
+    #[test]
+    fn start_accepts_a_per_side_size_at_the_minimum_order() {
+        let mr = two_outcome_market();
+        let (yes, no) = (book_at(dec!(0.40), dec!(5)), book_at(dec!(0.62), dec!(5)));
+        // Exactly 5 shares at 38¢ and at 60¢.
+        let one = start_configs(&mr, 0, &yes, None, &start_settings(dec!(0.02), dec!(1.90))).unwrap();
+        assert_eq!(one.len(), 1);
+        let both = start_configs(&mr, 0, &yes, Some(&no), &start_settings(dec!(0.02), dec!(3))).unwrap();
+        assert_eq!(both.len(), 2);
+        // The decimal-price suggestion is enough: $1.91 at 38.2¢ is 5 shares.
+        let fine_tick = MarketRef { tick_size: dec!(0.001), ..two_outcome_market() };
+        let at_min = start_configs(
+            &fine_tick,
+            0,
+            &book_at(dec!(0.402), dec!(5)),
+            None,
+            &start_settings(dec!(0.0195), dec!(1.91)),
+        );
+        assert!(at_min.is_ok(), "{at_min:?}");
+        // No minimum in the book (0): nothing to check.
+        let no_min = start_configs(&mr, 0, &book_at(dec!(0.40), dec!(0)), None, &start_settings(dec!(0.02), dec!(1)));
+        assert!(no_min.is_ok(), "{no_min:?}");
+    }
+
     /// Holders are valued at their own outcome's mid; names from Polymarket are
     /// escaped, and only a well-formed wallet becomes a profile link.
     #[test]
