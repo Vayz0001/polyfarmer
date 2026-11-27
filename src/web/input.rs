@@ -80,9 +80,26 @@ pub fn depth_usd(s: &str) -> Result<Decimal, String> {
 /// Distance below the best bid, entered in cents, returned in price units.
 pub fn distance_cents(s: &str) -> Result<Decimal, String> {
     match decimal(s) {
-        Some(c) if c > dec!(0) && c <= MAX_DISTANCE_CENTS => Ok(c / dec!(100)),
-        _ => Err(format!("Distance must be between 0 and {MAX_DISTANCE_CENTS} cents.")),
+        Some(c) if distance_cents_in_range(c) => Ok(c / dec!(100)),
+        _ => Err(distance_out_of_range()),
     }
+}
+
+/// A distance below the best bid in price units (computed, not typed), held
+/// to the same limit and message as [`distance_cents`].
+pub fn distance(d: Decimal) -> Result<Decimal, String> {
+    match d.checked_mul(dec!(100)) {
+        Some(c) if distance_cents_in_range(c) => Ok(d),
+        _ => Err(distance_out_of_range()),
+    }
+}
+
+fn distance_cents_in_range(c: Decimal) -> bool {
+    c > dec!(0) && c <= MAX_DISTANCE_CENTS
+}
+
+fn distance_out_of_range() -> String {
+    format!("Distance must be between 0 and {MAX_DISTANCE_CENTS} cents.")
 }
 
 /// Optional auto-pause threshold in cents (blank = disabled), in price units.
@@ -206,6 +223,18 @@ mod tests {
         assert_eq!(volatility_cents("").unwrap(), None);
         assert_eq!(volatility_cents("5").unwrap(), Some(dec!(0.05)));
         assert!(volatility_cents("0").is_err() && volatility_cents("101").is_err());
+    }
+
+    /// A computed distance gets the same bounds and message as a typed one.
+    #[test]
+    fn a_computed_distance_has_the_typed_limit() {
+        let refusal = distance_cents("50.01").unwrap_err();
+        assert_eq!(distance(dec!(0.50)), Ok(dec!(0.50)));
+        assert_eq!(distance(dec!(0.0001)), Ok(dec!(0.0001)));
+        assert_eq!(distance(dec!(0.5001)), Err(refusal.clone()));
+        assert_eq!(distance(dec!(0)), Err(refusal.clone()));
+        assert_eq!(distance(dec!(-0.01)), Err(refusal.clone()));
+        assert_eq!(distance(Decimal::MAX), Err(refusal), "no overflow panic");
     }
 
     #[test]

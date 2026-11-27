@@ -1076,6 +1076,15 @@ struct StartFarmingResultTemplate {
     error: Option<String>,
 }
 
+/// How far below the best bid a Start at `price` rests, or why it can't start.
+/// Held to Edit's distance limit, so a started leg can always be saved in Edit.
+fn start_distance(best_bid: Decimal, price: Decimal) -> Result<Decimal, String> {
+    if price >= best_bid {
+        return Err("Your price must be below the current best bid.".into());
+    }
+    input::distance(best_bid - price)
+}
+
 fn render_start_error(message: &str) -> Response {
     render(&StartFarmingResultTemplate { error: Some(message.to_string()) }).into_response()
 }
@@ -1126,11 +1135,11 @@ pub async fn start_farming(
     let Some(best_bid_a) = book_a.best_bid else {
         return render_start_error("No live bids on this market right now.");
     };
-    if price >= best_bid_a {
-        return render_start_error("Your price must be below the current best bid.");
-    }
     // Both sides share this distance — applied to the other leg's own best bid.
-    let distance = best_bid_a - price;
+    let distance = match start_distance(best_bid_a, price) {
+        Ok(d) => d,
+        Err(e) => return render_start_error(&e),
+    };
     let per_side_size = if both_sides { order_size / dec!(2) } else { order_size };
 
     let make = |token_idx: usize, benchmark: Decimal| MarketConfig {
@@ -2107,6 +2116,31 @@ pub async fn resume_group(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Start refuses a distance Edit would refuse, with Edit's own message, so
+    /// a leg can't be started at a distance it could then never be saved with.
+    #[test]
+    fn start_refuses_a_distance_over_the_edit_limit() {
+        let edit_refusal = input::distance_cents("50.01").unwrap_err();
+        // Le Pen NO: price 1¢ under a 55.7¢ best bid.
+        assert_eq!(start_distance(dec!(0.557), dec!(0.01)), Err(edit_refusal.clone()));
+        assert_eq!(start_distance(dec!(0.551), dec!(0.05)), Err(edit_refusal.clone()), "50.1¢");
+        assert_eq!(start_distance(dec!(0.99), dec!(0.01)), Err(edit_refusal));
+    }
+
+    #[test]
+    fn start_accepts_a_distance_up_to_the_edit_limit() {
+        assert_eq!(start_distance(dec!(0.55), dec!(0.05)), Ok(dec!(0.50)), "exactly 50¢");
+        assert_eq!(start_distance(dec!(0.557), dec!(0.507)), Ok(dec!(0.05)));
+        assert_eq!(start_distance(dec!(0.0002), dec!(0.0001)), Ok(dec!(0.0001)), "the finest tick");
+    }
+
+    #[test]
+    fn start_refuses_a_price_at_or_above_the_best_bid() {
+        let refusal = Err("Your price must be below the current best bid.".to_string());
+        assert_eq!(start_distance(dec!(0.40), dec!(0.40)), refusal);
+        assert_eq!(start_distance(dec!(0.40), dec!(0.41)), refusal);
+    }
 
     #[test]
     fn the_other_side_needs_room_below_its_best_bid() {
