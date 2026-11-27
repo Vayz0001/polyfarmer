@@ -2,7 +2,7 @@ use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
 use crate::engine::orderbook::TokenBook;
 use crate::engine::pairing;
-use crate::engine::placer;
+use crate::engine::placer::{self, OrderApi};
 use crate::engine::quoter::QuoteAction;
 use crate::engine::runner;
 use crate::types::{MarketConfig, OrderStatus, WsCommand, WsPriceChangeEvent};
@@ -550,102 +550,13 @@ async fn handle_message(
         }
     };
 
-    // Full book snapshots: an array on subscribe, single `book` objects later
-    // (after trades). Both replace the token's book.
-    let snapshots = TokenBook::snapshots_in(&value);
-    if !snapshots.is_empty() {
-        let mut s = state.write().await;
-        for snap in snapshots {
-            let asset_id = snap.asset_id.clone();
-            let book = s.books.entry(asset_id.clone()).or_default();
-            book.apply_snapshot(&snap);
-            let (best_bid, best_ask, n_bids, n_asks) = (book.best_bid, book.best_ask, book.bids.len(), book.asks.len());
-            s.snapshotted.insert(asset_id.clone());
-            info!(
-                "Book snapshot: {}... | best_bid={:?} best_ask={:?} bids={} asks={}",
-                asset_id.get(..8).unwrap_or(&asset_id),
-                best_bid,
-                best_ask,
-                n_bids,
-                n_asks
-            );
-        }
+    if handle_book_message(text, &value, state, executor, alerter, nudge).await {
         return;
     }
 
     let event_type = value.get("event_type").and_then(|v| v.as_str()).unwrap_or("");
 
     match event_type {
-        "price_change" => {
-            let event: WsPriceChangeEvent = match serde_json::from_str(text) {
-                Ok(e) => e,
-                Err(e) => {
-                    warn!("price_change parse error: {}", e);
-                    return;
-                }
-            };
-
-            // Collect which tokens were affected
-            let affected_tokens: HashSet<String> = event.price_changes.iter().map(|c| c.asset_id.clone()).collect();
-
-            // Apply changes to books — skip tokens that haven't received their snapshot yet.
-            // Price changes arriving before the snapshot would be wiped when the snapshot
-            // arrives (apply_snapshot calls clear()), leaving the book in an inconsistent state.
-            {
-                let mut s = state.write().await;
-                for change in &event.price_changes {
-                    if !s.snapshotted.contains(&change.asset_id) {
-                        continue; // snapshot hasn't arrived yet — will get authoritative state soon
-                    }
-                    let book = s.books.entry(change.asset_id.clone()).or_default();
-                    book.apply_change(change);
-                }
-            }
-
-            // Evaluate and act for each affected config — and for the other
-            // outcome of the same market, so a two-sided pair moves together
-            // (engine::pairing). Decide under the lock, execute outside it.
-            let actions: Vec<pairing::Decision> = {
-                let mut s = state.write().await;
-                let markets: HashSet<String> = s
-                    .configs
-                    .iter()
-                    .filter(|c| affected_tokens.contains(&c.token_id) && !c.condition_id.is_empty())
-                    .map(|c| c.condition_id.to_ascii_lowercase())
-                    .collect();
-                let actions = pairing::decide(
-                    &mut s,
-                    |c| {
-                        affected_tokens.contains(&c.token_id)
-                            || (!c.condition_id.is_empty() && markets.contains(&c.condition_id.to_ascii_lowercase()))
-                    },
-                    tokio::time::Instant::now(),
-                );
-                for pairing::Decision { config_id: id, action, token_id, .. } in &actions {
-                    let Some(c) = s.configs.iter().find(|c| &c.id == id) else { continue };
-                    let book = s.books.get(token_id);
-                    let status = s.order_status.get(id).cloned().unwrap_or_default();
-                    // Depth from the live order's price (or the target), as the quoter checks it.
-                    let best_bid = book.and_then(|b| b.best_bid).unwrap_or_default();
-                    let lower =
-                        if let OrderStatus::Live { price, .. } = &status { *price } else { best_bid - c.distance };
-                    let own = crate::engine::pairing::own_orders(&s, token_id);
-                    let depth = book.map(|b| b.others_depth_between(lower, best_bid, &own)).unwrap_or_default();
-                    if matches!(action, QuoteAction::Hold) {
-                        debug!("[{}] best_bid={:?} depth={} status={:?} → Hold", &c.label, best_bid, depth, status);
-                    } else {
-                        info!(
-                            "[{}] best_bid={:?} depth={} status={:?} → {:?}",
-                            &c.label, best_bid, depth, status, action
-                        );
-                    }
-                }
-                actions
-            };
-
-            runner::execute(actions, executor, state, alerter, nudge).await;
-        }
-
         "last_trade_price" => {
             // Trade executed — log only, no action needed for LP bot
             let asset_id = value.get("asset_id").and_then(|v| v.as_str()).unwrap_or("?");
@@ -679,6 +590,125 @@ async fn handle_message(
 
         _ => {}
     }
+}
+
+/// Book snapshots and price changes: update the books, then decide and act for
+/// the legs on the affected tokens. Returns `false` for any other message.
+/// Generic over [`OrderApi`] so it runs against the test fake too.
+async fn handle_book_message<A: OrderApi>(
+    text: &str,
+    value: &Value,
+    state: &Arc<RwLock<AppState>>,
+    api: &Arc<A>,
+    alerter: &Arc<Alerter>,
+    nudge: &Arc<tokio::sync::Notify>,
+) -> bool {
+    // Full book snapshots: an array on subscribe, single `book` objects later
+    // (after trades). Both replace the token's book, and are acted on like a
+    // price change: a trade can sweep the bids ahead of us with no price_change.
+    let snapshots = TokenBook::snapshots_in(value);
+    if !snapshots.is_empty() {
+        let affected_tokens: HashSet<String> = snapshots.iter().map(|snap| snap.asset_id.clone()).collect();
+        {
+            let mut s = state.write().await;
+            for snap in snapshots {
+                let asset_id = snap.asset_id.clone();
+                let book = s.books.entry(asset_id.clone()).or_default();
+                book.apply_snapshot(&snap);
+                let (best_bid, best_ask, n_bids, n_asks) =
+                    (book.best_bid, book.best_ask, book.bids.len(), book.asks.len());
+                s.snapshotted.insert(asset_id.clone());
+                info!(
+                    "Book snapshot: {}... | best_bid={:?} best_ask={:?} bids={} asks={}",
+                    asset_id.get(..8).unwrap_or(&asset_id),
+                    best_bid,
+                    best_ask,
+                    n_bids,
+                    n_asks
+                );
+            }
+        }
+        decide_and_execute(&affected_tokens, state, api, alerter, nudge).await;
+        return true;
+    }
+
+    if value.get("event_type").and_then(|v| v.as_str()) != Some("price_change") {
+        return false;
+    }
+    let event: WsPriceChangeEvent = match serde_json::from_str(text) {
+        Ok(e) => e,
+        Err(e) => {
+            warn!("price_change parse error: {}", e);
+            return true;
+        }
+    };
+
+    // Collect which tokens were affected
+    let affected_tokens: HashSet<String> = event.price_changes.iter().map(|c| c.asset_id.clone()).collect();
+
+    // Apply changes to books — skip tokens that haven't received their snapshot yet.
+    // Price changes arriving before the snapshot would be wiped when the snapshot
+    // arrives (apply_snapshot calls clear()), leaving the book in an inconsistent state.
+    {
+        let mut s = state.write().await;
+        for change in &event.price_changes {
+            if !s.snapshotted.contains(&change.asset_id) {
+                continue; // snapshot hasn't arrived yet — will get authoritative state soon
+            }
+            let book = s.books.entry(change.asset_id.clone()).or_default();
+            book.apply_change(change);
+        }
+    }
+
+    decide_and_execute(&affected_tokens, state, api, alerter, nudge).await;
+    true
+}
+
+/// Evaluate and act for each config on `affected_tokens` — and for the other
+/// outcome of the same market, so a two-sided pair moves together
+/// (engine::pairing). Decide under the lock, execute outside it.
+async fn decide_and_execute<A: OrderApi>(
+    affected_tokens: &HashSet<String>,
+    state: &Arc<RwLock<AppState>>,
+    api: &Arc<A>,
+    alerter: &Arc<Alerter>,
+    nudge: &Arc<tokio::sync::Notify>,
+) {
+    let actions: Vec<pairing::Decision> = {
+        let mut s = state.write().await;
+        let markets: HashSet<String> = s
+            .configs
+            .iter()
+            .filter(|c| affected_tokens.contains(&c.token_id) && !c.condition_id.is_empty())
+            .map(|c| c.condition_id.to_ascii_lowercase())
+            .collect();
+        let actions = pairing::decide(
+            &mut s,
+            |c| {
+                affected_tokens.contains(&c.token_id)
+                    || (!c.condition_id.is_empty() && markets.contains(&c.condition_id.to_ascii_lowercase()))
+            },
+            tokio::time::Instant::now(),
+        );
+        for pairing::Decision { config_id: id, action, token_id, .. } in &actions {
+            let Some(c) = s.configs.iter().find(|c| &c.id == id) else { continue };
+            let book = s.books.get(token_id);
+            let status = s.order_status.get(id).cloned().unwrap_or_default();
+            // Depth from the live order's price (or the target), as the quoter checks it.
+            let best_bid = book.and_then(|b| b.best_bid).unwrap_or_default();
+            let lower = if let OrderStatus::Live { price, .. } = &status { *price } else { best_bid - c.distance };
+            let own = crate::engine::pairing::own_orders(&s, token_id);
+            let depth = book.map(|b| b.others_depth_between(lower, best_bid, &own)).unwrap_or_default();
+            if matches!(action, QuoteAction::Hold) {
+                debug!("[{}] best_bid={:?} depth={} status={:?} → Hold", &c.label, best_bid, depth, status);
+            } else {
+                info!("[{}] best_bid={:?} depth={} status={:?} → {:?}", &c.label, best_bid, depth, status, action);
+            }
+        }
+        actions
+    };
+
+    runner::execute(actions, api, state, alerter, nudge).await;
 }
 
 /// `(asset_id, new_tick_size)` from a `tick_size_change` market event. The
@@ -852,5 +882,114 @@ mod farmed_tokens_tests {
         let mut want = vec![TOKEN.to_string(), "456".to_string()];
         want.sort();
         assert_eq!(tokens, want, "each token once, the empty one left out");
+    }
+}
+
+#[cfg(test)]
+mod book_message_tests {
+    use super::*;
+    use crate::engine::test_support::{alerts, env, leg, Env, Fake, TOKEN};
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+    use tokio::sync::Notify;
+
+    /// A leg 2¢ under the best bid that needs $400 of other bids ahead of it.
+    fn protected_leg() -> MarketConfig {
+        let mut a = leg("a", dec!(0.01));
+        a.distance = dec!(0.02);
+        a.min_depth_between = dec!(400);
+        a
+    }
+
+    /// A single `book` message (as Polymarket sends after a trade): a level at
+    /// 28¢ (where our order rests), the best bid worth `usd_at_best`, and asks
+    /// a cent above it.
+    fn book_msg(best_bid: Decimal, usd_at_best: Decimal) -> Value {
+        json!({
+            "event_type": "book",
+            "asset_id": TOKEN,
+            "market": "0xabc",
+            "bids": [
+                {"price": "0.28", "size": "1000"},
+                {"price": best_bid.to_string(), "size": (usd_at_best / best_bid).round_dp(2).to_string()},
+            ],
+            "asks": [{"price": (best_bid + dec!(0.01)).to_string(), "size": "500"}],
+            "timestamp": "1782753357257",
+            "hash": "x"
+        })
+    }
+
+    /// Feed one message through the book path and let spawned tasks finish.
+    async fn send(e: &Env, api: &Arc<Fake>, n: &Arc<Notify>, msg: Value) {
+        assert!(handle_book_message(&msg.to_string(), &msg, &e.state, api, &e.alerter, n).await);
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    }
+
+    /// The leg is live at 28¢ with $600 of other bids ahead at 30¢: protected.
+    async fn live_with_depth(legs: Vec<MarketConfig>) -> (Env, Arc<Fake>, Arc<Notify>) {
+        let (e, api, n) = (env(legs), Fake::new(dec!(0.01), dec!(0.01)), Arc::new(Notify::new()));
+        {
+            let mut s = e.state.write().await;
+            s.order_status.insert("a".into(), OrderStatus::Live { order_id: "o1".into(), price: dec!(0.28) });
+            s.snapshotted.insert(TOKEN.into());
+            let book = s.books.entry(TOKEN.into()).or_default();
+            book.bids.insert(dec!(0.28), dec!(1000));
+            book.bids.insert(dec!(0.30), dec!(2000));
+            book.asks.insert(dec!(0.31), dec!(500));
+            (book.best_bid, book.best_ask) = (Some(dec!(0.30)), Some(dec!(0.31)));
+        }
+        (e, api, n)
+    }
+
+    /// The bug: a trade swept the bids ahead of our order and Polymarket sent
+    /// a fresh `book`, but the engine only re-checked its orders on a
+    /// price_change (or the 30 s timer), leaving the order exposed meanwhile.
+    #[tokio::test]
+    async fn a_snapshot_that_removes_the_depth_ahead_pulls_the_order() {
+        let (e, api, n) = live_with_depth(vec![protected_leg()]).await;
+        send(&e, &api, &n, book_msg(dec!(0.30), dec!(30))).await; // only $30 ahead now
+        assert_eq!(*api.cancelled.lock().unwrap(), vec!["o1".to_string()], "pulled on the snapshot alone");
+        assert_eq!(e.state.read().await.order_status.get("a"), Some(&OrderStatus::Idle));
+        assert!(alerts(&e).contains("Order cancelled · leg a"));
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_past_the_auto_pause_limit_pauses_the_leg() {
+        let mut a = protected_leg();
+        a.benchmark_bid = Some(dec!(0.30));
+        a.max_volatility = Some(dec!(0.05));
+        let (e, api, n) = live_with_depth(vec![a]).await;
+        send(&e, &api, &n, book_msg(dec!(0.36), dec!(600))).await;
+        assert!(e.state.read().await.configs[0].paused, "auto-paused");
+        assert_eq!(*api.cancelled.lock().unwrap(), vec!["o1".to_string()]);
+        assert!(alerts(&e).contains("Auto-paused · leg a"));
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_that_changes_nothing_does_nothing() {
+        let (e, api, n) = live_with_depth(vec![protected_leg()]).await;
+        send(&e, &api, &n, book_msg(dec!(0.30), dec!(600))).await;
+        assert!(api.cancelled.lock().unwrap().is_empty());
+        assert!(api.placed.lock().unwrap().is_empty());
+        assert_eq!(
+            e.state.read().await.order_status.get("a"),
+            Some(&OrderStatus::Live { order_id: "o1".into(), price: dec!(0.28) })
+        );
+        assert!(!alerts(&e).contains("leg a"), "no alert");
+    }
+
+    /// On subscribe (and after a reconnect) the books arrive as one array: an
+    /// idle leg quotes from it at once, through the normal checks, instead of
+    /// waiting for the first price change. A token with no leg is only stored.
+    #[tokio::test]
+    async fn the_subscribe_snapshots_start_quoting_and_ignore_other_tokens() {
+        let (e, api, n) = (env(vec![protected_leg()]), Fake::new(dec!(0.01), dec!(0.01)), Arc::new(Notify::new()));
+        let mut other = book_msg(dec!(0.50), dec!(600));
+        other["asset_id"] = json!("123");
+        send(&e, &api, &n, json!([book_msg(dec!(0.30), dec!(600)), other])).await;
+        assert_eq!(*api.placed.lock().unwrap(), vec![dec!(0.28)], "one order, for the leg's token only");
+        let s = e.state.read().await;
+        assert!(s.snapshotted.contains(TOKEN) && s.snapshotted.contains("123"));
+        assert!(matches!(s.order_status.get("a"), Some(OrderStatus::Live { price, .. }) if *price == dec!(0.28)));
     }
 }
