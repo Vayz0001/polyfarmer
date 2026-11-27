@@ -11,6 +11,7 @@
 # Runtime state (gitignored): markets, alerts, encrypted creds, sessions
 /data/
 /data-demo/
+/data-preview/
 markets.json
 alerts.json
 

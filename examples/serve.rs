@@ -2,6 +2,8 @@
 //!
 //!   cargo run --example serve
 //!   → open http://127.0.0.1:8080  (first run asks you to create a password)
+//!     Uses `data-preview/`, never the bot's own `data/`: with no engine running,
+//!     market changes made here would rewrite the bot's markets.json behind its back.
 //!
 //!   DEMO=1 cargo run --example serve
 //!   → a populated dashboard for UI work: real reward-eligible markets with
@@ -82,7 +84,7 @@ fn data_dir(demo: bool) -> &'static str {
     if demo {
         "data-demo"
     } else {
-        "data"
+        "data-preview"
     }
 }
 

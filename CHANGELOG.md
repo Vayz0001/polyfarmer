@@ -56,6 +56,9 @@ anything may change between releases.
 
 ### Fixed
 
+- **Dashboard preview: `cargo run --example serve` no longer opens the bot's `data/` folder.** Without `DEMO=1`
+  it used the real bot's wallet, password and markets.json, so a market paused, edited or removed in the preview
+  changed the real bot's file. It now uses its own `data-preview/` folder; `DEMO=1` still uses `data-demo/`.
 - **Dashboard: a save no longer overwrites a newer one in markets.json.** A pause, resume, edit, remove or new
   market saved from the dashboard could land just after an auto-pause (or another change) and write it out of the
   file, so after a restart an auto-paused leg quoted again or a removed leg came back. Every save now happens in
