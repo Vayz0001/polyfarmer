@@ -2,6 +2,8 @@
 //!
 //!   cargo run --example serve
 //!   → open http://127.0.0.1:8080  (first run asks you to create a password)
+//!     Uses `data-preview/`, never the bot's own `data/`: with no engine running,
+//!     market changes made here would rewrite the bot's markets.json behind its back.
 //!
 //!   DEMO=1 cargo run --example serve
 //!   → a populated dashboard for UI work: real reward-eligible markets with
@@ -36,7 +38,7 @@ use tokio::sync::RwLock;
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let demo = std::env::var("DEMO").is_ok_and(|v| v == "1");
-    let dir = if demo { "data-demo" } else { "data" };
+    let dir = data_dir(demo);
     let store = CredentialStore::open(dir).wrap_err("open credential store")?;
 
     let engine = Arc::new(RwLock::new(AppState::new(format!("{dir}/markets.json").into())));
@@ -76,6 +78,14 @@ async fn main() -> eyre::Result<()> {
     println!("dashboard preview → http://{bind}");
     let svc = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
     axum::serve(listener, svc).await.wrap_err("serve")
+}
+
+fn data_dir(demo: bool) -> &'static str {
+    if demo {
+        "data-demo"
+    } else {
+        "data-preview"
+    }
 }
 
 async fn seed_demo(state: &WebState, dir: &str) -> eyre::Result<()> {
@@ -282,4 +292,21 @@ fn to_token_book(b: &market_data::BookSnapshot) -> TokenBook {
     tb.best_bid = b.best_bid;
     tb.best_ask = b.best_ask;
     tb
+}
+
+#[cfg(test)]
+mod tests {
+    use super::data_dir;
+
+    #[test]
+    fn plain_preview_does_not_open_the_bots_data_folder() {
+        // `data` is the real bot's default DATA_DIR (wallet, password, markets.json).
+        assert_ne!(data_dir(false), "data");
+        assert_eq!(data_dir(false), "data-preview");
+    }
+
+    #[test]
+    fn demo_preview_uses_the_demo_folder() {
+        assert_eq!(data_dir(true), "data-demo");
+    }
 }

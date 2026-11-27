@@ -67,6 +67,11 @@ tower = { version = "0.5", features = ["util"] }
 # paused clock for backoff tests (same tokio, test builds only)
 tokio = { version = "1", features = ["test-util"] }
 
+# Examples' tests don't run by default; this makes `cargo test` (and so ./check and CI) run the preview's.
+[[example]]
+name = "serve"
+test = true
+
 # `unsafe` is denied everywhere; the few places that need raw libc calls carry a
 # narrow #[allow(unsafe_code)] with the reason. The clippy lints below are denied for all
 # code outside tests (clippy.toml lets tests unwrap, expect, panic and print); the demo
