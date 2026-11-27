@@ -2146,3 +2146,70 @@ async fn a_leg_without_a_token_id_can_only_be_removed() {
     assert_eq!(error_toast(trigger), "");
     assert!(engine.read().await.configs.is_empty());
 }
+
+/// Logging out while another request of the same session is still running must
+/// end the session for good. tower-sessions saves that request's copy of the
+/// session when it finishes, after logout deleted it; the save must not bring
+/// the session back. The "slow" request is a real `/markets` GET that passed the
+/// auth guard and is held inside its handler by a write lock on the engine state.
+#[tokio::test]
+async fn logout_sticks_even_when_a_slow_request_finishes_after_it() {
+    use std::time::Duration;
+    let limit = Duration::from_secs(10);
+    let store = CredentialStore::open(unique_dir()).unwrap();
+    let pw = "test-password-123";
+    store.set_password(pw).unwrap();
+    let engine = empty_engine();
+    let app = router(WebState::new(Arc::new(store), engine.clone()));
+
+    let cookie = login(&app, pw).await;
+    let (status, page, rotated) = get_authed(&app, &cookie, "/markets").await;
+    assert_eq!(status, StatusCode::OK);
+    let cookie = rotated.unwrap_or(cookie);
+    let csrf = extract_csrf(&page);
+
+    let hold = engine.write().await;
+    let slow = tokio::spawn({
+        let (app, cookie) = (app.clone(), cookie.clone());
+        async move { get_authed(&app, &cookie, "/markets").await.0 }
+    });
+    // Let the slow request run until it blocks on the engine lock, past the auth guard.
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!slow.is_finished(), "the slow request must be held open inside its handler");
+
+    let res = tokio::time::timeout(
+        limit,
+        app.clone().oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/logout")
+                .header(header::COOKIE, &cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("csrf={csrf}")))
+                .unwrap(),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
+    let (status, _, _) = tokio::time::timeout(limit, get_authed(&app, &cookie, "/markets")).await.unwrap();
+    assert!(status.is_redirection(), "signed out right after logout, got {status}");
+
+    drop(hold);
+    let slow_status = tokio::time::timeout(limit, slow).await.unwrap().unwrap();
+    assert_eq!(slow_status, StatusCode::OK, "the request that started before logout completes normally");
+
+    let res = tokio::time::timeout(
+        limit,
+        app.clone()
+            .oneshot(Request::builder().uri("/markets").header(header::COOKIE, &cookie).body(Body::empty()).unwrap()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(res.status().is_redirection(), "the old cookie must stay signed out, got {}", res.status());
+    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
+}
