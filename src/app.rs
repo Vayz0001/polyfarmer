@@ -219,10 +219,7 @@ pub async fn run() -> Result<()> {
         };
 
         // ── Startup safety: cancel any open orders on tracked markets ─────────
-        let startup_tokens: Vec<String> = {
-            let s = state.read().await;
-            s.configs.iter().map(|c| c.token_id.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect()
-        };
+        let startup_tokens: Vec<String> = state.read().await.farmed_tokens();
         if let Err(e) = executor.cancel_orders_for_tokens(&startup_tokens).await {
             error!("Startup cancel failed — refusing to trade with potentially open orders: {}", e);
             if !failure_alerted {
@@ -371,10 +368,7 @@ pub async fn run() -> Result<()> {
 
     // 4. Sweep every farmed market for any open order the list above missed:
     //    one that landed after it, or an orphan. Same check as at startup.
-    let tokens: Vec<String> = {
-        let s = state.read().await;
-        s.configs.iter().map(|c| c.token_id.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect()
-    };
+    let tokens: Vec<String> = state.read().await.farmed_tokens();
     match tokio::time::timeout(SHUTDOWN_CANCEL_LIMIT, executor.cancel_orders_for_tokens(&tokens)).await {
         Ok(Ok(())) => info!("Shutdown sweep: no open orders left on farmed markets"),
         Ok(Err(e)) => {
@@ -607,8 +601,7 @@ async fn evaluate_all_markets(
 
     // Check every farmed market's open orders against what the legs track, and
     // cancel any stray ones (placer::reconcile; one check per market at a time).
-    let tokens: std::collections::HashSet<String> =
-        state.read().await.configs.iter().map(|c| c.token_id.clone()).collect();
+    let tokens = state.read().await.farmed_tokens();
     for token in tokens {
         let (exec, st, al) = (Arc::clone(executor), Arc::clone(state), Arc::clone(alerter));
         tokio::spawn(async move {

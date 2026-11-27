@@ -171,6 +171,12 @@ impl AppState {
             repeg_retry_at: HashMap::new(),
         }
     }
+
+    /// The tokens the legs farm, each once: what the feed subscribes to and
+    /// what the startup, timer and shutdown checks list open orders on.
+    pub fn farmed_tokens(&self) -> Vec<String> {
+        self.configs.iter().map(|c| c.token_id.clone()).collect::<HashSet<_>>().into_iter().collect()
+    }
 }
 
 /// Spawn the WS manager.
@@ -202,10 +208,7 @@ pub fn spawn(
             }
 
             // Collect currently subscribed token_ids from state
-            let token_ids: Vec<String> = {
-                let s = state.read().await;
-                s.configs.iter().map(|c| c.token_id.clone()).collect::<HashSet<_>>().into_iter().collect()
-            };
+            let token_ids: Vec<String> = state.read().await.farmed_tokens();
 
             // Don't connect until we have at least one market — the server
             // immediately drops connections that send no subscription.
