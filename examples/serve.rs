@@ -36,7 +36,7 @@ use tokio::sync::RwLock;
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let demo = std::env::var("DEMO").is_ok_and(|v| v == "1");
-    let dir = if demo { "data-demo" } else { "data" };
+    let dir = data_dir(demo);
     let store = CredentialStore::open(dir).wrap_err("open credential store")?;
 
     let engine = Arc::new(RwLock::new(AppState::new(format!("{dir}/markets.json").into())));
@@ -76,6 +76,14 @@ async fn main() -> eyre::Result<()> {
     println!("dashboard preview → http://{bind}");
     let svc = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
     axum::serve(listener, svc).await.wrap_err("serve")
+}
+
+fn data_dir(demo: bool) -> &'static str {
+    if demo {
+        "data-demo"
+    } else {
+        "data"
+    }
 }
 
 async fn seed_demo(state: &WebState, dir: &str) -> eyre::Result<()> {
