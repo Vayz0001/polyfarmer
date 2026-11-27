@@ -1889,3 +1889,154 @@ async fn pausing_claims_the_order_the_leg_holds_now() {
         }
     }
 }
+
+type Engine = Arc<tokio::sync::RwLock<polyfarmer::engine::ws_manager::AppState>>;
+type RaceTask = Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>;
+type Race = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+/// Make the dashboard's first markets.json write race `race` (another change
+/// that saves markets.json): the write starts it and gives it up to 200 ms to
+/// finish before writing. A dashboard that writes after releasing the engine
+/// lock lets `race` save first and then overwrites it with an older list; one
+/// that writes under the lock makes `race` wait, so its save lands last.
+/// Returns the slot holding the race's task, for the test to await.
+async fn race_first_markets_write(engine: &Engine, race: Race) -> RaceTask {
+    let pending = std::sync::Mutex::new(Some(race));
+    let task: RaceTask = Arc::new(std::sync::Mutex::new(None));
+    let slot = Arc::clone(&task);
+    let writer: polyfarmer::storage::MarketsWriter =
+        Arc::new(move |path: &std::path::Path, configs: &[polyfarmer::types::MarketConfig]| {
+            // Taken in its own statement so the lock is released at once: in
+            // an `if let` it would be held for the whole block, and a racing
+            // dashboard write would wait on it here.
+            let race = pending.lock().unwrap().take();
+            if let Some(race) = race {
+                let (done_tx, done_rx) = std::sync::mpsc::channel();
+                let handle = tokio::runtime::Handle::current().spawn(async move {
+                    race.await;
+                    let _ = done_tx.send(());
+                });
+                *slot.lock().unwrap() = Some(handle);
+                // Blocks the test's own thread, not the runtime's workers
+                // (multi-thread test), so `race` keeps running meanwhile.
+                let _ = done_rx.recv_timeout(std::time::Duration::from_millis(200));
+            }
+            polyfarmer::storage::save_markets(path, configs)
+        });
+    engine.write().await.markets_writer = writer;
+    task
+}
+
+/// An engine auto-pause of `id`, which must save.
+fn engine_auto_pause(engine: &Engine, id: &'static str) -> Race {
+    let engine = Arc::clone(engine);
+    Box::pin(async move {
+        let saved = polyfarmer::engine::placer::auto_pause(&engine, id).await;
+        assert!(matches!(saved, Some((_, Ok(())))), "auto-pause saved");
+    })
+}
+
+/// Await the race, then check markets.json holds exactly what is in memory.
+async fn finish_race_and_check_disk(
+    task: RaceTask,
+    engine: &Engine,
+    markets_file: &std::path::Path,
+) -> Vec<polyfarmer::types::MarketConfig> {
+    let handle = task.lock().unwrap().take().expect("the dashboard wrote markets.json");
+    handle.await.unwrap();
+    let memory = serde_json::to_value(&engine.read().await.configs).unwrap();
+    let raw = std::fs::read_to_string(markets_file).unwrap();
+    let disk: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(disk, memory, "markets.json must match memory");
+    serde_json::from_value(disk).unwrap()
+}
+
+/// A second, running leg on another market.
+async fn add_other_leg(engine: &Engine) {
+    let mut s = engine.write().await;
+    let mut other = s.configs[0].clone();
+    other.id = "mar_other".into();
+    other.condition_id = "0xdef".into();
+    other.token_id = "456".into();
+    other.paused = false;
+    s.configs.push(other);
+    s.order_status.insert("mar_other".into(), polyfarmer::types::OrderStatus::Idle);
+}
+
+/// A dashboard pause and an engine auto-pause of another leg at the same
+/// moment: both pauses end up in markets.json, not just the dashboard's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dashboard_pause_keeps_an_engine_auto_pause_that_saved_meanwhile() {
+    let (app, pw, engine, markets_file) = app_with_leg(polyfarmer::types::OrderStatus::Idle);
+    add_other_leg(&engine).await;
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let task = race_first_markets_write(&engine, engine_auto_pause(&engine, "mar_other")).await;
+
+    let (status, _) = post_form(&app, &cookie, "/markets/mar_leg/pause", format!("csrf={csrf}")).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let saved = finish_race_and_check_disk(task, &engine, &markets_file).await;
+    assert!(saved.iter().all(|c| c.paused), "both legs paused on disk: {saved:?}");
+}
+
+/// Resuming a leg while the engine auto-pauses it: whichever lands last in
+/// memory is what markets.json says, so an auto-paused leg can't quote again
+/// after a restart.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dashboard_resume_does_not_undo_an_engine_auto_pause_on_disk() {
+    let (app, pw, engine, markets_file) = app_with_leg(polyfarmer::types::OrderStatus::Idle);
+    engine.write().await.configs[0].paused = true;
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let task = race_first_markets_write(&engine, engine_auto_pause(&engine, "mar_leg")).await;
+
+    let (status, _) = post_form(&app, &cookie, "/markets/mar_leg/resume", format!("csrf={csrf}")).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let saved = finish_race_and_check_disk(task, &engine, &markets_file).await;
+    assert!(saved[0].paused, "the auto-pause came last: {saved:?}");
+}
+
+/// An edit and an engine auto-pause of another leg at the same moment: both
+/// changes end up in markets.json.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dashboard_edit_keeps_an_engine_auto_pause_that_saved_meanwhile() {
+    let (app, pw, engine, markets_file) = app_with_leg(polyfarmer::types::OrderStatus::Idle);
+    add_other_leg(&engine).await;
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let task = race_first_markets_write(&engine, engine_auto_pause(&engine, "mar_other")).await;
+
+    let body =
+        format!("csrf={csrf}&order_size=60&distance_cents=2&min_depth_usd=500&max_volatility_cents=&expires_in=keep");
+    let (status, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", body).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+
+    let saved = finish_race_and_check_disk(task, &engine, &markets_file).await;
+    let leg = saved.iter().find(|c| c.id == "mar_leg").unwrap();
+    let other = saved.iter().find(|c| c.id == "mar_other").unwrap();
+    assert_eq!(leg.order_size, rust_decimal_macros::dec!(60), "edit saved");
+    assert!(other.paused, "auto-pause saved: {saved:?}");
+}
+
+/// A pause and a remove of another leg at the same moment, both from the
+/// dashboard: the removed leg doesn't come back in markets.json.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dashboard_pause_does_not_bring_back_a_leg_removed_meanwhile() {
+    let (app, pw, engine, markets_file) = app_with_leg(polyfarmer::types::OrderStatus::Idle);
+    add_other_leg(&engine).await;
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let remove: Race = {
+        let (app, cookie, csrf) = (app.clone(), cookie.clone(), csrf.clone());
+        Box::pin(async move {
+            let (status, _) = post_form(&app, &cookie, "/markets/mar_other/remove", format!("csrf={csrf}")).await;
+            assert_eq!(status, StatusCode::OK);
+        })
+    };
+    let task = race_first_markets_write(&engine, remove).await;
+
+    let (status, _) = post_form(&app, &cookie, "/markets/mar_leg/pause", format!("csrf={csrf}")).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let saved = finish_race_and_check_disk(task, &engine, &markets_file).await;
+    assert_eq!(saved.len(), 1, "removed leg stays gone: {saved:?}");
+    assert!(saved[0].id == "mar_leg" && saved[0].paused, "{saved:?}");
+}

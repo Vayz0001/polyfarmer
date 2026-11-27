@@ -56,6 +56,10 @@ anything may change between releases.
 
 ### Fixed
 
+- **Dashboard: a save no longer overwrites a newer one in markets.json.** A pause, resume, edit, remove or new
+  market saved from the dashboard could land just after an auto-pause (or another change) and write it out of the
+  file, so after a restart an auto-paused leg quoted again or a removed leg came back. Every save now happens in
+  turn with the engine's own.
 - **Engine: "No balance" always pauses on the second refusal.** The second "not enough balance" only paused the leg
   if it came within two minutes of the first. When the retry was held back longer (thin depth, the two-sided
   rule), it counted as a first refusal again and the leg kept retrying without ever showing "No balance". Now the
