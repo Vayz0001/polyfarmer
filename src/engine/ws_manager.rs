@@ -2,7 +2,7 @@ use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
 use crate::engine::orderbook::TokenBook;
 use crate::engine::pairing;
-use crate::engine::placer;
+use crate::engine::placer::{self, OrderApi};
 use crate::engine::quoter::QuoteAction;
 use crate::engine::runner;
 use crate::types::{MarketConfig, OrderStatus, WsCommand, WsPriceChangeEvent};
@@ -550,102 +550,13 @@ async fn handle_message(
         }
     };
 
-    // Full book snapshots: an array on subscribe, single `book` objects later
-    // (after trades). Both replace the token's book.
-    let snapshots = TokenBook::snapshots_in(&value);
-    if !snapshots.is_empty() {
-        let mut s = state.write().await;
-        for snap in snapshots {
-            let asset_id = snap.asset_id.clone();
-            let book = s.books.entry(asset_id.clone()).or_default();
-            book.apply_snapshot(&snap);
-            let (best_bid, best_ask, n_bids, n_asks) = (book.best_bid, book.best_ask, book.bids.len(), book.asks.len());
-            s.snapshotted.insert(asset_id.clone());
-            info!(
-                "Book snapshot: {}... | best_bid={:?} best_ask={:?} bids={} asks={}",
-                asset_id.get(..8).unwrap_or(&asset_id),
-                best_bid,
-                best_ask,
-                n_bids,
-                n_asks
-            );
-        }
+    if handle_book_message(text, &value, state, executor, alerter, nudge).await {
         return;
     }
 
     let event_type = value.get("event_type").and_then(|v| v.as_str()).unwrap_or("");
 
     match event_type {
-        "price_change" => {
-            let event: WsPriceChangeEvent = match serde_json::from_str(text) {
-                Ok(e) => e,
-                Err(e) => {
-                    warn!("price_change parse error: {}", e);
-                    return;
-                }
-            };
-
-            // Collect which tokens were affected
-            let affected_tokens: HashSet<String> = event.price_changes.iter().map(|c| c.asset_id.clone()).collect();
-
-            // Apply changes to books — skip tokens that haven't received their snapshot yet.
-            // Price changes arriving before the snapshot would be wiped when the snapshot
-            // arrives (apply_snapshot calls clear()), leaving the book in an inconsistent state.
-            {
-                let mut s = state.write().await;
-                for change in &event.price_changes {
-                    if !s.snapshotted.contains(&change.asset_id) {
-                        continue; // snapshot hasn't arrived yet — will get authoritative state soon
-                    }
-                    let book = s.books.entry(change.asset_id.clone()).or_default();
-                    book.apply_change(change);
-                }
-            }
-
-            // Evaluate and act for each affected config — and for the other
-            // outcome of the same market, so a two-sided pair moves together
-            // (engine::pairing). Decide under the lock, execute outside it.
-            let actions: Vec<pairing::Decision> = {
-                let mut s = state.write().await;
-                let markets: HashSet<String> = s
-                    .configs
-                    .iter()
-                    .filter(|c| affected_tokens.contains(&c.token_id) && !c.condition_id.is_empty())
-                    .map(|c| c.condition_id.to_ascii_lowercase())
-                    .collect();
-                let actions = pairing::decide(
-                    &mut s,
-                    |c| {
-                        affected_tokens.contains(&c.token_id)
-                            || (!c.condition_id.is_empty() && markets.contains(&c.condition_id.to_ascii_lowercase()))
-                    },
-                    tokio::time::Instant::now(),
-                );
-                for pairing::Decision { config_id: id, action, token_id, .. } in &actions {
-                    let Some(c) = s.configs.iter().find(|c| &c.id == id) else { continue };
-                    let book = s.books.get(token_id);
-                    let status = s.order_status.get(id).cloned().unwrap_or_default();
-                    // Depth from the live order's price (or the target), as the quoter checks it.
-                    let best_bid = book.and_then(|b| b.best_bid).unwrap_or_default();
-                    let lower =
-                        if let OrderStatus::Live { price, .. } = &status { *price } else { best_bid - c.distance };
-                    let own = crate::engine::pairing::own_orders(&s, token_id);
-                    let depth = book.map(|b| b.others_depth_between(lower, best_bid, &own)).unwrap_or_default();
-                    if matches!(action, QuoteAction::Hold) {
-                        debug!("[{}] best_bid={:?} depth={} status={:?} → Hold", &c.label, best_bid, depth, status);
-                    } else {
-                        info!(
-                            "[{}] best_bid={:?} depth={} status={:?} → {:?}",
-                            &c.label, best_bid, depth, status, action
-                        );
-                    }
-                }
-                actions
-            };
-
-            runner::execute(actions, executor, state, alerter, nudge).await;
-        }
-
         "last_trade_price" => {
             // Trade executed — log only, no action needed for LP bot
             let asset_id = value.get("asset_id").and_then(|v| v.as_str()).unwrap_or("?");
@@ -679,6 +590,119 @@ async fn handle_message(
 
         _ => {}
     }
+}
+
+/// Book snapshots and price changes: update the books, then decide and act for
+/// the legs on the affected tokens. Returns `false` for any other message.
+/// Generic over [`OrderApi`] so it runs against the test fake too.
+async fn handle_book_message<A: OrderApi>(
+    text: &str,
+    value: &Value,
+    state: &Arc<RwLock<AppState>>,
+    api: &Arc<A>,
+    alerter: &Arc<Alerter>,
+    nudge: &Arc<tokio::sync::Notify>,
+) -> bool {
+    // Full book snapshots: an array on subscribe, single `book` objects later
+    // (after trades). Both replace the token's book.
+    let snapshots = TokenBook::snapshots_in(value);
+    if !snapshots.is_empty() {
+        let mut s = state.write().await;
+        for snap in snapshots {
+            let asset_id = snap.asset_id.clone();
+            let book = s.books.entry(asset_id.clone()).or_default();
+            book.apply_snapshot(&snap);
+            let (best_bid, best_ask, n_bids, n_asks) = (book.best_bid, book.best_ask, book.bids.len(), book.asks.len());
+            s.snapshotted.insert(asset_id.clone());
+            info!(
+                "Book snapshot: {}... | best_bid={:?} best_ask={:?} bids={} asks={}",
+                asset_id.get(..8).unwrap_or(&asset_id),
+                best_bid,
+                best_ask,
+                n_bids,
+                n_asks
+            );
+        }
+        return true;
+    }
+
+    if value.get("event_type").and_then(|v| v.as_str()) != Some("price_change") {
+        return false;
+    }
+    let event: WsPriceChangeEvent = match serde_json::from_str(text) {
+        Ok(e) => e,
+        Err(e) => {
+            warn!("price_change parse error: {}", e);
+            return true;
+        }
+    };
+
+    // Collect which tokens were affected
+    let affected_tokens: HashSet<String> = event.price_changes.iter().map(|c| c.asset_id.clone()).collect();
+
+    // Apply changes to books — skip tokens that haven't received their snapshot yet.
+    // Price changes arriving before the snapshot would be wiped when the snapshot
+    // arrives (apply_snapshot calls clear()), leaving the book in an inconsistent state.
+    {
+        let mut s = state.write().await;
+        for change in &event.price_changes {
+            if !s.snapshotted.contains(&change.asset_id) {
+                continue; // snapshot hasn't arrived yet — will get authoritative state soon
+            }
+            let book = s.books.entry(change.asset_id.clone()).or_default();
+            book.apply_change(change);
+        }
+    }
+
+    decide_and_execute(&affected_tokens, state, api, alerter, nudge).await;
+    true
+}
+
+/// Evaluate and act for each config on `affected_tokens` — and for the other
+/// outcome of the same market, so a two-sided pair moves together
+/// (engine::pairing). Decide under the lock, execute outside it.
+async fn decide_and_execute<A: OrderApi>(
+    affected_tokens: &HashSet<String>,
+    state: &Arc<RwLock<AppState>>,
+    api: &Arc<A>,
+    alerter: &Arc<Alerter>,
+    nudge: &Arc<tokio::sync::Notify>,
+) {
+    let actions: Vec<pairing::Decision> = {
+        let mut s = state.write().await;
+        let markets: HashSet<String> = s
+            .configs
+            .iter()
+            .filter(|c| affected_tokens.contains(&c.token_id) && !c.condition_id.is_empty())
+            .map(|c| c.condition_id.to_ascii_lowercase())
+            .collect();
+        let actions = pairing::decide(
+            &mut s,
+            |c| {
+                affected_tokens.contains(&c.token_id)
+                    || (!c.condition_id.is_empty() && markets.contains(&c.condition_id.to_ascii_lowercase()))
+            },
+            tokio::time::Instant::now(),
+        );
+        for pairing::Decision { config_id: id, action, token_id, .. } in &actions {
+            let Some(c) = s.configs.iter().find(|c| &c.id == id) else { continue };
+            let book = s.books.get(token_id);
+            let status = s.order_status.get(id).cloned().unwrap_or_default();
+            // Depth from the live order's price (or the target), as the quoter checks it.
+            let best_bid = book.and_then(|b| b.best_bid).unwrap_or_default();
+            let lower = if let OrderStatus::Live { price, .. } = &status { *price } else { best_bid - c.distance };
+            let own = crate::engine::pairing::own_orders(&s, token_id);
+            let depth = book.map(|b| b.others_depth_between(lower, best_bid, &own)).unwrap_or_default();
+            if matches!(action, QuoteAction::Hold) {
+                debug!("[{}] best_bid={:?} depth={} status={:?} → Hold", &c.label, best_bid, depth, status);
+            } else {
+                info!("[{}] best_bid={:?} depth={} status={:?} → {:?}", &c.label, best_bid, depth, status, action);
+            }
+        }
+        actions
+    };
+
+    runner::execute(actions, api, state, alerter, nudge).await;
 }
 
 /// `(asset_id, new_tick_size)` from a `tick_size_change` market event. The
