@@ -821,6 +821,52 @@ mod tests {
     }
 
     #[test]
+    fn a_paused_leg_with_an_order_on_the_book_says_pausing() {
+        let paused_with = |status: Option<OrderStatus>| {
+            let c = MarketConfig {
+                id: "y".into(),
+                url: String::new(),
+                label: String::new(),
+                condition_id: "0xabc".into(),
+                token_id: "yes".into(),
+                token_label: String::new(),
+                tick_size: dec!(0.01),
+                distance: dec!(0.01),
+                min_depth_between: dec!(0),
+                order_size: dec!(100),
+                expires_at: Utc::now() + chrono::Duration::days(1),
+                paused: true,
+                benchmark_bid: None,
+                max_volatility: None,
+            };
+            leg_row(&c, 0, status.as_ref(), None, None, &HashMap::new())
+        };
+        let cancelling = OrderStatus::Cancelling { order_id: "o1".into(), since: std::time::Instant::now() };
+        let live = OrderStatus::Live { order_id: "o1".into(), price: dec!(0.49) };
+        let placing = OrderStatus::Placing { price: dec!(0.49) };
+        for status in [cancelling, live, placing] {
+            let row = paused_with(Some(status.clone()));
+            assert_eq!((row.status_label, row.status_class), ("Pausing", "busy"), "{status:?}");
+            assert_eq!(
+                row.status_title, "Paused: cancelling the order, waiting for Polymarket to confirm it's gone.",
+                "{status:?}"
+            );
+            assert!(row.paused, "the Resume button still shows");
+            // Low balance never hides an order that is still on the book.
+            assert_eq!(with_low_balance(row, true).status_label, "Pausing", "{status:?}");
+        }
+        // Only with no order does a paused leg say so.
+        for status in [Some(OrderStatus::Idle), None] {
+            let row = paused_with(status.clone());
+            assert_eq!((row.status_label, row.status_class), ("Paused", "paused"), "{status:?}");
+            assert_eq!(
+                row.status_title, "Paused: no order. Resume to quote again. If the bot paused it, Activity says why.",
+                "{status:?}"
+            );
+        }
+    }
+
+    #[test]
     fn score_follows_the_two_sided_rule() {
         // Yes at mid 50¢, bid 49¢ (1¢ off, zone 4¢): alone ((4−1)/4)² = 56%.
         // No at mid 50¢, bid 48¢ (2¢ off): alone 25%.
