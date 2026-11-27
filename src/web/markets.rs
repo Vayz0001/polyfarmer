@@ -1824,11 +1824,13 @@ async fn cancel_leg_order(state: &WebState, id: &str) {
 
 /// POST /markets/{id}/remove — cancels the leg's resting order, then removes it.
 ///
-/// Order matters: the leg is paused first (the engine stops quoting it), its
-/// order is cancelled and confirmed gone, and only then is the leg removed. If
-/// the cancel can't be confirmed the leg stays, paused and saved, so the order
-/// is still tracked (and cancelled at the next start) instead of being left on
-/// Polymarket with nothing watching it.
+/// Order matters: the leg is paused first (the engine stops quoting it) and its
+/// order claimed for cancelling, the order is cancelled and confirmed gone, and
+/// only then is the leg removed, if it is still paused with no order. If the
+/// cancel can't be confirmed the leg stays, paused and saved, so the order is
+/// still tracked (the engine's timer retries the cancel, and the next start
+/// cancels it) instead of being left on Polymarket with nothing watching it. A
+/// leg resumed while its cancel ran is kept too.
 pub async fn remove_market(
     State(state): State<WebState>,
     session: Session,
@@ -1878,24 +1880,24 @@ async fn remove_leg<A: OrderApi>(engine: &RwLock<AppState>, api: Option<&A>, id:
         for c in s.configs.iter_mut().filter(|c| c.id == id) {
             c.paused = true;
         }
-        match s.order_status.get(id) {
-            Some(OrderStatus::Live { order_id, .. }) | Some(OrderStatus::Cancelling { order_id, .. }) => {
-                Some(order_id.clone())
-            }
-            // An order still being placed is cancelled by the placing task when
-            // it sees the status has moved on (see run_place in engine/placer.rs).
-            Some(OrderStatus::Placing { .. }) => {
-                s.order_status.insert(id.to_string(), OrderStatus::Idle);
-                None
-            }
-            _ => None,
+        match (s.order_status.get(id), api) {
+            // Already being cancelled (say, by a pause whose cancel is unconfirmed).
+            (Some(OrderStatus::Cancelling { order_id, .. }), _) => Some(order_id.clone()),
+            // Nothing to cancel it with, and no engine to place beside it: left
+            // Live for step 2 to report.
+            (Some(OrderStatus::Live { order_id, .. }), None) => Some(order_id.clone()),
+            // Claimed the way pause and edit do: a live order becomes Cancelling,
+            // which stops the engine placing for this leg even if it is resumed
+            // meanwhile. An order still being placed is cancelled by the placing
+            // task when it sees the status has moved on (see run_place).
+            _ => crate::engine::placer::settle_unplaced(&mut s, id),
         }
     };
 
     // 2. Cancel it and confirm it is off the book.
-    if let Some(order_id) = order_id {
+    if let Some(order_id) = &order_id {
         let confirmed = match api {
-            Some(api) => api.cancel_verified(&order_id).await,
+            Some(api) => api.cancel_verified(order_id).await,
             None => Err(eyre::eyre!("the engine is not running")),
         };
         if let Err(why) = confirmed.and_then(|gone| if gone { Ok(()) } else { Err(eyre::eyre!("it is still live")) }) {
@@ -1909,12 +1911,26 @@ async fn remove_leg<A: OrderApi>(engine: &RwLock<AppState>, api: Option<&A>, id:
             };
             return Removal::Kept(flash);
         }
-        let mut s = engine.write().await;
-        s.order_status.insert(id.to_string(), OrderStatus::Idle);
     }
 
-    // 3. Remove the leg.
+    // 3. Remove the leg, if it is still paused with no order.
     let mut s = engine.write().await;
+    if let Some(order_id) = &order_id {
+        // Only if the leg still holds that cancel: the state may have moved on
+        // while it ran, and a newer order must not be overwritten.
+        crate::engine::placer::free_if_cancelling(&mut s, id, order_id);
+    }
+    let Some(leg) = s.configs.iter().find(|c| c.id == id) else {
+        return Removal::Missing;
+    };
+    // Resumed in another tab while the cancel ran: the engine may be quoting
+    // it again, and deleting it would leave that order on Polymarket untracked.
+    if !leg.paused || !matches!(s.order_status.get(id), None | Some(OrderStatus::Idle)) {
+        return Removal::Kept(format!(
+            "{} was resumed while it was being removed, so it was kept. Remove it again.",
+            leg.label
+        ));
+    }
     let removed: Vec<_> = s.configs.iter().filter(|c| c.id == id).cloned().collect();
     s.configs.retain(|c| c.id != id);
     s.order_status.remove(id);
@@ -2444,6 +2460,93 @@ mod tests {
                 "{outcome:?}"
             );
             assert!(saved(&e).contains("\"id\": \"a\""), "kept in markets.json too");
+        }
+
+        /// While the remove's cancel runs the leg is Cancelling, so resuming it
+        /// can't get a second order placed beside the old one. Once the cancel
+        /// confirms, the resumed leg is freed and kept.
+        #[tokio::test]
+        async fn a_leg_resumed_during_its_remove_is_not_placed_until_the_cancel_confirms() {
+            let e = leg_with(live("old")).await;
+            let (fake, gate) = slow_cancel();
+            let remove = tokio::spawn({
+                let state = Arc::clone(&e.state);
+                let fake = Arc::clone(&fake);
+                async move { remove_leg(&state, Some(fake.as_ref()), "a").await }
+            });
+            cancel_sent(&fake, "old").await;
+            {
+                let mut s = e.state.write().await;
+                s.configs[0].paused = false;
+                assert!(
+                    matches!(s.order_status.get("a"), Some(OrderStatus::Cancelling { order_id, .. }) if order_id == "old")
+                );
+                let placed = crate::engine::placer::begin_place(&mut s, "a", dec!(0.39), tokio::time::Instant::now());
+                assert_eq!(placed, None, "nothing placed beside the order being cancelled");
+            }
+            gate.notify_one();
+            let outcome = remove.await.unwrap();
+
+            let mut s = e.state.write().await;
+            assert!(matches!(&outcome, Removal::Kept(flash) if flash.contains("leg a was resumed")), "{outcome:?}");
+            assert!(s.configs.iter().any(|c| c.id == "a" && !c.paused), "kept, resumed");
+            assert_eq!(s.order_status.get("a"), Some(&OrderStatus::Idle));
+            let placed = crate::engine::placer::begin_place(&mut s, "a", dec!(0.39), tokio::time::Instant::now());
+            assert!(placed.is_some(), "free to quote again");
+        }
+
+        #[tokio::test]
+        async fn removing_a_leg_cancels_its_order_then_deletes_it() {
+            let e = leg_with(live("old")).await;
+            let fake = Fake::new(dec!(0.01), dec!(0.01));
+            let outcome = remove_leg(&e.state, Some(fake.as_ref()), "a").await;
+
+            assert!(
+                matches!(&outcome, Removal::Removed { unsubscribe } if unsubscribe == &[crate::engine::test_support::TOKEN]),
+                "{outcome:?}"
+            );
+            assert_eq!(*fake.cancelled.lock().unwrap(), vec!["old".to_string()]);
+            let s = e.state.read().await;
+            assert!(s.configs.is_empty() && !s.order_status.contains_key("a"));
+            assert!(!saved(&e).contains("\"id\": \"a\""), "{}", saved(&e));
+        }
+
+        /// A pause whose cancel is still unconfirmed left the leg Cancelling:
+        /// removing it cancels that order and deletes the leg.
+        #[tokio::test]
+        async fn removing_a_leg_still_cancelling_cancels_that_order() {
+            let e =
+                leg_with(OrderStatus::Cancelling { order_id: "old".into(), since: std::time::Instant::now() }).await;
+            e.state.write().await.configs[0].paused = true;
+            let fake = Fake::new(dec!(0.01), dec!(0.01));
+            let outcome = remove_leg(&e.state, Some(fake.as_ref()), "a").await;
+
+            assert!(matches!(outcome, Removal::Removed { .. }), "{outcome:?}");
+            assert_eq!(*fake.cancelled.lock().unwrap(), vec!["old".to_string()]);
+            assert!(e.state.read().await.configs.is_empty());
+        }
+
+        /// An unconfirmed cancel keeps the leg, paused and saved, still holding
+        /// its order as Cancelling: the engine's timer retries that cancel and
+        /// places nothing for the leg meanwhile.
+        #[tokio::test]
+        async fn an_unconfirmed_cancel_keeps_the_leg_paused_and_its_order_tracked() {
+            let e = leg_with(live("old")).await;
+            let fake = Fake::new(dec!(0.01), dec!(0.01));
+            fake.verify.lock().unwrap().push_back(Err("checking order old timed out after 10s".into()));
+            let outcome = remove_leg(&e.state, Some(fake.as_ref()), "a").await;
+
+            assert!(
+                matches!(&outcome, Removal::Kept(flash) if flash.contains("Couldn't cancel its order on Polymarket")),
+                "{outcome:?}"
+            );
+            let s = e.state.read().await;
+            assert!(s.configs.iter().any(|c| c.id == "a" && c.paused), "kept, paused");
+            assert!(
+                matches!(s.order_status.get("a"), Some(OrderStatus::Cancelling { order_id, .. }) if order_id == "old"),
+                "still tracked"
+            );
+            assert!(saved(&e).contains("\"paused\": true"), "{}", saved(&e));
         }
     }
 }

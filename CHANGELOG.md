@@ -56,6 +56,9 @@ anything may change between releases.
 
 ### Fixed
 
+- **Resuming a leg while it is being removed can no longer leave an untracked order on Polymarket.** Remove now
+  holds the leg's order as cancelling, so nothing new is placed until the cancel is confirmed, and deletes the leg
+  only if it is still paused with no order. Otherwise it is kept, with a message to remove it again.
 - **Start farming refuses a price more than 50¢ below the best bid**, with the same "Distance must be between 0
   and 50 cents." message as Edit, and creates nothing. Before, Start accepted it (for example 1¢ under a 55.7¢ best
   bid) and the leg could then not be saved in Edit.
