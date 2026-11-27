@@ -67,17 +67,25 @@ async fn main() -> eyre::Result<()> {
     } else if !state.store.is_initialized() {
         if let Some(code) = state.store.setup_code() {
             println!("\n  first run — setup code: {code}");
-            println!("  open http://127.0.0.1:8080/welcome?code={code}\n");
+            println!("  open {}\n", first_run_link("127.0.0.1:8080", &code));
         }
     }
     events::spawn_state_watcher(state.clone());
     polyfarmer::web::prewarm_browse();
 
-    let bind = std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());
+    let bind = std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| default_bind().into());
     let listener = tokio::net::TcpListener::bind(&bind).await.wrap_err("bind")?;
     println!("dashboard preview → http://{bind}");
     let svc = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
     axum::serve(listener, svc).await.wrap_err("serve")
+}
+
+fn default_bind() -> &'static str {
+    "127.0.0.1:8080"
+}
+
+fn first_run_link(_bind: &str, code: &str) -> String {
+    format!("http://127.0.0.1:8080/welcome?code={code}")
 }
 
 fn data_dir(demo: bool) -> &'static str {
