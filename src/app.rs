@@ -413,7 +413,7 @@ async fn set_phase(state: &Arc<RwLock<AppState>>, phase: EnginePhase) {
 /// `http://host:port/welcome?code=…` for the startup log. A wildcard bind
 /// (`0.0.0.0`) has no usable host, so show `localhost`; on a remote server the
 /// owner substitutes the address they reach it by.
-fn setup_link(bind: &str, code: &str) -> String {
+pub fn setup_link(bind: &str, code: &str) -> String {
     let host = bind
         .strip_prefix("0.0.0.0")
         .or_else(|| bind.strip_prefix("[::]"))

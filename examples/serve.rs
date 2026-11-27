@@ -1,7 +1,8 @@
 //! Preview the dashboard without booting the trading engine (no wallet needed).
 //!
 //!   cargo run --example serve
-//!   → open http://127.0.0.1:8080  (first run asks you to create a password)
+//!   → open http://127.0.0.1:8081, or the printed link on first run (it asks you
+//!     to create a password). DASHBOARD_BIND=host:port binds elsewhere.
 //!     Uses `data-preview/`, never the bot's own `data/`: with no engine running,
 //!     market changes made here would rewrite the bot's markets.json behind its back.
 //!
@@ -62,30 +63,32 @@ async fn main() -> eyre::Result<()> {
         });
     }
 
+    let bind = std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| default_bind().into());
     if demo {
         seed_demo(&state, dir).await?;
     } else if !state.store.is_initialized() {
         if let Some(code) = state.store.setup_code() {
             println!("\n  first run — setup code: {code}");
-            println!("  open {}\n", first_run_link("127.0.0.1:8080", &code));
+            println!("  open {}\n", first_run_link(&bind, &code));
         }
     }
     events::spawn_state_watcher(state.clone());
     polyfarmer::web::prewarm_browse();
 
-    let bind = std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| default_bind().into());
     let listener = tokio::net::TcpListener::bind(&bind).await.wrap_err("bind")?;
     println!("dashboard preview → http://{bind}");
     let svc = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
     axum::serve(listener, svc).await.wrap_err("serve")
 }
 
+/// One above the bot's default (`127.0.0.1:8080`), so the preview can run next
+/// to a bot on the same machine. `DASHBOARD_BIND` overrides it.
 fn default_bind() -> &'static str {
-    "127.0.0.1:8080"
+    "127.0.0.1:8081"
 }
 
-fn first_run_link(_bind: &str, code: &str) -> String {
-    format!("http://127.0.0.1:8080/welcome?code={code}")
+fn first_run_link(bind: &str, code: &str) -> String {
+    polyfarmer::app::setup_link(bind, code)
 }
 
 fn data_dir(demo: bool) -> &'static str {
