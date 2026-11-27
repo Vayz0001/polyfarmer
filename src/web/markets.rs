@@ -1077,11 +1077,12 @@ struct StartFarmingResultTemplate {
 }
 
 /// How far below the best bid a Start at `price` rests, or why it can't start.
+/// Held to Edit's distance limit, so a started leg can always be saved in Edit.
 fn start_distance(best_bid: Decimal, price: Decimal) -> Result<Decimal, String> {
     if price >= best_bid {
         return Err("Your price must be below the current best bid.".into());
     }
-    Ok(best_bid - price)
+    input::distance(best_bid - price)
 }
 
 fn render_start_error(message: &str) -> Response {

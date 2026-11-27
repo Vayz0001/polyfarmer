@@ -56,6 +56,9 @@ anything may change between releases.
 
 ### Fixed
 
+- **Start farming refuses a price more than 50¢ below the best bid**, with the same "Distance must be between 0
+  and 50 cents." message as Edit, and creates nothing. Before, Start accepted it (for example 1¢ under a 55.7¢ best
+  bid) and the leg could then not be saved in Edit.
 - **When your session ends (logout in another tab, a restart, the idle timeout), the whole page now goes to the
   login page.** Before, the next refresh of a live panel put a "Sign in" card inside the status strip and the
   panels (also the order book on a market's page and the Alerts window) while the rest of the old page stayed on
