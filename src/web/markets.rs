@@ -2365,4 +2365,85 @@ mod tests {
         assert_eq!(browse_ends(Utc::now() - chrono::Duration::hours(1)), "ended");
         assert_eq!(browse_ends(Utc::now() + chrono::Duration::days(3) + chrono::Duration::minutes(5)), "3d 0h");
     }
+
+    mod remove {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use rust_decimal_macros::dec;
+        use tokio::sync::Notify;
+
+        use super::super::{remove_leg, Removal};
+        use crate::engine::test_support::{env, leg, Env, Fake};
+        use crate::types::OrderStatus;
+
+        fn live(order_id: &str) -> OrderStatus {
+            OrderStatus::Live { order_id: order_id.into(), price: dec!(0.4) }
+        }
+
+        /// One leg "a" holding `status`.
+        async fn leg_with(status: OrderStatus) -> Env {
+            let e = env(vec![leg("a", dec!(0.01))]);
+            e.state.write().await.order_status.insert("a".into(), status);
+            e
+        }
+
+        /// A Polymarket whose cancel replies only once the gate is notified.
+        fn slow_cancel() -> (Arc<Fake>, Arc<Notify>) {
+            let fake = Fake::new(dec!(0.01), dec!(0.01));
+            let gate = Arc::new(Notify::new());
+            *fake.verify_gate.lock().unwrap() = Some(Arc::clone(&gate));
+            (fake, gate)
+        }
+
+        /// Waits until the remove has sent its cancel of `order_id`.
+        async fn cancel_sent(fake: &Fake, order_id: &str) {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !fake.cancelled.lock().unwrap().iter().any(|o| o == order_id) {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+
+        fn saved(e: &Env) -> String {
+            std::fs::read_to_string(e.dir.join("markets.json")).unwrap()
+        }
+
+        /// The bug: Resume in another tab while Remove waits on a slow cancel.
+        /// The engine quotes the resumed leg again (a new order), then the
+        /// remove finished and deleted the leg, leaving that new order resting
+        /// on Polymarket with nothing tracking it.
+        #[tokio::test]
+        async fn a_leg_resumed_during_its_remove_keeps_its_new_order_tracked() {
+            let e = leg_with(live("old")).await;
+            let (fake, gate) = slow_cancel();
+            let remove = tokio::spawn({
+                let state = Arc::clone(&e.state);
+                let fake = Arc::clone(&fake);
+                async move { remove_leg(&state, Some(fake.as_ref()), "a").await }
+            });
+            cancel_sent(&fake, "old").await;
+            {
+                let mut s = e.state.write().await;
+                // Resume, as set_paused(false) does...
+                s.configs[0].paused = false;
+                // ...and the engine, once the old order is off the book, places a new one.
+                s.order_status.insert("a".into(), OrderStatus::Idle);
+                s.order_status.insert("a".into(), live("new"));
+            }
+            gate.notify_one();
+            let outcome = remove.await.unwrap();
+
+            let s = e.state.read().await;
+            assert!(s.configs.iter().any(|c| c.id == "a"), "the leg holding the new order is kept: {outcome:?}");
+            assert_eq!(s.order_status.get("a"), Some(&live("new")), "the new order is still tracked");
+            assert!(
+                matches!(&outcome, Removal::Kept(flash) if flash.contains("was resumed while it was being removed")),
+                "{outcome:?}"
+            );
+            assert!(saved(&e).contains("\"id\": \"a\""), "kept in markets.json too");
+        }
+    }
 }
