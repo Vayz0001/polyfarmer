@@ -16,8 +16,8 @@ use tower_sessions::Session;
 use zeroize::Zeroizing;
 
 use super::auth::{
-    csrf_token, refresh_session_after_password_change, set_password_blocking, verify_csrf, verify_password_blocking,
-    AttemptSource, ClientIp,
+    csrf_token, refresh_session_after_password_change, set_password_blocking, verify_csrf, verify_password_throttled,
+    AttemptSource, ClientIp, PasswordCheck,
 };
 use super::shell::{render as render_tpl, shell, Shell};
 use super::state::WebState;
@@ -118,15 +118,13 @@ pub async fn set_password(
     // Re-authentication is throttled like login: a hijacked session must not get
     // unlimited guesses at the current password.
     let source = AttemptSource::from_peer(peer);
-    if let Some(wait) = state.limiter.check(source) {
-        let msg = format!("Too many attempts — try again in {} seconds.", wait.as_secs().max(1));
-        return render_pw(&state, &session, None, Some(msg)).await;
+    match verify_password_throttled(&state, source, &form.current).await {
+        PasswordCheck::Correct => {}
+        PasswordCheck::Incorrect => {
+            return render_pw(&state, &session, None, Some("Current password is incorrect.".into())).await;
+        }
+        PasswordCheck::Refused(msg) => return render_pw(&state, &session, None, Some(msg)).await,
     }
-    if !verify_password_blocking(&state, &form.current).await {
-        state.limiter.fail(source);
-        return render_pw(&state, &session, None, Some("Current password is incorrect.".into())).await;
-    }
-    state.limiter.success(source);
     if let Err(msg) = crate::creds::validate_new_password(&form.password) {
         return render_pw(&state, &session, None, Some(msg)).await;
     }

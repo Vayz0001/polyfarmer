@@ -77,20 +77,51 @@ pub struct LoginForm {
 
 // ── attempt throttling (login, setup-code entry, re-authentication) ──────────
 
-/// Message for a locked-out source, or `None` if it may try.
-fn lockout_message(state: &WebState, source: Source) -> Option<String> {
-    state
-        .limiter
-        .check(source)
-        .map(|wait| format!("Too many attempts — try again in {} seconds.", wait.as_secs().max(1)))
+fn lockout_text(wait: Duration) -> String {
+    format!("Too many attempts — try again in {} seconds.", wait.as_secs().max(1))
 }
 
-/// Verify the admin password on the blocking pool (argon2 is deliberately slow
-/// and must not stall the async runtime that also drives the trading engine).
-pub async fn verify_password_blocking(state: &WebState, password: &str) -> bool {
+/// Message for a locked-out source, or `None` if it may try.
+fn lockout_message(state: &WebState, source: Source) -> Option<String> {
+    state.limiter.check(source).map(lockout_text)
+}
+
+/// Outcome of a throttled admin-password check.
+pub enum PasswordCheck {
+    Correct,
+    Incorrect,
+    /// Not checked: locked out or too many checks in flight (the message says when to retry).
+    Refused(String),
+}
+
+/// Check the admin password as one attempt from `source`: admitted by the
+/// limiter first (so a burst of parallel guesses gets no more tries than the
+/// same guesses one at a time), then hashed on the blocking pool (argon2 is
+/// deliberately slow and must not stall the async runtime that also drives the
+/// trading engine), then counted.
+pub async fn verify_password_throttled(state: &WebState, source: Source, password: &str) -> PasswordCheck {
+    let attempt = match state.limiter.try_begin(source) {
+        Ok(attempt) => attempt,
+        Err(wait) => return PasswordCheck::Refused(lockout_text(wait)),
+    };
     let store = Arc::clone(&state.store);
     let password = password.to_string();
-    tokio::task::spawn_blocking(move || store.verify_login(&password).unwrap_or(false)).await.unwrap_or(false)
+    // The attempt moves into the blocking task: its in-flight slot stays taken
+    // until the hash really ends, even if the request is dropped meanwhile.
+    let task = tokio::task::spawn_blocking(move || {
+        let ok = store.verify_login(&password).unwrap_or(false);
+        if ok {
+            attempt.succeeded();
+        } else {
+            attempt.failed();
+        }
+        ok
+    });
+    if task.await.unwrap_or(false) {
+        PasswordCheck::Correct
+    } else {
+        PasswordCheck::Incorrect
+    }
 }
 
 /// Set the admin password on the blocking pool.
@@ -230,10 +261,16 @@ pub async fn welcome_submit(
         return render_welcome(csrf_token(&session).await, Some("Invalid session — retry.".into()), &code)
             .into_response();
     }
+    let attempt = match state.limiter.try_begin(source) {
+        Ok(attempt) => attempt,
+        Err(wait) => {
+            return render_welcome(csrf_token(&session).await, Some(lockout_text(wait)), &code).into_response()
+        }
+    };
     // The one-time setup code proves the visitor can read the bot's log / data
     // folder — i.e. is the owner — regardless of which address they came from.
     if !state.store.verify_setup_code(&form.code) {
-        state.limiter.fail(source);
+        attempt.failed();
         return render_welcome(
             csrf_token(&session).await,
             Some("Setup code is incorrect. It's printed in the bot's startup log (and saved as setup.code in its data folder).".into()),
@@ -241,6 +278,8 @@ pub async fn welcome_submit(
         )
         .into_response();
     }
+    // Success is recorded once the password is saved, below.
+    attempt.uncounted();
     if let Err(msg) = validate_new_password(&form.password) {
         return render_welcome(csrf_token(&session).await, Some(msg), &code).into_response();
     }
@@ -277,18 +316,19 @@ pub async fn login_submit(
         return render_login(csrf_token(&session).await, Some("Invalid session — retry.".into())).into_response();
     }
 
-    let ok = verify_password_blocking(&state, &form.password).await;
-    if ok {
-        state.limiter.success(source);
-        // Rotates the id (session fixation), stamps epoch + login time, sets the idle timeout.
-        begin_session(&session, &state).await;
+    match verify_password_throttled(&state, source, &form.password).await {
+        PasswordCheck::Correct => {
+            // Rotates the id (session fixation), stamps epoch + login time, sets the idle timeout.
+            begin_session(&session, &state).await;
 
-        // Send to wallet setup if not configured yet, else to the dashboard.
-        let dest = if !state.store.has_wallet() { "/setup" } else { "/" };
-        Redirect::to(dest).into_response()
-    } else {
-        state.limiter.fail(source);
-        render_login(csrf_token(&session).await, Some("Incorrect password.".into())).into_response()
+            // Send to wallet setup if not configured yet, else to the dashboard.
+            let dest = if !state.store.has_wallet() { "/setup" } else { "/" };
+            Redirect::to(dest).into_response()
+        }
+        PasswordCheck::Incorrect => {
+            render_login(csrf_token(&session).await, Some("Incorrect password.".into())).into_response()
+        }
+        PasswordCheck::Refused(msg) => render_login(csrf_token(&session).await, Some(msg)).into_response(),
     }
 }
 

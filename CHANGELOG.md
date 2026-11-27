@@ -56,6 +56,10 @@ anything may change between releases.
 
 ### Fixed
 
+- **Security: many wrong passwords sent at once no longer get around the login lockout.** Each guess is now
+  counted before the password is checked, so a burst gets no more tries than the same guesses one at a time. This
+  also applies to the setup code and to the current password when changing it. Only 4 password checks run at once.
+  Any others get "Too many attempts" until one finishes.
 - **Resuming a leg while it is being removed can no longer leave an untracked order on Polymarket.** Remove now
   holds the leg's order as cancelling, so nothing new is placed until the cancel is confirmed, and deletes the leg
   only if it is still paused with no order. Otherwise it is kept, with a message to remove it again.
