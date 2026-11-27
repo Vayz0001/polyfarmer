@@ -18,7 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use askama::Template;
 use axum::{
     extract::{ConnectInfo, FromRequestParts, Query, Request, State},
-    http::request::Parts,
+    http::{request::Parts, StatusCode},
     middleware::Next,
     response::{Html, IntoResponse, Redirect, Response},
     Form,
@@ -311,12 +311,28 @@ pub async fn logout(session: Session, Form(form): Form<LogoutForm>) -> Redirect 
 /// Route guard: first-run → /welcome, unauthenticated → /login, else proceed.
 pub async fn require_auth(State(state): State<WebState>, session: Session, req: Request, next: Next) -> Response {
     if !state.store.is_initialized() {
-        return Redirect::to("/welcome").into_response();
+        return send_page_to(&req, "/welcome");
     }
     if is_authenticated(&session, &state).await {
         next.run(req).await
     } else {
-        Redirect::to("/login").into_response()
+        send_page_to(&req, "/login")
+    }
+}
+
+/// Answer a refused request by sending the browser's whole page to `dest`.
+///
+/// A plain request gets a 303. For an htmx request the browser would follow a
+/// 303 inside the XHR and htmx would swap `dest` into the polled fragment, so it
+/// gets `HX-Redirect`, which htmx (2.0.x) acts on for any non-3xx status before
+/// its swap and error handling; 204 leaves nothing to swap regardless. The
+/// header only chooses the shape of a refusal, never whether to refuse.
+fn send_page_to(req: &Request, dest: &'static str) -> Response {
+    let from_htmx = req.headers().get("hx-request").is_some_and(|v| v == "true");
+    if from_htmx {
+        (StatusCode::NO_CONTENT, [("hx-redirect", dest)]).into_response()
+    } else {
+        Redirect::to(dest).into_response()
     }
 }
 

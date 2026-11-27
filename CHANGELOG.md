@@ -56,6 +56,9 @@ anything may change between releases.
 
 ### Fixed
 
+- **When your session ends (logout in another tab, a restart, the idle timeout), the whole page now goes to the
+  login page.** Before, the next refresh of a live panel put a "Sign in" card inside the status strip and the
+  panels while the rest of the old page stayed on screen. First run goes to the welcome page the same way.
 - **Logging out now always ends the session.** If another page or panel of the same session was still loading
   when you logged out, it saved the session again as it finished and the old login cookie worked again. Logging
   out now sticks; a request still running finishes normally but can no longer restore the session.
