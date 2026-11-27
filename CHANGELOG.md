@@ -56,6 +56,9 @@ anything may change between releases.
 
 ### Fixed
 
+- **Dashboard preview: `cargo run --example serve` now listens on `127.0.0.1:8081` by default**, not the bot's
+  port 8080, so it can run next to a bot on the same machine (`DASHBOARD_BIND` still overrides it). Its first-run
+  welcome link now shows the address it actually listens on instead of always `127.0.0.1:8080`.
 - **Dashboard preview: `cargo run --example serve` no longer opens the bot's `data/` folder.** Without `DEMO=1`
   it used the real bot's wallet, password and markets.json, so a market paused, edited or removed in the preview
   changed the real bot's file. It now uses its own `data-preview/` folder; `DEMO=1` still uses `data-demo/`.
