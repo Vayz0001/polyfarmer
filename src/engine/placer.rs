@@ -371,8 +371,6 @@ pub async fn cancel_orphan<A: OrderApi>(api: &A, alerter: &Alerter, order_id: &s
 /// holding the write lock, so the saved list always includes the pause and a
 /// leg removed meanwhile is never brought back by this save. Returns the leg's
 /// label and the save result, or `None` if the leg no longer exists.
-/// (The dashboard's own saves still copy the list under the lock and write it
-/// after; making those save under the lock too is a separate change.)
 pub async fn auto_pause(state: &RwLock<AppState>, config_id: &str) -> Option<(String, Result<()>)> {
     let mut s = state.write().await;
     let cfg = s.configs.iter_mut().find(|c| c.id == config_id)?;
