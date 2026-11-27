@@ -1087,6 +1087,68 @@ fn start_distance(best_bid: Decimal, price: Decimal) -> Result<Decimal, String> 
     input::distance(best_bid - price)
 }
 
+/// The settings every leg of one Start shares.
+struct StartSettings {
+    distance: Decimal,
+    min_depth_between: Decimal,
+    /// Per side: a both-sides Start splits the order size in half.
+    order_size: Decimal,
+    expires_at: chrono::DateTime<Utc>,
+    max_volatility: Option<Decimal>,
+}
+
+const NO_LIVE_BIDS: &str = "No live bids on this market right now.";
+
+/// The legs a Start creates from fresh books, or why it can't: `book` is the
+/// chosen side's, `other_book` the other side's when farming both. Each leg's
+/// best bid becomes its auto-pause benchmark.
+fn start_configs(
+    mr: &MarketRef,
+    side: usize,
+    book: &market_data::BookSnapshot,
+    other_book: Option<&market_data::BookSnapshot>,
+    settings: &StartSettings,
+) -> Result<Vec<MarketConfig>, String> {
+    let make = |token_idx: usize, benchmark: Decimal| MarketConfig {
+        id: new_config_id(),
+        url: poly_event_url(&mr.event_slug, &mr.market_slug),
+        label: mr.question.clone(),
+        condition_id: mr.condition_id.clone(),
+        token_id: mr.token_ids[token_idx].clone(),
+        token_label: mr.outcomes[token_idx].clone(),
+        tick_size: mr.tick_size,
+        distance: settings.distance,
+        min_depth_between: settings.min_depth_between,
+        order_size: settings.order_size,
+        expires_at: settings.expires_at,
+        paused: false,
+        benchmark_bid: Some(benchmark),
+        max_volatility: settings.max_volatility,
+    };
+    let best_bid = book.best_bid.ok_or(NO_LIVE_BIDS)?;
+    let mut configs = vec![make(side, best_bid)];
+    if let Some(other_book) = other_book {
+        let other = 1 - side;
+        let best_bid_b = other_book.best_bid.ok_or("No live bids on the other side right now.")?;
+        // The other leg bids the same distance below its own best bid: that must
+        // be a real price, or the leg would sit waiting forever.
+        if other_side_price(best_bid_b, settings.distance, mr.tick_size).is_none() {
+            let other_label = mr.outcomes.get(other).cloned().unwrap_or_default();
+            return Err(format!(
+                "{other_label}'s best bid is {}¢, so there's no room {}¢ below it. Farm one side, or bid closer to \
+                 the best bid.",
+                cents(best_bid_b),
+                cents(settings.distance)
+            ));
+        }
+        configs.push(make(other, best_bid_b));
+    }
+    for cfg in &configs {
+        cfg.validate()?;
+    }
+    Ok(configs)
+}
+
 fn render_start_error(message: &str) -> Response {
     render(&StartFarmingResultTemplate { error: Some(message.to_string()) }).into_response()
 }
@@ -1135,7 +1197,7 @@ pub async fn start_farming(
         _ => return render_start_error("Could not load the order book — try again."),
     };
     let Some(best_bid_a) = book_a.best_bid else {
-        return render_start_error("No live bids on this market right now.");
+        return render_start_error(NO_LIVE_BIDS);
     };
     // Both sides share this distance — applied to the other leg's own best bid.
     let distance = match start_distance(best_bid_a, price) {
@@ -1143,51 +1205,19 @@ pub async fn start_farming(
         Err(e) => return render_start_error(&e),
     };
     let per_side_size = if both_sides { order_size / dec!(2) } else { order_size };
-
-    let make = |token_idx: usize, benchmark: Decimal| MarketConfig {
-        id: new_config_id(),
-        url: poly_event_url(&mr.event_slug, &mr.market_slug),
-        label: mr.question.clone(),
-        condition_id: mr.condition_id.clone(),
-        token_id: mr.token_ids[token_idx].clone(),
-        token_label: mr.outcomes[token_idx].clone(),
-        tick_size: mr.tick_size,
-        distance,
-        min_depth_between,
-        order_size: per_side_size,
-        expires_at,
-        paused: false,
-        benchmark_bid: Some(benchmark),
-        max_volatility,
-    };
-    let mut new_configs = vec![make(side, best_bid_a)];
-    if both_sides {
-        let other = 1 - side;
-        let book_b = match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(&mr.token_ids[other])).await {
-            Ok(Ok(b)) => b,
+    let book_b = if both_sides {
+        match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(&mr.token_ids[1 - side])).await {
+            Ok(Ok(b)) => Some(b),
             _ => return render_start_error("Could not load the order book for the other side — try again."),
-        };
-        let Some(best_bid_b) = book_b.best_bid else {
-            return render_start_error("No live bids on the other side right now.");
-        };
-        // The other leg bids the same distance below its own best bid: that must
-        // be a real price, or the leg would sit waiting forever.
-        if other_side_price(best_bid_b, distance, mr.tick_size).is_none() {
-            let other_label = mr.outcomes.get(other).cloned().unwrap_or_default();
-            return render_start_error(&format!(
-                "{other_label}'s best bid is {}¢, so there's no room {}¢ below it. Farm one side, or bid closer to \
-                 the best bid.",
-                cents(best_bid_b),
-                cents(distance)
-            ));
         }
-        new_configs.push(make(other, best_bid_b));
-    }
-    for cfg in &new_configs {
-        if let Err(e) = cfg.validate() {
-            return render_start_error(&e);
-        }
-    }
+    } else {
+        None
+    };
+    let settings = StartSettings { distance, min_depth_between, order_size: per_side_size, expires_at, max_volatility };
+    let new_configs = match start_configs(&mr, side, &book_a, book_b.as_ref(), &settings) {
+        Ok(c) => c,
+        Err(e) => return render_start_error(&e),
+    };
 
     let new_token_ids: Vec<String> = new_configs.iter().map(|c| c.token_id.clone()).collect();
     let newly_subscribed = {
