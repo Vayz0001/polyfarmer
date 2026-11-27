@@ -14,6 +14,16 @@
   function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
   function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
   function num(v) { var n = parseFloat(v); return isFinite(n) ? n : NaN; }
+  // GET an HTML fragment the way htmx does. Once the session has ended the
+  // server answers with HX-Redirect and no body: the whole page goes there and
+  // the promise rejects, so the caller's catch runs and nothing is inserted.
+  function fetchFragment(url) {
+    return fetch(url, { headers: { "HX-Request": "true" } }).then(function (r) {
+      var dest = r.headers.get("HX-Redirect");
+      if (dest) { location.href = dest; throw new Error("session ended"); }
+      return r.text();
+    });
+  }
   // Older than a week: the date, and (where there's room) the time of day,
   // which the day headings above a feed don't give.
   function relTime(iso, withTime) {
@@ -172,7 +182,7 @@
       clamp();
       if (!winLoaded) {
         winLoaded = true;
-        fetch("/activity/recent").then(function (r) { return r.text(); }).then(function (html) {
+        fetchFragment("/activity/recent").then(function (html) {
           $("#pf-win-feed").innerHTML = html; PF.relTime($("#pf-win-feed"));
         }).catch(function () { winLoaded = false; });
       }
@@ -320,7 +330,9 @@
   document.addEventListener("htmx:afterRequest", function (e) {
     var d = e.detail;
     // (htmx follows HX-Redirect before it sets d.successful, so check the status.)
-    if (!d || !d.elt || d.elt.id !== "order-form" || !d.xhr || d.xhr.status < 200 || d.xhr.status >= 300 || !d.xhr.getResponseHeader("HX-Redirect")) return;
+    // Only the start's own target counts: a refused request (session ended) also
+    // carries HX-Redirect, to /login or /welcome, and added nothing.
+    if (!d || !d.elt || d.elt.id !== "order-form" || !d.xhr || d.xhr.status < 200 || d.xhr.status >= 300 || d.xhr.getResponseHeader("HX-Redirect") !== "/markets") return;
     var h = $(".mv-head h1");
     try { sessionStorage.setItem("pf-started", ((h && h.textContent) || "").trim().slice(0, 200)); } catch (_) {}
   });
@@ -627,7 +639,7 @@
   function mvAsked() { return { side: MV.side, group: MV.group }; }
   function mvFetchBook() {
     var asked = mvAsked();
-    fetch("/markets/view/book?" + mvBookParams()).then(function (r) { return r.text(); }).then(function (h) { mvSwapBook(h, asked); }).catch(function () {});
+    fetchFragment("/markets/view/book?" + mvBookParams()).then(function (h) { mvSwapBook(h, asked); }).catch(function () {});
   }
 
   // Live book over SSE; if no update arrives, fall back to REST polling until it does.

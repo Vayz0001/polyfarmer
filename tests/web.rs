@@ -2213,3 +2213,68 @@ async fn logout_sticks_even_when_a_slow_request_finishes_after_it() {
     assert!(res.status().is_redirection(), "the old cookie must stay signed out, got {}", res.status());
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
 }
+
+// ── a session that ends while htmx is polling ──────────────────────────────────
+
+/// Send `method uri` as htmx does (`HX-Request: true`), optionally with a session cookie.
+async fn htmx_request(app: &Router, method: &str, uri: &str, cookie: Option<&str>) -> axum::response::Response {
+    let mut req = Request::builder().method(method).uri(uri).header("HX-Request", "true");
+    if let Some(cookie) = cookie {
+        req = req.header(header::COOKIE, cookie);
+    }
+    app.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap()
+}
+
+/// A refused htmx request must make htmx load `dest` as a whole page. A 3xx
+/// would not: the browser follows it inside the XHR and htmx swaps the login
+/// page into the polled fragment. htmx acts on `HX-Redirect` for any non-3xx
+/// status before its swap and error handling; 204 leaves nothing to swap.
+async fn assert_navigates_whole_page(res: axum::response::Response, dest: &str, what: &str) {
+    assert_eq!(res.status(), StatusCode::NO_CONTENT, "{what}");
+    assert_eq!(header_str(&res, "hx-redirect").as_deref(), Some(dest), "{what}");
+    assert!(res.headers().get(header::LOCATION).is_none(), "{what}: no redirect for the XHR to follow");
+    assert_eq!(body_string(res).await, "", "{what}: nothing to swap into the fragment");
+}
+
+#[tokio::test]
+async fn htmx_requests_without_a_session_send_the_whole_page_to_login() {
+    let (app, _) = test_app();
+    for (method, uri) in [
+        ("GET", "/markets/table"),
+        ("GET", "/status/strip"),
+        ("GET", "/overview/kpis"),
+        ("POST", "/markets/some-leg/pause"),
+    ] {
+        let res = htmx_request(&app, method, uri, None).await;
+        assert_navigates_whole_page(res, "/login", &format!("{method} {uri}")).await;
+    }
+}
+
+#[tokio::test]
+async fn htmx_poll_after_logout_sends_the_whole_page_to_login() {
+    let (app, pw) = test_app();
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let res = htmx_request(&app, "GET", "/markets/table", Some(&cookie)).await;
+    assert_eq!(res.status(), StatusCode::OK, "signed in: the fragment renders");
+    assert!(res.headers().get("hx-redirect").is_none());
+
+    let (status, _) = post_form(&app, &cookie, "/logout", format!("csrf={csrf}")).await;
+    assert!(status.is_redirection());
+
+    let res = htmx_request(&app, "GET", "/markets/table", Some(&cookie)).await;
+    assert_navigates_whole_page(res, "/login", "poll after logout").await;
+    let (status, _, _) = get_authed(&app, &cookie, "/markets").await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "a normal page load keeps the plain redirect");
+}
+
+#[tokio::test]
+async fn htmx_requests_on_first_run_send_the_whole_page_to_welcome() {
+    let (app, _) = test_app_uninit_with_code();
+    for (method, uri) in [("GET", "/status/strip"), ("POST", "/markets/some-leg/pause")] {
+        let res = htmx_request(&app, method, uri, None).await;
+        assert_navigates_whole_page(res, "/welcome", &format!("{method} {uri}")).await;
+    }
+    let res = app.oneshot(Request::builder().uri("/markets/table").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER, "non-htmx requests keep the plain redirect");
+    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/welcome");
+}
