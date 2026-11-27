@@ -14,7 +14,7 @@
 
 import { chromium } from "playwright";
 
-const BASE_URL = process.env.BASE_URL || "http://127.0.0.1:8080";
+const BASE_URL = process.env.BASE_URL || "http://127.0.0.1:8081";
 const MONKEY_EVENTS = parseInt(process.env.MONKEY_EVENTS || "1000", 10);
 const EVENT_INTERVAL_MS = 15; // ~66 events per second
 
