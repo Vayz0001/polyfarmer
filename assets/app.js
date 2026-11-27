@@ -78,13 +78,19 @@
   }
 
   // ── toasts ──────────────────────────────────────────────────────────────
-  function toast(title, body, tone, ttl) {
+  // link (optional): { href, text }, shown after the body.
+  function toast(title, body, tone, ttl, link) {
     var wrap = $("#pf-toasts"); if (!wrap) return;
     var el = document.createElement("div");
     el.className = "toast tone-" + (tone || "pos");
     el.innerHTML = '<span class="bar"></span><div><div class="t">' + esc(title) + "</div>" +
-      (body ? '<div class="b">' + esc(body) + "</div>" : "") + "</div>" +
+      (body || link ? '<div class="b">' + esc(body) + "</div>" : "") + "</div>" +
       '<button class="btn ghost icon x" aria-label="Dismiss"><svg class="i sm"><use href="#i-x"/></svg></button>';
+    if (link) {
+      var a = document.createElement("a");
+      a.href = link.href; a.textContent = link.text;
+      $(".b", el).append(body ? " " : "", a);
+    }
     function dismiss() { el.classList.remove("show"); setTimeout(function () { el.remove(); }, 220); }
     el.onclick = dismiss;
     wrap.appendChild(el);
@@ -182,8 +188,8 @@
   // Live alerts are held until the catch-up ends, so it gets a time limit;
   // a stream that never opens delays it by STREAM_OPEN_WAIT_MS at most.
   var CATCH_UP_SLACK_MS = 3000, CATCH_UP_TIMEOUT_MS = 10000, STREAM_OPEN_WAIT_MS = 5000;
-  // How many alerts /activity/recent returns at most (WINDOW_LIMIT in src/web/activity.rs).
-  var CATCH_UP_LOG_ROWS = 100;
+  // How many alerts the Activity page loads (FEED_LIMIT in src/web/activity.rs).
+  var ACTIVITY_PAGE_ROWS = 300;
   function whenOpen(es, ms) {
     return new Promise(function (resolve) {
       if (es.readyState === EventSource.OPEN) { resolve(); return; }
@@ -216,10 +222,13 @@
           .filter(function (a) { return Date.parse(a.ts) > cutoff && !held.some(function (h) { return h.ts === a.ts; }); })
           .reverse()   // the log is newest first; feeds take them oldest first
           .forEach(function (a) { showAlert(a, false); });
-        // A full read whose oldest row is still after the cutoff: older missed ones didn't fit.
+        // The read doesn't reach back to the cutoff: older missed ones didn't
+        // fit (it is capped at 100) or were rotated out of the log file.
+        // An empty log has nothing to miss.
         var oldest = logged[logged.length - 1];
-        if (logged.length >= CATCH_UP_LOG_ROWS && Date.parse(oldest.ts) > cutoff) {
-          toast("Some alerts may be missing", "Many alerts arrived while this tab was in the background, so only the newest " + CATCH_UP_LOG_ROWS + " are shown. Reload the page to see them all.", "caution", -1);
+        if (oldest && Date.parse(oldest.ts) > cutoff) {
+          toast("Some alerts may be missing", "Not every alert sent while this tab was in the background could be loaded here.", "caution", -1,
+            { href: "/activity", text: "Open Activity to see up to " + ACTIVITY_PAGE_ROWS + " recent ones." });
         }
       });
     }).catch(function (e) {
