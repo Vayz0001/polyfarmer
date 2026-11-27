@@ -39,6 +39,9 @@ pub(crate) struct Fake {
     pub(crate) verify: Mutex<VecDeque<std::result::Result<bool, String>>>,
     /// Makes `cancel_verified` hang (to exercise the timeout).
     pub(crate) verify_hangs: Mutex<bool>,
+    /// When set, `cancel_verified` waits for this to be notified before it
+    /// replies: a slow Polymarket, held for as long as a test needs.
+    pub(crate) verify_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
     /// Open orders per token, as `open_orders` reports them.
     pub(crate) open: Mutex<std::collections::HashMap<String, Vec<String>>>,
     /// Makes `open_orders` fail (network).
@@ -60,6 +63,7 @@ impl Fake {
             cancelled: Mutex::new(Vec::new()),
             verify: Mutex::new(VecDeque::new()),
             verify_hangs: Mutex::new(false),
+            verify_gate: Mutex::new(None),
             open: Mutex::new(std::collections::HashMap::new()),
             list_fails: Mutex::new(false),
             bulk_cancelled: Mutex::new(Vec::new()),
@@ -114,6 +118,10 @@ impl OrderApi for Fake {
         self.cancelled.lock().unwrap().push(o.to_string());
         if *self.verify_hangs.lock().unwrap() {
             std::future::pending::<()>().await;
+        }
+        let gate = self.verify_gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.notified().await;
         }
         match self.verify.lock().unwrap().pop_front() {
             Some(Ok(b)) => Ok(b),
