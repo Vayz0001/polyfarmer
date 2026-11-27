@@ -53,6 +53,13 @@ fn feed_alert_due(last: Option<std::time::Instant>, now: std::time::Instant) -> 
 }
 pub const MAX_PLACE_FAILURES: u32 = 3;
 
+/// One of our orders as it was placed: its price and size in USD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlacedOrder {
+    pub price: rust_decimal::Decimal,
+    pub usd: rust_decimal::Decimal,
+}
+
 /// Shared application state — all tasks hold an Arc clone of this.
 pub struct AppState {
     /// Tokens that have received their initial book snapshot.
@@ -63,6 +70,12 @@ pub struct AppState {
     pub books: HashMap<String, TokenBook>,
     /// Per-config order status
     pub order_status: HashMap<String, OrderStatus>,
+    /// Our orders that went live, by order id. A leg cancelling one no longer
+    /// carries its price, yet the order rests in the book until Polymarket
+    /// confirms it gone, so it must still be left out of the depth ahead
+    /// (`pairing::own_orders`). Only orders a leg still holds, live or being
+    /// cancelled, are kept: `pairing::decide` drops the rest on every pass.
+    pub placed_orders: HashMap<String, PlacedOrder>,
     /// Current market configs (refreshed by the watcher task)
     pub configs: Vec<MarketConfig>,
     /// Consecutive placement failure count per config — reset on success or reconnect
@@ -142,6 +155,7 @@ impl AppState {
             snapshotted: HashSet::new(),
             books: HashMap::new(),
             order_status: HashMap::new(),
+            placed_orders: HashMap::new(),
             configs: Vec::new(),
             place_failures: HashMap::new(),
             place_retry_at: HashMap::new(),

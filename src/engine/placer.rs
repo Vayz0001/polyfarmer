@@ -32,7 +32,7 @@ use tracing::{error, info, warn};
 
 use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
-use crate::engine::ws_manager::{AppState, MAX_PLACE_FAILURES};
+use crate::engine::ws_manager::{AppState, PlacedOrder, MAX_PLACE_FAILURES};
 use crate::storage::save_markets;
 use crate::types::OrderStatus;
 
@@ -644,6 +644,7 @@ pub async fn run_place<A: OrderApi>(
                 cancel_orphan(&*api, &alerter, &order_id).await;
                 return Outcome::Superseded;
             }
+            s.placed_orders.insert(order_id.clone(), PlacedOrder { price, usd: order_size });
             s.order_status.insert(config_id.clone(), OrderStatus::Live { order_id, price });
             s.place_attempt.remove(&config_id);
             s.place_failures.remove(&config_id);
