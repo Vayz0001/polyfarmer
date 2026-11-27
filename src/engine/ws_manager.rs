@@ -814,3 +814,35 @@ mod tick_event_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod farmed_tokens_tests {
+    use super::AppState;
+    use crate::engine::test_support::{leg, TOKEN};
+    use rust_decimal_macros::dec;
+
+    /// A leg loaded paused because its token id is empty must never reach
+    /// Polymarket as token "": not in the feed's subscription, nor in the
+    /// startup, timer or shutdown order checks (all built from this list).
+    #[test]
+    fn an_empty_token_id_is_never_farmed() {
+        let mut s = AppState::new("unused.json".into());
+        let mut no_token = leg("none", dec!(0.01));
+        no_token.token_id = String::new();
+        no_token.paused = true;
+        s.configs = vec![no_token.clone()];
+        assert!(s.farmed_tokens().is_empty(), "nothing to subscribe to or cancel on");
+
+        // Other invalid values keep their token: its stray orders are still found and cancelled.
+        let mut bad_distance = leg("bad", dec!(0.01));
+        bad_distance.token_id = "456".into();
+        bad_distance.distance = dec!(0);
+        bad_distance.paused = true;
+        s.configs = vec![leg("a", dec!(0.01)), no_token, bad_distance, leg("b", dec!(0.01))];
+        let mut tokens = s.farmed_tokens();
+        tokens.sort();
+        let mut want = vec![TOKEN.to_string(), "456".to_string()];
+        want.sort();
+        assert_eq!(tokens, want, "each token once, the empty one left out");
+    }
+}

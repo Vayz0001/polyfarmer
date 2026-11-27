@@ -2040,3 +2040,109 @@ async fn a_dashboard_pause_does_not_bring_back_a_leg_removed_meanwhile() {
     assert_eq!(saved.len(), 1, "removed leg stays gone: {saved:?}");
     assert!(saved[0].id == "mar_leg" && saved[0].paused, "{saved:?}");
 }
+
+// ── Legs loaded paused because a value is invalid ──────────────────────────────
+
+/// The error toast a dashboard action answered with, if any.
+fn error_toast(trigger: Option<String>) -> String {
+    let Some(trigger) = trigger else { return String::new() };
+    let event: serde_json::Value = serde_json::from_str(&trigger).unwrap();
+    event["pf-error"].as_str().unwrap_or_default().to_string()
+}
+
+/// A leg loaded paused with an invalid value (here a distance of 0) can't be
+/// resumed until it is fixed: Resume says why and changes nothing, alone or
+/// with its market's other leg. Once Edit saves valid values, it resumes.
+#[tokio::test]
+async fn an_invalid_leg_cannot_resume_until_an_edit_fixes_it() {
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, markets_file) = app_with_leg(OrderStatus::Idle);
+    {
+        let mut s = engine.write().await;
+        let leg = &mut s.configs[0];
+        leg.distance = dec!(0);
+        leg.paused = true;
+        let mut other = leg.clone();
+        other.id = "mar_other".into();
+        other.token_id = "456".into();
+        other.token_label = "No".into();
+        other.distance = dec!(0.02);
+        s.configs.push(other);
+    }
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+
+    // Listed and paused; the table renders even with a zero tick and distance.
+    engine.write().await.configs[0].tick_size = dec!(0);
+    let (status, table, _) = get_authed(&app, &cookie, "/markets/table").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(table.contains("Will the test pass?") && table.contains("Paused"), "{table}");
+    {
+        let mut s = engine.write().await;
+        s.configs[0].tick_size = dec!(0.01);
+        polyfarmer::storage::save_markets(&markets_file, &s.configs).unwrap();
+    }
+    let before = std::fs::read_to_string(&markets_file).unwrap();
+
+    for uri in ["/markets/mar_leg/resume", "/markets/group/0xabc/resume"] {
+        let (_, trigger) = post_as(&app, &cookie, uri, format!("csrf={csrf}")).await;
+        assert_eq!(
+            error_toast(trigger),
+            "Can't resume Will the test pass? (Yes): distance must be > 0, got 0. Fix it in Edit, or remove it.",
+            "{uri}"
+        );
+        let s = engine.read().await;
+        assert!(s.configs.iter().all(|c| c.paused), "{uri}: nothing resumed");
+        drop(s);
+        assert_eq!(std::fs::read_to_string(&markets_file).unwrap(), before, "{uri}: nothing saved");
+    }
+
+    let edit =
+        format!("csrf={csrf}&order_size=100&distance_cents=2&min_depth_usd=500&max_volatility_cents=&expires_in=keep");
+    let (status, _) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").distance, dec!(0.02));
+
+    let (_, trigger) = post_as(&app, &cookie, "/markets/mar_leg/resume", format!("csrf={csrf}")).await;
+    assert_eq!(error_toast(trigger), "", "resumed without an error");
+    assert!(!leg_of(&*engine.read().await, "mar_leg").paused);
+    let saved: Vec<polyfarmer::types::MarketConfig> =
+        serde_json::from_str(&std::fs::read_to_string(&markets_file).unwrap()).unwrap();
+    let saved_leg = saved.iter().find(|c| c.id == "mar_leg").unwrap();
+    assert!(!saved_leg.paused && saved_leg.distance == dec!(0.02), "{saved_leg:?}");
+}
+
+/// A leg without a token id can't trade at all, and Edit can't give it one:
+/// Resume and Edit both say to remove it (Edit before looking anything up on
+/// Polymarket for token ""), and Remove works.
+#[tokio::test]
+async fn a_leg_without_a_token_id_can_only_be_removed() {
+    use polyfarmer::types::OrderStatus;
+    let (app, pw, engine, _) = app_with_leg(OrderStatus::Idle);
+    {
+        let mut s = engine.write().await;
+        s.configs[0].token_id = String::new();
+        s.configs[0].paused = true;
+    }
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    let (_, trigger) = post_as(&app, &cookie, "/markets/mar_leg/resume", format!("csrf={csrf}")).await;
+    assert_eq!(
+        error_toast(trigger),
+        "Can't resume Will the test pass? (Yes): token_id is empty. Remove it and add the market again."
+    );
+    assert!(engine.read().await.configs[0].paused);
+
+    // Setting an auto-pause limit would read the token's best bid first.
+    let edit =
+        format!("csrf={csrf}&order_size=100&distance_cents=2&min_depth_usd=500&max_volatility_cents=5&expires_in=keep");
+    let (status, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(out.contains("Remove it and add the market again."), "{out}");
+    let s = engine.read().await;
+    assert!(s.configs[0].paused && s.configs[0].max_volatility.is_none(), "edit refused");
+    drop(s);
+
+    let (_, trigger) = post_as(&app, &cookie, "/markets/mar_leg/remove", format!("csrf={csrf}")).await;
+    assert_eq!(error_toast(trigger), "");
+    assert!(engine.read().await.configs.is_empty());
+}
