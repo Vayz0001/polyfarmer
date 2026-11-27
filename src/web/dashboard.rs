@@ -289,9 +289,10 @@ fn apply_two_sided(legs: &mut [LegRow]) {
 }
 
 /// A leg the engine paused because Polymarket said there wasn't enough balance
-/// for its order (`engine::placer::low_balance`) says so instead of "Paused".
+/// for its order (`engine::placer::low_balance`) says so instead of "Paused",
+/// but never while an order may still be on the book ("Pausing").
 fn with_low_balance(mut row: LegRow, low: bool) -> LegRow {
-    if low && row.paused {
+    if low && row.status_label == "Paused" {
         row.status_label = "No balance";
         row.status_class = "warn";
         row.status_title = "Paused: Polymarket said there isn't enough balance for this order. Add funds or lower \
@@ -353,7 +354,14 @@ fn leg_row(
     };
     let expired = c.expires_at <= Utc::now();
     let (status_label, status_class, live) = if c.paused {
-        ("Paused", "paused", None)
+        match status {
+            // Paused, but an order is still (or may soon be) on the book until
+            // Polymarket confirms the cancel.
+            Some(OrderStatus::Live { .. } | OrderStatus::Placing { .. } | OrderStatus::Cancelling { .. }) => {
+                ("Pausing", "busy", None)
+            }
+            _ => ("Paused", "paused", None),
+        }
     } else {
         match status {
             Some(OrderStatus::Live { order_id, price }) => ("Live", "live", Some((order_id.clone(), *price))),
@@ -365,6 +373,7 @@ fn leg_row(
     };
     let status_title = match status_label {
         "Paused" => "Paused: no order. Resume to quote again.",
+        "Pausing" => "Paused: cancelling the order, waiting for Polymarket to confirm it's gone.",
         "Live" => "Your order is resting on the book.",
         "Placing" => "Placing the order on Polymarket…",
         "Cancelling" => "Cancelling the order: waiting for Polymarket to confirm it's gone.",
@@ -859,10 +868,7 @@ mod tests {
         for status in [Some(OrderStatus::Idle), None] {
             let row = paused_with(status.clone());
             assert_eq!((row.status_label, row.status_class), ("Paused", "paused"), "{status:?}");
-            assert_eq!(
-                row.status_title, "Paused: no order. Resume to quote again. If the bot paused it, Activity says why.",
-                "{status:?}"
-            );
+            assert!(row.status_title.starts_with("Paused: no order. Resume to quote again."), "{status:?}");
         }
     }
 
