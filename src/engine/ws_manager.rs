@@ -53,11 +53,15 @@ fn feed_alert_due(last: Option<std::time::Instant>, now: std::time::Instant) -> 
 }
 pub const MAX_PLACE_FAILURES: u32 = 3;
 
-/// One of our orders as it was placed: its price and size in USD.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One of our orders as it was placed: its token, price and size in USD.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlacedOrder {
+    pub token_id: String,
     pub price: rust_decimal::Decimal,
     pub usd: rust_decimal::Decimal,
+    /// When `pairing::decide` first found no leg holding it (its cancel
+    /// confirmed, its leg removed); `None` while a leg holds it.
+    pub released_at: Option<tokio::time::Instant>,
 }
 
 /// Shared application state — all tasks hold an Arc clone of this.
@@ -72,9 +76,12 @@ pub struct AppState {
     pub order_status: HashMap<String, OrderStatus>,
     /// Our orders that went live, by order id. A leg cancelling one no longer
     /// carries its price, yet the order rests in the book until Polymarket
-    /// confirms it gone, so it must still be left out of the depth ahead
-    /// (`pairing::own_orders`). Only orders a leg still holds, live or being
-    /// cancelled, are kept: `pairing::decide` drops the rest on every pass.
+    /// confirms it gone, and the feed's book shows it until its update
+    /// arrives: until then it must still be left out of the depth ahead
+    /// (`pairing::own_orders`). Kept while a leg holds it (live or being
+    /// cancelled), then until the feed's book shows it gone, for ten seconds at
+    /// most (`pairing::RELEASED_ORDER_LIMIT`): `pairing::decide` drops the rest
+    /// on every pass.
     pub placed_orders: HashMap<String, PlacedOrder>,
     /// Current market configs (refreshed by the watcher task)
     pub configs: Vec<MarketConfig>,

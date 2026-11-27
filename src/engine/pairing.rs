@@ -21,13 +21,15 @@
 //! neither acts nor forgets: a price flickering across 90¢ can't keep resetting
 //! it. Pure decision logic: no I/O.
 
+use crate::engine::executor::Executor;
+use crate::engine::orderbook::TokenBook;
 use crate::engine::quoter::{self, CancelReason, DeactivateReason, QuoteAction};
-use crate::engine::ws_manager::AppState;
+use crate::engine::ws_manager::{AppState, PlacedOrder};
 use crate::rewards::market_data::single_sided_allowed;
 use crate::types::{MarketConfig, OrderStatus};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -41,6 +43,12 @@ const PAIR_BACKOFF_MAX: Duration = Duration::from_secs(600);
 const PAIR_STALE: Duration = Duration::from_secs(60);
 /// Midpoints in this range are "well inside": the rule's state is cleared.
 const CLEARLY_INSIDE: (Decimal, Decimal) = (dec!(0.11), dec!(0.89));
+/// How long an order of ours that no leg holds any more (its cancel confirmed)
+/// is still left out of the depth ahead while the feed's book may show it. The
+/// feed normally shows a cancel well within a second; ten seconds covers a slow
+/// feed several times over, and bounds how long a price level we shared with
+/// other people's bids is under-counted (which only ever holds a leg back).
+const RELEASED_ORDER_LIMIT: Duration = Duration::from_secs(10);
 
 /// Why a leg is held off the book by the two-sided rule (dashboard display).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,8 +98,10 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
     s.place_outage.retain(|id, _| ids.contains(id));
     let tokens: HashSet<String> = s.configs.iter().map(|c| c.token_id.clone()).collect();
     s.reconcile_tokens.retain(|t| tokens.contains(t));
-    // Forget orders no leg holds any more (cancel confirmed, filled, leg
-    // removed), whichever path let go of them.
+    // An order no leg holds any more (cancel confirmed, filled, leg removed),
+    // whichever path let go of it, may still show in the feed's book: it is
+    // kept until the book shows it gone, for RELEASED_ORDER_LIMIT at most, and
+    // only while a leg farms its token.
     let held: HashSet<&str> = s
         .order_status
         .values()
@@ -100,7 +110,16 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
             _ => None,
         })
         .collect();
-    s.placed_orders.retain(|order_id, _| held.contains(order_id.as_str()));
+    let books = &s.books;
+    s.placed_orders.retain(|order_id, o| {
+        if held.contains(order_id.as_str()) {
+            return true;
+        }
+        let since = *o.released_at.get_or_insert(now);
+        tokens.contains(&o.token_id)
+            && now.saturating_duration_since(since) < RELEASED_ORDER_LIMIT
+            && !gone_from_book(books, o)
+    });
 
     let mut out = Vec::new();
     for i in 0..s.configs.len() {
@@ -147,16 +166,28 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
 /// placed (the order may already be on the book), and ones being cancelled,
 /// at the price and size they were placed with: a cancel can stay unconfirmed
 /// for 30 s and more, and the order rests in the book until it is confirmed.
+/// Also ones no leg holds any more (cancel confirmed) that the feed's book may
+/// still show, for whichever leg quotes on `token` (see [`decide`]).
 pub fn own_orders(s: &AppState, token: &str) -> Vec<(Decimal, Decimal)> {
-    s.configs
-        .iter()
-        .filter(|c| c.token_id == token)
-        .filter_map(|c| match s.order_status.get(&c.id) {
-            Some(OrderStatus::Live { price, .. } | OrderStatus::Placing { price }) => Some((*price, c.order_size)),
-            Some(OrderStatus::Cancelling { order_id, .. }) => s.placed_orders.get(order_id).map(|o| (o.price, o.usd)),
-            _ => None,
-        })
-        .collect()
+    let held = s.configs.iter().filter(|c| c.token_id == token).filter_map(|c| match s.order_status.get(&c.id) {
+        Some(OrderStatus::Live { price, .. } | OrderStatus::Placing { price }) => Some((*price, c.order_size)),
+        Some(OrderStatus::Cancelling { order_id, .. }) => s.placed_orders.get(order_id).map(|o| (o.price, o.usd)),
+        _ => None,
+    });
+    let released =
+        s.placed_orders.values().filter(|o| o.released_at.is_some() && o.token_id == token).map(|o| (o.price, o.usd));
+    held.chain(released).collect()
+}
+
+/// The feed's book shows `o` gone: the level at its price is missing or holds
+/// fewer shares than the order had (counted as the placement counts them). No
+/// book for the token (the feed is down) proves nothing.
+fn gone_from_book(books: &HashMap<String, TokenBook>, o: &PlacedOrder) -> bool {
+    let Some(book) = books.get(&o.token_id) else { return false };
+    // Only a positive price is ever placed: a size that can't be worked out
+    // belongs to no order that could be in the book.
+    let Ok(shares) = Executor::shares_from_usd(o.usd, o.price) else { return true };
+    book.bids.get(&o.price).is_none_or(|level| *level < shares)
 }
 
 /// The legs farming the other outcome of `c`'s market.
@@ -452,15 +483,25 @@ mod tests {
         decide(s, |_| true, now)
     }
 
-    /// A placed order's price is kept only while a leg holds that order (live
-    /// or being cancelled): once no leg does (its cancel confirmed by any path,
-    /// or its leg removed) the next pass forgets it.
+    /// A placed order's price is kept while a leg holds that order (live or
+    /// being cancelled). Once no leg does (its cancel confirmed by any path, or
+    /// its leg removed) the next pass forgets it when, as here, the feed's book
+    /// no longer shows it or no leg farms its token; otherwise it lingers a few
+    /// seconds (`a_released_order_stays_ours_until_the_feed_shows_it_gone`).
     #[test]
     fn a_placed_order_is_forgotten_once_no_leg_holds_it() {
         use crate::engine::ws_manager::PlacedOrder;
         let mut s = state(dec!(100), dec!(100));
         for (order, price) in [("ord-y", dec!(0.94)), ("ord-n", dec!(0.03)), ("confirmed", dec!(0.93))] {
-            s.placed_orders.insert(order.into(), PlacedOrder { price, usd: dec!(50) });
+            s.placed_orders.insert(
+                order.into(),
+                PlacedOrder {
+                    token_id: (if order == "ord-n" { "NO" } else { "YES" }).into(),
+                    price,
+                    usd: dec!(50),
+                    released_at: None,
+                },
+            );
         }
         live(&mut s, "y", dec!(0.94));
         s.order_status
@@ -475,6 +516,84 @@ mod tests {
         s.order_status.remove("y");
         all(&mut s, Instant::now());
         assert!(s.placed_orders.is_empty());
+    }
+
+    /// An order of ours no leg holds any more (its cancel confirmed) is still
+    /// ours while the feed's book may show it, for every leg on its token. It
+    /// goes on the first of: the book shows it gone (its level missing, or
+    /// with fewer shares than the order had), RELEASED_ORDER_LIMIT, or no leg
+    /// farming its token. A restart starts with none.
+    #[test]
+    fn a_released_order_stays_ours_until_the_feed_shows_it_gone() {
+        assert!(AppState::new(PathBuf::from("unused.json")).placed_orders.is_empty(), "restart: none");
+        let mut s = state(dec!(100), dec!(100));
+        let mut yes = TokenBook { best_bid: Some(dec!(0.95)), best_ask: Some(dec!(0.96)), ..Default::default() };
+        yes.bids.insert(dec!(0.95), dec!(100)); // $95 of other people's
+        yes.bids.insert(dec!(0.90), dec!(50)); // all of it "alone"
+        yes.bids.insert(dec!(0.91), dec!(110)); // "shared", and 60 shares of other people's
+        yes.bids.insert(dec!(0.93), dec!(50)); // all of it "shrinks"
+        s.books.insert("YES".into(), yes);
+        s.books.remove("NO"); // the feed is down for NO: nothing proves "no-book" gone
+        for (order, token, price) in [
+            ("alone", "YES", dec!(0.90)),
+            ("shared", "YES", dec!(0.91)),
+            ("gone", "YES", dec!(0.92)), // the feed already shows it gone
+            ("shrinks", "YES", dec!(0.93)),
+            ("no-book", "NO", dec!(0.03)),
+            ("unfarmed", "OLD", dec!(0.50)),
+        ] {
+            // 50 shares each.
+            let o = PlacedOrder { token_id: token.into(), price, usd: price * dec!(50), released_at: None };
+            s.placed_orders.insert(order.into(), o);
+        }
+        let kept = |s: &AppState| -> HashSet<String> { s.placed_orders.keys().cloned().collect() };
+        let t0 = Instant::now();
+        all(&mut s, t0);
+        assert_eq!(kept(&s), HashSet::from(["alone", "shared", "shrinks", "no-book"].map(String::from)));
+        assert!(s.placed_orders.values().all(|o| o.released_at == Some(t0)));
+        // Ours for any leg quoting YES: only other people's money is depth.
+        let own = own_orders(&s, "YES");
+        assert_eq!(own.len(), 3);
+        let depth = s.books["YES"].others_depth_between(dec!(0.89), dec!(0.95), &own);
+        assert_eq!(depth, dec!(95) + dec!(0.91) * dec!(60), "$95 at 95¢ and the others' 60 shares at 91¢");
+
+        // The feed catches up: 90¢ goes, 93¢ drops below the order's 50 shares,
+        // and 91¢ is back to the others' 60 (which could still hold ours: kept).
+        let yes = s.books.get_mut("YES").unwrap();
+        yes.bids.remove(&dec!(0.90));
+        yes.bids.insert(dec!(0.93), dec!(20));
+        yes.bids.insert(dec!(0.91), dec!(60));
+        all(&mut s, t0 + RELEASED_ORDER_LIMIT - Duration::from_millis(1));
+        assert_eq!(kept(&s), HashSet::from(["shared", "no-book"].map(String::from)));
+        // The time limit: the rest go.
+        all(&mut s, t0 + RELEASED_ORDER_LIMIT);
+        assert!(s.placed_orders.is_empty());
+    }
+
+    /// A released order at a price where another leg of ours (or other people)
+    /// also bids takes off at most what that level holds: other levels' money
+    /// still counts in full, and depth never goes negative.
+    #[test]
+    fn a_released_order_never_takes_more_than_its_level_holds() {
+        let mut s = state(dec!(100), dec!(100));
+        let mut yes = TokenBook { best_bid: Some(dec!(0.95)), best_ask: Some(dec!(0.96)), ..Default::default() };
+        yes.bids.insert(dec!(0.95), dec!(100)); // $95 of other people's
+                                                // y's live $47 (50 shares) at 94¢. Our cancelled $47 there has already
+                                                // left the book, but the 50 shares left could still be it: kept.
+        yes.bids.insert(dec!(0.94), dec!(50));
+        s.books.insert("YES".into(), yes);
+        s.configs[0].order_size = dec!(47);
+        live(&mut s, "y", dec!(0.94));
+        let old = PlacedOrder { token_id: "YES".into(), price: dec!(0.94), usd: dec!(47), released_at: None };
+        s.placed_orders.insert("old".into(), old);
+        all(&mut s, Instant::now());
+        let own = own_orders(&s, "YES");
+        assert_eq!(own, vec![(dec!(0.94), dec!(47)), (dec!(0.94), dec!(47))]);
+        // $94 of ours against a $47 level: that level counts nothing, the $95 above all of it.
+        assert_eq!(s.books["YES"].others_depth_between(dec!(0.93), dec!(0.95), &own), dec!(95));
+        // Other people join at 94¢ ($28.20): under-counted while ours may linger, never below the rest.
+        s.books.get_mut("YES").unwrap().bids.insert(dec!(0.94), dec!(80));
+        assert_eq!(s.books["YES"].others_depth_between(dec!(0.93), dec!(0.95), &own), dec!(95));
     }
 
     /// An auto-pause is recorded when it is decided, so a second evaluation
