@@ -23,7 +23,6 @@ use tower_sessions::Session;
 use crate::cache::TtlCache;
 use crate::rewards::gamma_resolve::{self, MarketRef};
 use crate::rewards::{market_data, market_flow, markets_browse};
-use crate::storage::save_markets;
 use crate::types::{MarketConfig, OrderStatus, WsCommand};
 
 use super::auth::{csrf_token, verify_csrf};
@@ -1178,7 +1177,7 @@ pub async fn start_farming(
     }
 
     let new_token_ids: Vec<String> = new_configs.iter().map(|c| c.token_id.clone()).collect();
-    let (configs_snapshot, newly_subscribed, markets_file) = {
+    let (configs_snapshot, newly_subscribed, markets_file, write_markets) = {
         let mut s = state.engine.write().await;
         let newly_subscribed: Vec<String> =
             new_token_ids.iter().filter(|t| !s.configs.iter().any(|c| &c.token_id == *t)).cloned().collect();
@@ -1186,10 +1185,10 @@ pub async fn start_farming(
             s.order_status.insert(cfg.id.clone(), OrderStatus::Idle);
         }
         s.configs.extend(new_configs.iter().cloned());
-        (s.configs.clone(), newly_subscribed, s.markets_file.clone())
+        (s.configs.clone(), newly_subscribed, s.markets_file.clone(), Arc::clone(&s.markets_writer))
     };
 
-    if let Err(e) = save_markets(&markets_file, &configs_snapshot) {
+    if let Err(e) = write_markets(&markets_file, &configs_snapshot) {
         // Roll back so disk and memory never diverge.
         let mut s = state.engine.write().await;
         let new_ids: Vec<&str> = new_configs.iter().map(|c| c.id.as_str()).collect();
@@ -1716,7 +1715,7 @@ pub async fn edit_submit(
         None
     };
 
-    let (old, requote_order, snapshot, markets_file) = {
+    let (old, requote_order, snapshot, markets_file, write_markets) = {
         let mut s = state.engine.write().await;
         let Some(cfg) = s.configs.iter_mut().find(|c| c.id == id) else {
             drop(s);
@@ -1742,10 +1741,10 @@ pub async fn edit_submit(
         // Size or distance changed: settle whatever the leg holds once saved — a
         // live order, or one still being placed with the old settings.
         let requote = quote_changed.then_some(());
-        (old, requote, s.configs.clone(), s.markets_file.clone())
+        (old, requote, s.configs.clone(), s.markets_file.clone(), Arc::clone(&s.markets_writer))
     };
 
-    if let Err(e) = save_markets(&markets_file, &snapshot) {
+    if let Err(e) = write_markets(&markets_file, &snapshot) {
         let mut s = state.engine.write().await;
         if let Some(cfg) = s.configs.iter_mut().find(|c| c.id == id) {
             *cfg = old;
@@ -1870,7 +1869,7 @@ pub async fn remove_market(
     }
 
     // 3. Remove the leg.
-    let (configs_snapshot, removed, tokens_to_unsubscribe, markets_file) = {
+    let (configs_snapshot, removed, tokens_to_unsubscribe, markets_file, write_markets) = {
         let mut s = state.engine.write().await;
         let removed: Vec<_> = s.configs.iter().filter(|c| c.id == id).cloned().collect();
         s.configs.retain(|c| c.id != id);
@@ -1884,10 +1883,10 @@ pub async fn remove_market(
             .map(|c| c.token_id.clone())
             .filter(|tid| !s.configs.iter().any(|c| &c.token_id == tid))
             .collect();
-        (s.configs.clone(), removed, tokens_to_unsubscribe, s.markets_file.clone())
+        (s.configs.clone(), removed, tokens_to_unsubscribe, s.markets_file.clone(), Arc::clone(&s.markets_writer))
     };
 
-    if let Err(e) = save_markets(&markets_file, &configs_snapshot) {
+    if let Err(e) = write_markets(&markets_file, &configs_snapshot) {
         // Keep it (paused, no order) rather than lose it from the file.
         let mut s = state.engine.write().await;
         for c in &removed {
@@ -1910,11 +1909,11 @@ pub async fn remove_market(
 
 /// Write the current market list to markets.json.
 async fn persist_configs(state: &WebState) -> Result<(), String> {
-    let (configs, markets_file) = {
+    let (configs, markets_file, write_markets) = {
         let s = state.engine.read().await;
-        (s.configs.clone(), s.markets_file.clone())
+        (s.configs.clone(), s.markets_file.clone(), Arc::clone(&s.markets_writer))
     };
-    save_markets(&markets_file, &configs).map_err(|e| e.to_string())
+    write_markets(&markets_file, &configs).map_err(|e| e.to_string())
 }
 
 /// The engine's (WS-fed) best bid for `token`, else a fresh REST read.
@@ -1953,7 +1952,7 @@ async fn restart_price(state: &WebState, id: &str) -> Result<Option<Decimal>, St
 /// paused by hand. Without this, a leg auto-paused after a move would stay
 /// over its limit and never quote again.
 async fn set_paused(state: &WebState, id: &str, pausing: bool, restart_from: Option<Decimal>) -> Result<(), String> {
-    let (configs_snapshot, order_to_cancel, markets_file, old, restarted) = {
+    let (configs_snapshot, order_to_cancel, markets_file, old, restarted, write_markets) = {
         let mut s = state.engine.write().await;
         let Some(c) = s.configs.iter_mut().find(|c| c.id == id) else {
             return Ok(()); // already gone
@@ -1981,10 +1980,10 @@ async fn set_paused(state: &WebState, id: &str, pausing: bool, restart_from: Opt
         // Pausing settles whatever the leg holds once saved (cancel_leg_order):
         // a live order, or a placement still in flight.
         let order_to_cancel = pausing.then_some(());
-        (s.configs.clone(), order_to_cancel, s.markets_file.clone(), old, restarted)
+        (s.configs.clone(), order_to_cancel, s.markets_file.clone(), old, restarted, Arc::clone(&s.markets_writer))
     };
 
-    if let Err(e) = save_markets(&markets_file, &configs_snapshot) {
+    if let Err(e) = write_markets(&markets_file, &configs_snapshot) {
         // Undo only what this call changed and nothing has changed since
         // (an auto-pause may have landed in between).
         let mut s = state.engine.write().await;

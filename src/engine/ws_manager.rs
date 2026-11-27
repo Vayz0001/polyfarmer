@@ -81,6 +81,8 @@ pub struct AppState {
     pub cancel_failures: HashMap<String, (String, u32)>,
     /// Path to markets.json — saved by engine-side changes (auto-pause, tick change, pause after rejections)
     pub markets_file: PathBuf,
+    /// How the dashboard writes markets.json (`storage::save_markets`).
+    pub markets_writer: crate::storage::MarketsWriter,
     /// Set by heartbeat after 3 consecutive failures + order cancel.
     /// Prevents new placements until heartbeat recovers.
     pub heartbeat_paused: bool,
@@ -147,6 +149,7 @@ impl AppState {
             next_attempt: 0,
             cancel_failures: HashMap::new(),
             markets_file,
+            markets_writer: Arc::new(crate::storage::save_markets),
             heartbeat_paused: false,
             engine_phase: crate::types::EnginePhase::AwaitingWallet,
             ws_connected: false,

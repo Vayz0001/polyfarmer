@@ -2,6 +2,7 @@ use crate::types::{Alert, MarketConfig};
 use eyre::Result;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 // ── markets.json ──────────────────────────────────────────────────────────────
 
@@ -45,6 +46,10 @@ pub fn save_markets(path: &Path, configs: &[MarketConfig]) -> Result<()> {
     let data = serde_json::to_string_pretty(configs)? + "\n";
     crate::fsutil::write_private_atomic(path, data.as_bytes())
 }
+
+/// Writes markets.json for the dashboard's changes: [`save_markets`] in the
+/// app (`AppState::new`). A test swaps it to act at the exact moment of a write.
+pub type MarketsWriter = Arc<dyn Fn(&Path, &[MarketConfig]) -> Result<()> + Send + Sync>;
 
 // ── alerts.json ───────────────────────────────────────────────────────────────
 
