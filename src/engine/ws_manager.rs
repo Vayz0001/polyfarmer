@@ -878,3 +878,112 @@ mod farmed_tokens_tests {
         assert_eq!(tokens, want, "each token once, the empty one left out");
     }
 }
+
+#[cfg(test)]
+mod book_message_tests {
+    use super::*;
+    use crate::engine::test_support::{alerts, env, leg, Env, Fake, TOKEN};
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+    use tokio::sync::Notify;
+
+    /// A leg 2¢ under the best bid that needs $400 of other bids ahead of it.
+    fn protected_leg() -> MarketConfig {
+        let mut a = leg("a", dec!(0.01));
+        a.distance = dec!(0.02);
+        a.min_depth_between = dec!(400);
+        a
+    }
+
+    /// A single `book` message (as Polymarket sends after a trade): a level at
+    /// 28¢ (where our order rests), the best bid worth `usd_at_best`, and asks
+    /// a cent above it.
+    fn book_msg(best_bid: Decimal, usd_at_best: Decimal) -> Value {
+        json!({
+            "event_type": "book",
+            "asset_id": TOKEN,
+            "market": "0xabc",
+            "bids": [
+                {"price": "0.28", "size": "1000"},
+                {"price": best_bid.to_string(), "size": (usd_at_best / best_bid).round_dp(2).to_string()},
+            ],
+            "asks": [{"price": (best_bid + dec!(0.01)).to_string(), "size": "500"}],
+            "timestamp": "1782753357257",
+            "hash": "x"
+        })
+    }
+
+    /// Feed one message through the book path and let spawned tasks finish.
+    async fn send(e: &Env, api: &Arc<Fake>, n: &Arc<Notify>, msg: Value) {
+        assert!(handle_book_message(&msg.to_string(), &msg, &e.state, api, &e.alerter, n).await);
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    }
+
+    /// The leg is live at 28¢ with $600 of other bids ahead at 30¢: protected.
+    async fn live_with_depth(legs: Vec<MarketConfig>) -> (Env, Arc<Fake>, Arc<Notify>) {
+        let (e, api, n) = (env(legs), Fake::new(dec!(0.01), dec!(0.01)), Arc::new(Notify::new()));
+        {
+            let mut s = e.state.write().await;
+            s.order_status.insert("a".into(), OrderStatus::Live { order_id: "o1".into(), price: dec!(0.28) });
+            s.snapshotted.insert(TOKEN.into());
+            let book = s.books.entry(TOKEN.into()).or_default();
+            book.bids.insert(dec!(0.28), dec!(1000));
+            book.bids.insert(dec!(0.30), dec!(2000));
+            book.asks.insert(dec!(0.31), dec!(500));
+            (book.best_bid, book.best_ask) = (Some(dec!(0.30)), Some(dec!(0.31)));
+        }
+        (e, api, n)
+    }
+
+    /// The bug: a trade swept the bids ahead of our order and Polymarket sent
+    /// a fresh `book`, but the engine only re-checked its orders on a
+    /// price_change (or the 30 s timer), leaving the order exposed meanwhile.
+    #[tokio::test]
+    async fn a_snapshot_that_removes_the_depth_ahead_pulls_the_order() {
+        let (e, api, n) = live_with_depth(vec![protected_leg()]).await;
+        send(&e, &api, &n, book_msg(dec!(0.30), dec!(30))).await; // only $30 ahead now
+        assert_eq!(*api.cancelled.lock().unwrap(), vec!["o1".to_string()], "pulled on the snapshot alone");
+        assert_eq!(e.state.read().await.order_status.get("a"), Some(&OrderStatus::Idle));
+        assert!(alerts(&e).contains("Order cancelled · leg a"));
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_past_the_auto_pause_limit_pauses_the_leg() {
+        let mut a = protected_leg();
+        a.benchmark_bid = Some(dec!(0.30));
+        a.max_volatility = Some(dec!(0.05));
+        let (e, api, n) = live_with_depth(vec![a]).await;
+        send(&e, &api, &n, book_msg(dec!(0.36), dec!(600))).await;
+        assert!(e.state.read().await.configs[0].paused, "auto-paused");
+        assert_eq!(*api.cancelled.lock().unwrap(), vec!["o1".to_string()]);
+        assert!(alerts(&e).contains("Auto-paused · leg a"));
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_that_changes_nothing_does_nothing() {
+        let (e, api, n) = live_with_depth(vec![protected_leg()]).await;
+        send(&e, &api, &n, book_msg(dec!(0.30), dec!(600))).await;
+        assert!(api.cancelled.lock().unwrap().is_empty());
+        assert!(api.placed.lock().unwrap().is_empty());
+        assert_eq!(
+            e.state.read().await.order_status.get("a"),
+            Some(&OrderStatus::Live { order_id: "o1".into(), price: dec!(0.28) })
+        );
+        assert!(!alerts(&e).contains("leg a"), "no alert");
+    }
+
+    /// On subscribe (and after a reconnect) the books arrive as one array: an
+    /// idle leg quotes from it at once, through the normal checks, instead of
+    /// waiting for the first price change. A token with no leg is only stored.
+    #[tokio::test]
+    async fn the_subscribe_snapshots_start_quoting_and_ignore_other_tokens() {
+        let (e, api, n) = (env(vec![protected_leg()]), Fake::new(dec!(0.01), dec!(0.01)), Arc::new(Notify::new()));
+        let mut other = book_msg(dec!(0.50), dec!(600));
+        other["asset_id"] = json!("123");
+        send(&e, &api, &n, json!([book_msg(dec!(0.30), dec!(600)), other])).await;
+        assert_eq!(*api.placed.lock().unwrap(), vec![dec!(0.28)], "one order, for the leg's token only");
+        let s = e.state.read().await;
+        assert!(s.snapshotted.contains(TOKEN) && s.snapshotted.contains("123"));
+        assert!(matches!(s.order_status.get("a"), Some(OrderStatus::Live { price, .. }) if *price == dec!(0.28)));
+    }
+}
