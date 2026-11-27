@@ -84,6 +84,7 @@ pub async fn run() -> Result<()> {
     // markets/orders even before the wallet is configured (engine idle until then).
     let initial_configs = load_markets(&config.markets_file)?;
     info!("Loaded {} market configs", initial_configs.len());
+    let load_alerts = paused_on_load(&initial_configs);
     let state = Arc::new(RwLock::new({
         let mut s = AppState::new(config.markets_file.clone());
         for cfg in &initial_configs {
@@ -97,6 +98,9 @@ pub async fn run() -> Result<()> {
     // endpoint subscribes. Buffered so a briefly-slow client doesn't block.
     let (alert_tx, _) = tokio::sync::broadcast::channel::<crate::types::Alert>(256);
     let alerter = Arc::new(Alerter::new(&config.alerts_file, alert_tx.clone()));
+    for message in load_alerts {
+        alerter.warn(message);
+    }
 
     // Lets the dashboard poke the quote loop to re-evaluate immediately (e.g.
     // right after a resume) instead of waiting for the next tick.
@@ -387,6 +391,11 @@ pub async fn run() -> Result<()> {
 
 // ── Boot helpers ────────────────────────────────────────────────────────────
 
+/// One Activity alert per leg that `load_markets` paused for an invalid value.
+fn paused_on_load(configs: &[crate::types::MarketConfig]) -> Vec<String> {
+    configs.iter().filter_map(|c| c.describe_problem()).map(|d| format!("Paused on load: {d}")).collect()
+}
+
 /// What to tell the user when signing in to Polymarket fails. `chain` is the full error text.
 fn start_failure_hint(chain: &str) -> &'static str {
     if chain.to_ascii_lowercase().contains("certificate") {
@@ -623,6 +632,34 @@ mod link_tests {
     fn setup_link_uses_a_reachable_host() {
         assert_eq!(setup_link("127.0.0.1:8080", "abcd-efgh"), "http://127.0.0.1:8080/welcome?code=abcd-efgh");
         assert_eq!(setup_link("0.0.0.0:8080", "abcd-efgh"), "http://localhost:8080/welcome?code=abcd-efgh");
+    }
+}
+
+#[cfg(test)]
+mod load_alert_tests {
+    use crate::engine::test_support::leg;
+    use rust_decimal_macros::dec;
+
+    /// Each leg loaded paused for an invalid value gets an Activity alert that
+    /// names it and says how to fix it; valid legs get none.
+    #[test]
+    fn each_leg_paused_on_load_gets_an_alert() {
+        let mut bad_distance = leg("a", dec!(0.01));
+        bad_distance.label = "Le Pen".into();
+        bad_distance.token_label = "YES".into();
+        bad_distance.distance = dec!(0);
+        let mut no_token = bad_distance.clone();
+        no_token.token_id = String::new();
+        no_token.token_label = "NO".into();
+        let configs = [leg("ok", dec!(0.01)), bad_distance, no_token];
+        assert_eq!(
+            super::paused_on_load(&configs),
+            [
+                "Paused on load: Le Pen (YES): distance must be > 0, got 0. Fix it in Edit, or remove it.",
+                "Paused on load: Le Pen (NO): token_id is empty. Remove it and add the market again.",
+            ]
+        );
+        assert!(super::paused_on_load(&[leg("ok", dec!(0.01))]).is_empty());
     }
 }
 

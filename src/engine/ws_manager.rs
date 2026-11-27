@@ -173,9 +173,17 @@ impl AppState {
     }
 
     /// The tokens the legs farm, each once: what the feed subscribes to and
-    /// what the startup, timer and shutdown checks list open orders on.
+    /// what the startup, timer and shutdown checks list open orders on. An
+    /// empty token id (an invalid leg, loaded paused) is left out: it names no
+    /// market, and the order library would read it as token 0.
     pub fn farmed_tokens(&self) -> Vec<String> {
-        self.configs.iter().map(|c| c.token_id.clone()).collect::<HashSet<_>>().into_iter().collect()
+        self.configs
+            .iter()
+            .filter(|c| !c.token_id.is_empty())
+            .map(|c| c.token_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
     }
 }
 

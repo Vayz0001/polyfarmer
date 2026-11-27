@@ -61,22 +61,44 @@ impl MarketConfig {
     /// Validate that numeric fields are in sensible ranges.
     /// Called after deserializing from markets.json.
     pub fn validate(&self) -> Result<(), String> {
+        match self.problem() {
+            Some(p) => Err(format!("[{}] {p}", self.label)),
+            None => Ok(()),
+        }
+    }
+
+    /// For the dashboard: "<label> (<side>): <what's wrong>. <how to fix it>",
+    /// or `None` when the leg is valid.
+    pub fn describe_problem(&self) -> Option<String> {
+        let problem = self.problem()?;
+        // Edit can't set a token id: such a leg can only be added again.
+        let fix = if self.token_id.is_empty() {
+            "Remove it and add the market again."
+        } else {
+            "Fix it in Edit, or remove it."
+        };
+        Some(format!("{} ({}): {problem}. {fix}", self.label, self.token_label))
+    }
+
+    /// The first value out of range, if any.
+    fn problem(&self) -> Option<String> {
+        use rust_decimal::Decimal;
         if self.token_id.is_empty() {
-            return Err(format!("[{}] token_id is empty", self.label));
+            return Some("token_id is empty".into());
         }
-        if self.distance <= rust_decimal::Decimal::ZERO {
-            return Err(format!("[{}] distance must be > 0, got {}", self.label, self.distance));
+        if self.distance <= Decimal::ZERO {
+            return Some(format!("distance must be > 0, got {}", self.distance));
         }
-        if self.order_size <= rust_decimal::Decimal::ZERO {
-            return Err(format!("[{}] order_size must be > 0, got {}", self.label, self.order_size));
+        if self.order_size <= Decimal::ZERO {
+            return Some(format!("order_size must be > 0, got {}", self.order_size));
         }
-        if self.tick_size <= rust_decimal::Decimal::ZERO {
-            return Err(format!("[{}] tick_size must be > 0, got {}", self.label, self.tick_size));
+        if self.tick_size <= Decimal::ZERO {
+            return Some(format!("tick_size must be > 0, got {}", self.tick_size));
         }
-        if self.min_depth_between < rust_decimal::Decimal::ZERO {
-            return Err(format!("[{}] min_depth_between must be >= 0, got {}", self.label, self.min_depth_between));
+        if self.min_depth_between < Decimal::ZERO {
+            return Some(format!("min_depth_between must be >= 0, got {}", self.min_depth_between));
         }
-        Ok(())
+        None
     }
 }
 

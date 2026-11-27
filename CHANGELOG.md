@@ -56,6 +56,9 @@ anything may change between releases.
 
 ### Fixed
 
+- **A market leg with an invalid value in `markets.json` (for example a distance of 0) is no longer dropped at
+  startup.** It vanished from the dashboard, the next save deleted it and any order it had resting was no longer
+  tracked. It now loads paused with an Activity alert saying what's wrong; Resume refuses until Edit fixes it.
 - **Dashboard preview: `cargo run --example serve` now listens on `127.0.0.1:8081` by default**, not the bot's
   port 8080, so it can run next to a bot on the same machine (`DASHBOARD_BIND` still overrides it). Its first-run
   welcome link now shows the address it actually listens on instead of always `127.0.0.1:8080`.

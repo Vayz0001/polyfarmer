@@ -30,14 +30,17 @@ fn load_markets_inner(path: &Path) -> Result<Vec<MarketConfig>> {
     if raw.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let configs: Vec<MarketConfig> = serde_json::from_str(&raw)?;
-    let (valid, invalid): (Vec<_>, Vec<_>) = configs.into_iter().partition(|c| c.validate().is_ok());
-    for c in &invalid {
+    let mut configs: Vec<MarketConfig> = serde_json::from_str(&raw)?;
+    // An invalid leg is kept, paused, never dropped: dropping it would delete it
+    // from the file at the next save and lose track of any order it has resting.
+    // The engine never quotes a paused leg; Resume refuses until it is fixed.
+    for c in &mut configs {
         if let Err(e) = c.validate() {
-            tracing::warn!("Skipping invalid market config: {}", e);
+            tracing::warn!("Invalid market config, loaded paused: {}", e);
+            c.paused = true;
         }
     }
-    Ok(valid)
+    Ok(configs)
 }
 
 /// Write market configs back to disk atomically (temp + rename).
