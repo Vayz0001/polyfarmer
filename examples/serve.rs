@@ -304,7 +304,19 @@ fn to_token_book(b: &market_data::BookSnapshot) -> TokenBook {
 
 #[cfg(test)]
 mod tests {
-    use super::data_dir;
+    use super::{data_dir, default_bind, first_run_link};
+
+    #[test]
+    fn preview_does_not_default_to_the_bots_port() {
+        // 127.0.0.1:8080 is the real bot's default DASHBOARD_BIND.
+        assert_ne!(default_bind(), "127.0.0.1:8080");
+        assert_eq!(default_bind(), "127.0.0.1:8081");
+    }
+
+    #[test]
+    fn first_run_link_uses_the_bound_address() {
+        assert_eq!(first_run_link("127.0.0.1:18150", "abcd-efgh"), "http://127.0.0.1:18150/welcome?code=abcd-efgh");
+    }
 
     #[test]
     fn plain_preview_does_not_open_the_bots_data_folder() {
