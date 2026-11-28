@@ -4,6 +4,7 @@
 use crate::config::Config;
 use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
+use crate::engine::placer::OrderApi;
 use crate::engine::ws_manager::AppState;
 use crate::engine::{heartbeat, pairing, placer, runner, ws_manager};
 use crate::storage::load_markets;
@@ -272,31 +273,13 @@ pub async fn run() -> Result<()> {
     // reconcile from a periodic file diff.
 
     // ── Spawn: 30s quote timer (fallback re-evaluation) ───────────────────────
-    {
-        let state2 = Arc::clone(&state);
-        let executor2 = Arc::clone(&executor);
-        let alerter2 = Arc::clone(&alerter);
-        let nudge = Arc::clone(&quote_nudge);
-        let mut stop = stop_rx.clone();
-
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(QUOTE_TIMER_INTERVAL);
-            loop {
-                tokio::select! {
-                    _ = ticker.tick() => {
-                        evaluate_all_markets(&state2, &executor2, &alerter2, &nudge).await;
-                    }
-                    // Dashboard poke (e.g. resume): re-evaluate now, don't wait.
-                    _ = nudge.notified() => {
-                        evaluate_all_markets(&state2, &executor2, &alerter2, &nudge).await;
-                    }
-                    _ = stop.changed() => {
-                        if *stop.borrow() { break; }
-                    }
-                }
-            }
-        });
-    }
+    tokio::spawn(quote_loop(
+        Arc::clone(&state),
+        Arc::clone(&executor),
+        Arc::clone(&alerter),
+        Arc::clone(&quote_nudge),
+        stop_rx.clone(),
+    ));
 
     // ── Spawn: hourly summary ─────────────────────────────────────────────────
     {
@@ -597,9 +580,53 @@ async fn settle_placements(state: &RwLock<AppState>, limit: Duration) -> usize {
 
 // ── 30s fallback re-evaluation ────────────────────────────────────────────────
 
-async fn evaluate_all_markets(
+/// The quote task: re-evaluates every market on the 30 s timer and whenever
+/// something nudges it, until `stop` turns true. The stray-order check of
+/// every farmed market runs on the timer only.
+async fn quote_loop<A: OrderApi>(
+    state: Arc<RwLock<AppState>>,
+    api: Arc<A>,
+    alerter: Arc<Alerter>,
+    nudge: Arc<Notify>,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut ticker = tokio::time::interval(QUOTE_TIMER_INTERVAL);
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => {
+                check_open_orders(&state, &api, &alerter).await;
+                evaluate_all_markets(&state, &api, &alerter, &nudge).await;
+            }
+            // Re-peg confirmed, dashboard resume or edit...: re-evaluate now,
+            // don't wait. No open-orders check here: nudges can come in bursts
+            // (many legs re-pegging at once) and each check lists every farmed
+            // market. The timer's check catches stray orders.
+            _ = nudge.notified() => {
+                evaluate_all_markets(&state, &api, &alerter, &nudge).await;
+            }
+            _ = stop.changed() => {
+                if *stop.borrow() { break; }
+            }
+        }
+    }
+}
+
+/// Check every farmed market's open orders against what the legs track, and
+/// cancel any stray ones (placer::reconcile; one check per market at a time).
+/// One open-orders listing per market.
+async fn check_open_orders<A: OrderApi>(state: &Arc<RwLock<AppState>>, api: &Arc<A>, alerter: &Arc<Alerter>) {
+    let tokens = state.read().await.farmed_tokens();
+    for token in tokens {
+        let (api, st, al) = (Arc::clone(api), Arc::clone(state), Arc::clone(alerter));
+        tokio::spawn(async move {
+            placer::reconcile(&*api, &st, &al, &token).await;
+        });
+    }
+}
+
+async fn evaluate_all_markets<A: OrderApi>(
     state: &Arc<RwLock<AppState>>,
-    executor: &Arc<Executor>,
+    executor: &Arc<A>,
     alerter: &Arc<Alerter>,
     nudge: &Arc<tokio::sync::Notify>,
 ) {
@@ -612,16 +639,6 @@ async fn evaluate_all_markets(
         let (exec, st, al) = (Arc::clone(executor), Arc::clone(state), Arc::clone(alerter));
         tokio::spawn(async move {
             placer::confirm_stuck_cancel(&*exec, &st, &al, &config_id, &order_id).await;
-        });
-    }
-
-    // Check every farmed market's open orders against what the legs track, and
-    // cancel any stray ones (placer::reconcile; one check per market at a time).
-    let tokens = state.read().await.farmed_tokens();
-    for token in tokens {
-        let (exec, st, al) = (Arc::clone(executor), Arc::clone(state), Arc::clone(alerter));
-        tokio::spawn(async move {
-            placer::reconcile(&*exec, &st, &al, &token).await;
         });
     }
 
@@ -789,5 +806,98 @@ mod tests {
             assert_eq!(libc::getrlimit(libc::RLIMIT_CORE, &mut lim), 0);
             assert_eq!((lim.rlim_cur, lim.rlim_max), (0, 0));
         }
+    }
+}
+
+#[cfg(test)]
+mod quote_loop_tests {
+    use crate::engine::placer::OrderApi;
+    use crate::engine::test_support::{env, leg, Fake, TOKEN};
+    use eyre::Result;
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+    use std::collections::HashMap;
+    use std::future::Future;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+    use tokio::sync::{watch, Notify};
+
+    const OTHER_TOKEN: &str = "other-token";
+
+    /// The fake exchange, counting how often each market's open orders are listed.
+    struct Counting {
+        fake: Arc<Fake>,
+        listings: Mutex<HashMap<String, u32>>,
+    }
+
+    impl Counting {
+        fn listings(&self, token: &str) -> u32 {
+            self.listings.lock().unwrap().get(token).copied().unwrap_or(0)
+        }
+    }
+
+    impl OrderApi for Counting {
+        fn sdk_tick(&self, t: &str) -> impl Future<Output = Result<Decimal>> + Send {
+            self.fake.sdk_tick(t)
+        }
+        fn refresh_tick(&self, t: &str) -> impl Future<Output = Result<Decimal>> + Send {
+            self.fake.refresh_tick(t)
+        }
+        fn place_buy(&self, t: &str, price: Decimal, shares: Decimal) -> impl Future<Output = Result<String>> + Send {
+            self.fake.place_buy(t, price, shares)
+        }
+        fn cancel(&self, o: &str) -> impl Future<Output = Result<bool>> + Send {
+            self.fake.cancel(o)
+        }
+        fn cancel_verified(&self, o: &str) -> impl Future<Output = Result<bool>> + Send {
+            self.fake.cancel_verified(o)
+        }
+        fn open_orders(&self, t: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
+            *self.listings.lock().unwrap().entry(t.to_string()).or_default() += 1;
+            self.fake.open_orders(t)
+        }
+        fn cancel_many(&self, ids: &[String]) -> impl Future<Output = Result<Vec<String>>> + Send {
+            self.fake.cancel_many(ids)
+        }
+    }
+
+    /// A nudge (re-peg confirmed, dashboard resume or edit...) re-evaluates at
+    /// once but lists no open orders: the stray-order check of every farmed
+    /// market runs on the 30 s timer only, once per market per tick. Before,
+    /// each nudge listed every market again, a burst of requests when many
+    /// legs re-pegged at once.
+    #[tokio::test(start_paused = true)]
+    async fn nudges_do_not_relist_open_orders_only_the_timer_does() {
+        let mut other = leg("b", dec!(0.01));
+        other.token_id = OTHER_TOKEN.into();
+        let e = env(vec![leg("a", dec!(0.01)), other]);
+        let api = Arc::new(Counting { fake: Fake::new(dec!(0.01), dec!(0.01)), listings: Mutex::new(HashMap::new()) });
+        let nudge = Arc::new(Notify::new());
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let task = tokio::spawn(super::quote_loop(
+            Arc::clone(&e.state),
+            Arc::clone(&api),
+            Arc::clone(&e.alerter),
+            Arc::clone(&nudge),
+            stop_rx,
+        ));
+        let counts = || [api.listings(TOKEN), api.listings(OTHER_TOKEN)];
+
+        // The timer's first tick is at once: one listing per market.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(counts(), [1, 1], "startup tick checks every market once");
+
+        for _ in 0..5 {
+            nudge.notify_one();
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        assert_eq!(counts(), [1, 1], "nudges list no open orders");
+
+        // The next tick checks every market again, once.
+        tokio::time::sleep(super::QUOTE_TIMER_INTERVAL).await;
+        assert_eq!(counts(), [2, 2], "each timer tick checks every market once");
+
+        stop_tx.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), task).await.unwrap().unwrap();
     }
 }
