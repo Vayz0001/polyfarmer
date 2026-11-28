@@ -49,6 +49,10 @@ anything may change between releases.
 - **The market page no longer shows the other outcome's order book after a quick Yes/No switch.** A slow reply for
   the outcome you had just left could replace the ladder of the one you switched back to, so clicking a level priced
   the wrong outcome.
+- **When the market page's live order book drops, it really refreshes until it's back.** It said "polling" but
+  froze once the live stream had failed after working. It now refreshes every 3 seconds, one request at a time (given
+  up after 15 seconds, so a slow server can't tie up the browser's connections), and shows "live" again when the
+  stream returns.
 
 ## [0.1.1] - 2026-11-27
 
