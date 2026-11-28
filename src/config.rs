@@ -32,14 +32,41 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         dotenvy::dotenv().ok();
 
-        let data_dir = PathBuf::from(env::var("DATA_DIR").unwrap_or_else(|_| "data".to_string()));
-        let markets_file = PathBuf::from(env::var("MARKETS_FILE").unwrap_or_else(|_| "data/markets.json".to_string()));
-        let alerts_file = PathBuf::from(env::var("ALERTS_FILE").unwrap_or_else(|_| "data/alerts.json".to_string()));
+        let vars = PathVars {
+            data_dir: env::var("DATA_DIR").ok().map(PathBuf::from),
+            markets_file: env::var("MARKETS_FILE").ok().map(PathBuf::from),
+            alerts_file: env::var("ALERTS_FILE").ok().map(PathBuf::from),
+        };
+        let DataPaths { data_dir, markets_file, alerts_file } = data_paths(&vars);
         let dashboard_bind = env::var("DASHBOARD_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
         let secure_cookies = env::var("DASHBOARD_SECURE_COOKIES").map(|v| is_truthy(&v)).unwrap_or(false);
         let polygon_rpc_url = env::var("POLYGON_RPC_URL").ok();
 
         Ok(Config { data_dir, markets_file, alerts_file, dashboard_bind, secure_cookies, polygon_rpc_url })
+    }
+}
+
+/// The path settings as set in the environment (`None` = not set).
+struct PathVars {
+    data_dir: Option<PathBuf>,
+    markets_file: Option<PathBuf>,
+    alerts_file: Option<PathBuf>,
+}
+
+/// Where state is stored.
+#[derive(Debug, PartialEq)]
+struct DataPaths {
+    data_dir: PathBuf,
+    markets_file: PathBuf,
+    alerts_file: PathBuf,
+}
+
+/// The paths `vars` set, with a default for each one left unset.
+fn data_paths(vars: &PathVars) -> DataPaths {
+    DataPaths {
+        data_dir: vars.data_dir.clone().unwrap_or_else(|| PathBuf::from("data")),
+        markets_file: vars.markets_file.clone().unwrap_or_else(|| PathBuf::from("data/markets.json")),
+        alerts_file: vars.alerts_file.clone().unwrap_or_else(|| PathBuf::from("data/alerts.json")),
     }
 }
 
