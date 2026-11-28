@@ -63,6 +63,8 @@ anything may change between releases.
 - **Re-pegs and dashboard changes no longer re-list every market's open orders.** Each re-peg, resume or edit made
   the bot list the open orders of every farmed market, so many re-pegs at once sent a burst of requests to
   Polymarket. That check now runs on the 30-second timer only; quoting still reacts at once.
+- **Corrected the docs on reqwest.** They said the Polymarket SDK pins our `reqwest`; it doesn't: we use 0.12 and the
+  SDK uses 0.13, so the bot builds both. No dependency changed.
 
 ## [0.1.1] - 2026-11-27
 
