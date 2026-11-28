@@ -1235,6 +1235,10 @@ pub async fn start_farming(
         Ok(m) => m,
         Err(e) => return render_start_error(&e),
     };
+    // The best bid is on the tick, so an on-tick price gives an on-tick distance.
+    if let Err(e) = input::on_tick(price, mr.tick_size, "Your price") {
+        return render_start_error(&e);
+    }
     let side = form.side.min(mr.outcomes.len().saturating_sub(1));
     let both_sides = form.sides.as_deref() == Some("both");
 
@@ -1611,6 +1615,8 @@ struct EditTemplate {
     slug: String,
     order_size: String,
     distance_cents: String,
+    /// The market's tick in cents: the distance input steps by it.
+    tick_cents: String,
     min_depth_usd: String,
     max_volatility_cents: String,
     expires: String,
@@ -1686,6 +1692,7 @@ async fn edit_template(
         slug: super::dashboard::slug_of(&c.url),
         order_size: v.order_size.clone(),
         distance_cents: v.distance_cents.clone(),
+        tick_cents: (c.tick_size * dec!(100)).normalize().to_string(),
         min_depth_usd: v.min_depth_usd.clone(),
         max_volatility_cents: v.max_volatility_cents.clone(),
         expires: until(c.expires_at),
@@ -1800,6 +1807,10 @@ pub async fn edit_submit(
             },
             None => return fail("This market leg no longer exists.".into()).await,
         }
+    };
+    let distance = match input::on_tick(distance, leg.tick_size, "Distance") {
+        Ok(v) => v,
+        Err(e) => return fail(e).await,
     };
     // Only size and distance change the order's shares.
     if leg.order_size != order_size || leg.distance != distance {
