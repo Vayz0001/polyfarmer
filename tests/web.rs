@@ -2227,14 +2227,15 @@ async fn edit_accepts_the_minimum_order_and_checks_a_distance_change() {
     assert_eq!(leg_of(&*engine.read().await, "mar_leg").distance, dec!(0.02), "not changed");
 }
 
-/// Without the engine's live book there is no price to check at: a size or
-/// distance edit is refused until it loads. Other edits don't change the
-/// order's shares, so they save without a book or a known minimum.
+/// Without the running engine's live book there is no price to check at: a
+/// size or distance edit is refused until it loads. Other edits don't change
+/// the order's shares, so they save without a book or a known minimum.
 #[tokio::test]
 async fn edit_without_a_live_book_refuses_only_size_and_distance_changes() {
-    use polyfarmer::types::OrderStatus;
+    use polyfarmer::types::{EnginePhase, OrderStatus};
     use rust_decimal_macros::dec;
     let (app, pw, engine, _, state) = app_state_with_leg(OrderStatus::Idle);
+    engine.write().await.engine_phase = EnginePhase::Running;
     state.caches.min_order_size.put("123", dec!(5));
     let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
 
@@ -2255,6 +2256,32 @@ async fn edit_without_a_live_book_refuses_only_size_and_distance_changes() {
     let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "100", "2", "900")).await;
     assert!(!out.contains("alert err"), "{out}");
     assert_eq!(leg_of(&*engine.read().await, "mar_leg").min_depth_between, dec!(900), "saved");
+}
+
+/// With no engine (no wallet yet, or a failed start) no book will ever load,
+/// so the refusal says to start the bot instead of to wait. A starting engine
+/// is about to load it: wait.
+#[tokio::test]
+async fn edit_without_a_running_bot_says_to_start_it() {
+    use polyfarmer::types::{EnginePhase, OrderStatus};
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, _, state) = app_state_with_leg(OrderStatus::Idle);
+    state.caches.min_order_size.put("123", dec!(5));
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+
+    let not_running = "no live order book to check the size against — start the bot (Settings), then edit.";
+    for phase in [EnginePhase::AwaitingWallet, EnginePhase::Error] {
+        engine.write().await.engine_phase = phase.clone();
+        let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "60", "2", "500")).await;
+        assert!(out.contains("The bot isn") && out.contains(not_running), "{phase:?}: {out}");
+        assert!(!out.contains("loaded yet"), "{phase:?}: {out}");
+        assert_eq!(leg_of(&*engine.read().await, "mar_leg").order_size, dec!(100), "{phase:?}: not changed");
+    }
+
+    engine.write().await.engine_phase = EnginePhase::Starting;
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "60", "2", "500")).await;
+    assert!(out.contains("loaded yet — try again in a few seconds."), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").order_size, dec!(100), "not changed");
 }
 
 /// The minimum comes from Polymarket when it isn't cached. A failed read is

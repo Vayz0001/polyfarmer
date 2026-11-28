@@ -28,7 +28,7 @@ use crate::engine::placer::OrderApi;
 use crate::engine::ws_manager::AppState;
 use crate::rewards::gamma_resolve::{self, MarketRef};
 use crate::rewards::{market_data, market_flow, markets_browse};
-use crate::types::{MarketConfig, OrderStatus, WsCommand};
+use crate::types::{EnginePhase, MarketConfig, OrderStatus, WsCommand};
 
 use super::auth::{csrf_token, verify_csrf};
 use super::dashboard::{cents, render_markets_table, until};
@@ -2070,12 +2070,25 @@ async fn best_bid_now(state: &WebState, token: &str) -> Option<Decimal> {
 
 /// Whether `cfg` (a leg with its edited size and distance) meets Polymarket's
 /// minimum order where it would rest now, below the engine's live best bid.
-/// The engine subscribes every configured leg, paused ones too, so a missing
-/// book means it hasn't loaded yet: refused, as there is no price to check at.
+/// Without a live book there is no price to check at, so the edit is refused.
+/// A running (or starting) engine subscribes every configured leg, paused ones
+/// too, so its missing book is still loading; with no engine, none will load.
 async fn check_min_order(state: &WebState, cfg: &MarketConfig) -> Result<(), String> {
-    let best_bid = state.engine.read().await.books.get(&cfg.token_id).and_then(|b| b.best_bid);
+    let (phase, best_bid) = {
+        let s = state.engine.read().await;
+        (s.engine_phase.clone(), s.books.get(&cfg.token_id).and_then(|b| b.best_bid))
+    };
     let Some(best_bid) = best_bid else {
-        return Err("The order book for this market isn't loaded yet — try again in a few seconds.".into());
+        return Err(match phase {
+            EnginePhase::Running | EnginePhase::Starting => {
+                "The order book for this market isn't loaded yet — try again in a few seconds."
+            }
+            EnginePhase::AwaitingWallet | EnginePhase::Error => {
+                "The bot isn't running, so there's no live order book to check the size against — start the bot \
+                 (Settings), then edit."
+            }
+        }
+        .into());
     };
     let min_shares = min_order_size(state, &cfg.token_id).await?;
     match min_order_shortfall(cfg, best_bid, min_shares) {
