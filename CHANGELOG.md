@@ -41,6 +41,11 @@ anything may change between releases.
 - **Edit checks Polymarket's minimum order size too.** Changing a leg's size or distance now checks its shares at the
   live best bid against the market's minimum (5 shares on most markets) and says how much to enter, like Start.
   Before, a too-small edit was saved, Polymarket rejected the order three times and the leg paused.
+- **With `DATA_DIR` set, your legs and alerts now live there too.** `markets.json` and `alerts.json` stayed in
+  `./data` even when `DATA_DIR` pointed elsewhere, splitting the bot's files across two folders. They now default to
+  `DATA_DIR` (`MARKETS_FILE` and `ALERTS_FILE` still override). If your `markets.json` is still in `./data`, the bot
+  stops at startup and says to move it; an `alerts.json` left there only gets a warning. Nothing is moved for you.
+  Without `DATA_DIR` nothing changes.
 
 ## [0.1.1] - 2026-11-27
 
