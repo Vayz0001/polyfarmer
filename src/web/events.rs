@@ -3,22 +3,34 @@
 //!   * `state` — "something the UI shows just changed" (markets, order
 //!     statuses, engine phase, connection health). Pages re-fetch the affected
 //!     fragments on it instead of blind fixed-interval polling.
+//!
+//! Every live stream (this one and the market page's book) ends once its
+//! session stops being signed in: see [`while_signed_in`].
 
 use std::collections::hash_map::DefaultHasher;
 use std::convert::Infallible;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures_util::stream::Stream;
+use futures_util::StreamExt;
 use tokio::sync::broadcast::error::RecvError;
+use tower_sessions::session::Id;
+use tower_sessions::Session;
 
 use super::activity::alert_payload;
+use super::auth::is_authenticated;
 use super::state::WebState;
 
 /// How often the watcher fingerprints engine state for changes.
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
+
+/// How often a stream with nothing to send re-checks its session: a signed-out
+/// stream ends within this long even when idle.
+const SESSION_RECHECK: Duration = Duration::from_secs(10);
 
 /// Watch engine state and ping `state_tx` whenever its UI-visible parts
 /// change. Cheap: one read lock + a hash per second. Call once at startup.
@@ -51,8 +63,51 @@ async fn fingerprint(state: &WebState) -> u64 {
     h.finish()
 }
 
+/// `events`, ended once `session` is no longer signed in (logged out, signed
+/// out by a password change, expired): checked before each event and every
+/// [`SESSION_RECHECK`] while idle. The auth guard checks only at connect.
+pub(super) fn while_signed_in<S>(state: WebState, session: &Session, events: S) -> impl Stream<Item = S::Item>
+where
+    S: Stream + Send + 'static,
+{
+    let id = session.id();
+    let recheck = tokio::time::interval_at(tokio::time::Instant::now() + SESSION_RECHECK, SESSION_RECHECK);
+    futures_util::stream::unfold(
+        (Box::pin(events), recheck, state),
+        move |(mut events, mut recheck, state)| async move {
+            loop {
+                tokio::select! {
+                    item = events.next() => {
+                        let item = item?;
+                        if !signed_in(&state, id).await {
+                            return None;
+                        }
+                        return Some((item, (events, recheck, state)));
+                    }
+                    _ = recheck.tick() => {
+                        if !signed_in(&state, id).await {
+                            return None;
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Whether session `id` is signed in now, read from the store through a fresh
+/// `Session`: the request's own keeps the record it loaded at connect, so it
+/// would never see a logout (which deletes the record from the store).
+async fn signed_in(state: &WebState, id: Option<Id>) -> bool {
+    let current = Session::new(id, Arc::new(state.sessions.clone()), None);
+    is_authenticated(&current, state).await
+}
+
 /// GET /events
-pub async fn stream(State(state): State<WebState>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+pub async fn stream(
+    State(state): State<WebState>,
+    session: Session,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let alerts = state.alert_tx.subscribe();
     let changes = state.state_tx.subscribe();
     let stream = futures_util::stream::unfold((alerts, changes), |(mut alerts, mut changes)| async move {
@@ -75,5 +130,5 @@ pub async fn stream(State(state): State<WebState>) -> Sse<impl Stream<Item = Res
             }
         }
     });
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(while_signed_in(state, &session, stream)).keep_alive(KeepAlive::default())
 }

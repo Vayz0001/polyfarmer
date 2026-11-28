@@ -738,6 +738,7 @@ pub async fn view_book(State(state): State<WebState>, Query(p): Query<BookParams
 /// Holding the stream holds the token's subscription in the book hub.
 pub async fn view_book_stream(
     State(state): State<WebState>,
+    session: Session,
     Query(p): Query<BookParams>,
 ) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
     struct Ctx {
@@ -755,7 +756,7 @@ pub async fn view_book_stream(
     let group = mr.as_ref().map(|m| parse_group(p.group.as_deref(), m.tick_size)).unwrap_or(dec!(0.01));
     let rx = state.book_hub.updates();
     let guard = mr.as_ref().map(|m| state.book_hub.acquire(&m.token_ids[side]));
-    let ctx = Ctx { state, mr, side, group, rx, _guard: guard, dirty: true, last_sent: None };
+    let ctx = Ctx { state: state.clone(), mr, side, group, rx, _guard: guard, dirty: true, last_sent: None };
 
     let stream = futures_util::stream::unfold(ctx, |mut ctx| async move {
         let mr = ctx.mr.clone()?; // unknown market → end the stream
@@ -790,7 +791,7 @@ pub async fn view_book_stream(
             }
         }
     });
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(super::events::while_signed_in(state, &session, stream)).keep_alive(KeepAlive::default())
 }
 
 // ── Your position (authenticated; only when you're farming this market) ─────

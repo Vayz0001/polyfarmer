@@ -24,6 +24,9 @@ anything may change between releases.
   order was being placed, shutdown didn't wait for that placement, so the order could land after the final cleanup and
   stay on the book after the bot stopped. Shutdown now waits for it (up to 5 seconds), and the order it returns is
   cancelled.
+- **Live updates stop when you sign out.** An open page kept receiving alerts, status and the market's order book
+  after you logged out, changed the password on another device, or the session expired. The streams now end within
+  10 seconds, and the page goes to the login screen.
 
 ## [0.1.1] - 2026-11-27
 
