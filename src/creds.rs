@@ -175,6 +175,8 @@ impl CredentialStore {
     }
 
     /// Open (creating if needed) the store at `dir`, ensuring a master key exists.
+    /// Fails without writing anything if `master.key` is missing but `wallet.enc`
+    /// exists.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self> {
         let dir = dir.into();
         // Created 0700 (an already-existing dir is left alone, with a warning if
@@ -204,6 +206,15 @@ impl CredentialStore {
 
     fn ensure_master_key(&self) -> Result<()> {
         if !self.master_path().exists() {
+            // A fresh key could never decrypt the saved wallet; writing one would
+            // turn a missing file into an unexplained decrypt error later.
+            if self.has_wallet() {
+                return Err(eyre!(
+                    "master.key is missing but wallet.enc exists in {}. Restore master.key from the same backup \
+                     as wallet.enc, or delete wallet.enc and enter the wallet again in Settings.",
+                    self.dir.display()
+                ));
+            }
             let mut key = Zeroizing::new([0u8; KEY_LEN]);
             os_random(&mut *key)?;
             write_private_atomic(&self.master_path(), &*key)?;
