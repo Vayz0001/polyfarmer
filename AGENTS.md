@@ -19,7 +19,7 @@ Self-hosted bot that farms Polymarket liquidity rewards. It trades real money: i
 
 ## Rules for this repo
 - Dependencies: cargo won't resolve a crate version published less than 7 days ago (`.cargo/config.toml`). Security exceptions need the owner's approval.
-- `alloy`, `reqwest` and `polymarket_client_sdk_v2` majors are pinned on purpose (the SDK needs them).
+- `alloy` and `polymarket_client_sdk_v2` majors are pinned on purpose (we share the SDK's `alloy`). `reqwest` is not pinned by the SDK: ours is 0.12, the SDK's is 0.13, and the binary carries both. Moving ours to 0.13 is a separate change that needs the owner's approval.
 - The ignore entries in `deny.toml` and `.cargo/audit.toml` are documented decisions, each with a reason. Don't add or remove one without asking.
 - `unsafe` is denied. The only exceptions are `harden_process` in `src/app.rs` and test modules that call libc; each carries a narrow `#[allow(unsafe_code)]` with the reason.
 - Clippy `unwrap_used`, `expect_used`, `panic`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout` and `print_stderr` are denied in `Cargo.toml` for all code outside tests (`clippy.toml` lets tests use them). Never add `#[allow]` or `#[expect]` for them without the owner's approval. The only exception is the documented print `#![expect]` in `examples/serve.rs`.
@@ -38,6 +38,6 @@ This section overrides the global "never touch real wallets" rule, for this repo
 - changing pricing, placement, cancel or replace behaviour beyond the agreed fix
 - editing or deleting an existing test
 - touching `src/creds.rs`, `src/web/auth.rs`, `src/web/security.rs`, or key handling
-- bumping `alloy`, `reqwest` or `polymarket_client_sdk_v2` majors
+- bumping `alloy` or `polymarket_client_sdk_v2` majors, or moving our `reqwest` from 0.12 to 0.13
 - a change over ~300 lines, or CI failing twice on the same PR
 - anything that would run against a real wallet

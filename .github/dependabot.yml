@@ -14,8 +14,10 @@ updates:
       cargo-minor-and-patch:
         update-types: [minor, patch]
     ignore:
-      # polymarket_client_sdk_v2 pins these majors; bumping them alone breaks the
-      # build or pulls in a second copy. Move them together with the SDK, by hand.
+      # We share the SDK's alloy major; bumping alloy or the SDK alone breaks the
+      # build or pulls in a second copy, so they move together, by hand. reqwest is
+      # not tied to the SDK (ours is 0.12, the SDK's 0.13): moving ours is a
+      # separate change the owner approves, not an automatic PR.
       - dependency-name: "alloy*"
         update-types: ["version-update:semver-major"]
       - dependency-name: "reqwest"

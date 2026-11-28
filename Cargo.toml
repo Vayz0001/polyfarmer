@@ -11,12 +11,13 @@ repository = "https://github.com/Vayz0001/polyfarmer"
 # V2 cutover (Apr 28 2026) made V1 SDKs dead. `clob` feature required (default = []).
 # `gamma` adds the typed Gamma metadata client (market/event resolution by slug) —
 # used to resolve a pasted Polymarket URL without hand-rolled JSON parsing.
-# alloy/reqwest are PINNED to the versions this SDK expects — do NOT bump majors.
+# alloy is PINNED to the major this SDK uses (one shared copy) — do NOT bump it
+# apart from the SDK. The SDK brings its own reqwest 0.13; ours below is separate.
 polymarket_client_sdk_v2 = { version = "0.7.0", features = ["clob", "gamma"] }
 
 # ── Async runtime + networking ────────────────────────────────────────────────
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json"] }            # pinned by SDK
+reqwest = { version = "0.12", features = ["json"] }            # ours; the SDK uses 0.13 (both are built). Moving to 0.13 needs the owner's OK
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 futures-util = "0.3"
 
