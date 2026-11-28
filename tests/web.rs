@@ -2227,6 +2227,42 @@ async fn edit_accepts_the_minimum_order_and_checks_a_distance_change() {
     assert_eq!(leg_of(&*engine.read().await, "mar_leg").distance, dec!(0.02), "not changed");
 }
 
+/// The engine rests a leg at best bid − distance rounded down to the market's
+/// tick, so a distance between ticks would quietly rest a tick further away
+/// than typed. Edit refuses one, naming the tick, and the drawer steps by it.
+#[tokio::test]
+async fn edit_refuses_a_distance_between_ticks() {
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, markets_file, state) = app_state_with_leg(OrderStatus::Idle);
+    seed_book_and_min(&state, "123", dec!(0.40), dec!(5)).await;
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+
+    // A 1¢ tick.
+    let (status, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "100", "1.55", "500")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").distance, dec!(0.02), "not changed");
+    assert!(!markets_file.exists(), "nothing saved");
+    assert!(out.contains("Distance must be in steps of 1¢ on this market."), "{out}");
+    assert!(out.contains(r#"value="1.55""#), "what was typed is kept");
+    let (_, drawer, _) = get_authed(&app, &cookie, "/markets/mar_leg/edit").await;
+    assert!(drawer.contains(r#"name="distance_cents" type="number" step="1" min="1""#), "{drawer}");
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "100", "3", "500")).await;
+    assert!(!out.contains("alert err"), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").distance, dec!(0.03), "on the tick: saved");
+
+    // A 0.1¢ tick.
+    engine.write().await.configs[0].tick_size = dec!(0.001);
+    let (_, drawer, _) = get_authed(&app, &cookie, "/markets/mar_leg/edit").await;
+    assert!(drawer.contains(r#"name="distance_cents" type="number" step="0.1" min="0.1""#), "{drawer}");
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "100", "1.55", "500")).await;
+    assert!(out.contains("Distance must be in steps of 0.1¢ on this market."), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").distance, dec!(0.03), "not changed");
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "100", "1.5", "500")).await;
+    assert!(!out.contains("alert err"), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").distance, dec!(0.015), "on the tick: saved");
+}
+
 /// Without the running engine's live book there is no price to check at: a
 /// size or distance edit is refused until it loads. Other edits don't change
 /// the order's shares, so they save without a book or a known minimum.
