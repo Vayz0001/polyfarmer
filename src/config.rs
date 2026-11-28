@@ -145,6 +145,51 @@ mod tests {
         }
     }
 
+    fn vars(data_dir: Option<&str>, markets_file: Option<&str>, alerts_file: Option<&str>) -> PathVars {
+        PathVars {
+            data_dir: data_dir.map(PathBuf::from),
+            markets_file: markets_file.map(PathBuf::from),
+            alerts_file: alerts_file.map(PathBuf::from),
+        }
+    }
+
+    /// With only DATA_DIR set, the legs and the activity log go there too, not
+    /// to ./data next to it (the hardened systemd unit can only write DATA_DIR).
+    #[test]
+    fn data_dir_holds_the_markets_and_alerts_files_by_default() {
+        let paths = data_paths(&vars(Some("/var/lib/polyfarmer"), None, None));
+        assert_eq!(
+            paths,
+            DataPaths {
+                data_dir: PathBuf::from("/var/lib/polyfarmer"),
+                markets_file: PathBuf::from("/var/lib/polyfarmer/markets.json"),
+                alerts_file: PathBuf::from("/var/lib/polyfarmer/alerts.json"),
+            }
+        );
+    }
+
+    #[test]
+    fn without_data_dir_the_paths_are_unchanged() {
+        assert_eq!(
+            data_paths(&vars(None, None, None)),
+            DataPaths {
+                data_dir: PathBuf::from("data"),
+                markets_file: PathBuf::from("data/markets.json"),
+                alerts_file: PathBuf::from("data/alerts.json"),
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_markets_and_alerts_files_win() {
+        let paths = data_paths(&vars(Some("/var/lib/polyfarmer"), Some("/srv/legs.json"), Some("/srv/log.json")));
+        assert_eq!(paths.markets_file, PathBuf::from("/srv/legs.json"));
+        assert_eq!(paths.alerts_file, PathBuf::from("/srv/log.json"));
+        let paths = data_paths(&vars(None, Some("/srv/legs.json"), None));
+        assert_eq!(paths.markets_file, PathBuf::from("/srv/legs.json"));
+        assert_eq!(paths.alerts_file, PathBuf::from("data/alerts.json"));
+    }
+
     #[test]
     fn warns_only_when_reachable_from_elsewhere() {
         assert!(exposure_warnings("127.0.0.1:8080", false).is_empty());
