@@ -581,7 +581,8 @@ async fn settle_placements(state: &RwLock<AppState>, limit: Duration) -> usize {
 // ── 30s fallback re-evaluation ────────────────────────────────────────────────
 
 /// The quote task: re-evaluates every market on the 30 s timer and whenever
-/// something nudges it, until `stop` turns true.
+/// something nudges it, until `stop` turns true. The stray-order check of
+/// every farmed market runs on the timer only.
 async fn quote_loop<A: OrderApi>(
     state: Arc<RwLock<AppState>>,
     api: Arc<A>,
@@ -593,9 +594,13 @@ async fn quote_loop<A: OrderApi>(
     loop {
         tokio::select! {
             _ = ticker.tick() => {
+                check_open_orders(&state, &api, &alerter).await;
                 evaluate_all_markets(&state, &api, &alerter, &nudge).await;
             }
-            // Dashboard poke (e.g. resume): re-evaluate now, don't wait.
+            // Re-peg confirmed, dashboard resume or edit...: re-evaluate now,
+            // don't wait. No open-orders check here: nudges can come in bursts
+            // (many legs re-pegging at once) and each check lists every farmed
+            // market. The timer's check catches stray orders.
             _ = nudge.notified() => {
                 evaluate_all_markets(&state, &api, &alerter, &nudge).await;
             }
@@ -603,6 +608,19 @@ async fn quote_loop<A: OrderApi>(
                 if *stop.borrow() { break; }
             }
         }
+    }
+}
+
+/// Check every farmed market's open orders against what the legs track, and
+/// cancel any stray ones (placer::reconcile; one check per market at a time).
+/// One open-orders listing per market.
+async fn check_open_orders<A: OrderApi>(state: &Arc<RwLock<AppState>>, api: &Arc<A>, alerter: &Arc<Alerter>) {
+    let tokens = state.read().await.farmed_tokens();
+    for token in tokens {
+        let (api, st, al) = (Arc::clone(api), Arc::clone(state), Arc::clone(alerter));
+        tokio::spawn(async move {
+            placer::reconcile(&*api, &st, &al, &token).await;
+        });
     }
 }
 
@@ -621,16 +639,6 @@ async fn evaluate_all_markets<A: OrderApi>(
         let (exec, st, al) = (Arc::clone(executor), Arc::clone(state), Arc::clone(alerter));
         tokio::spawn(async move {
             placer::confirm_stuck_cancel(&*exec, &st, &al, &config_id, &order_id).await;
-        });
-    }
-
-    // Check every farmed market's open orders against what the legs track, and
-    // cancel any stray ones (placer::reconcile; one check per market at a time).
-    let tokens = state.read().await.farmed_tokens();
-    for token in tokens {
-        let (exec, st, al) = (Arc::clone(executor), Arc::clone(state), Arc::clone(alerter));
-        tokio::spawn(async move {
-            placer::reconcile(&*exec, &st, &al, &token).await;
         });
     }
 
