@@ -8,13 +8,11 @@ use std::sync::Arc;
 
 /// Load market configs from disk.
 /// Returns empty vec if the file doesn't exist yet.
-/// On Windows, retries once after 100ms to handle the brief window during
-/// atomic rename fallback (copy+unlink) where a partial write is possible.
+/// Retries once after 100ms if the file fails to parse.
 pub fn load_markets(path: &Path) -> Result<Vec<MarketConfig>> {
     match load_markets_inner(path) {
         Ok(v) => Ok(v),
         Err(e) => {
-            // Retry once — may have caught a mid-write on Windows
             tracing::warn!("load_markets: parse failed ({}), retrying after 100ms", e);
             std::thread::sleep(std::time::Duration::from_millis(100));
             load_markets_inner(path)
@@ -109,7 +107,7 @@ pub fn read_recent_alerts(path: &Path, limit: usize) -> Vec<Alert> {
             return Vec::new();
         }
         let text = String::from_utf8_lossy(&buf);
-        // A tail that doesn't begin at the file start begins mid-line: drop that fragment.
+        // A tail that doesn't begin at the file start may begin mid-line: drop its first line.
         let text: &str = if start > 0 { text.split_once('\n').map(|(_, rest)| rest).unwrap_or("") } else { &text };
         let alerts: Vec<Alert> =
             text.lines().rev().filter_map(|l| serde_json::from_str::<Alert>(l.trim()).ok()).take(limit).collect();

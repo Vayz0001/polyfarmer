@@ -4,7 +4,7 @@
 //! 1. First-run unauthenticated access, setup code verification, and admin password creation.
 //! 2. Wallet credential validation and encrypted on-disk storage (master.key + wallet.enc).
 //! 3. Authenticated dashboard browsing across all core routes with strict CSP headers.
-//! 4. Real-time Server-Sent Events (SSE) streaming (/activity/stream).
+//! 4. Real-time Server-Sent Events (SSE) streaming (/events).
 //! 5. Session termination and logout invalidation.
 //! 6. Trading engine quoting and safety protection rules (depth, volatility, expiry).
 
@@ -189,7 +189,7 @@ async fn e2e_complete_server_and_trading_lifecycle() {
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/launching");
 
-    // Verify credentials encrypted atomically to disk with owner permissions
+    // master.key and wallet.enc are written
     assert!(server.data_dir.join("master.key").exists(), "master.key written to disk");
     assert!(server.data_dir.join("wallet.enc").exists(), "wallet.enc written to disk");
 

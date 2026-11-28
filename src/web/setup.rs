@@ -280,9 +280,8 @@ pub async fn detect_wallet(
         return render_detect(false, "", String::new(), false, Vec::new());
     }
 
-    // The client-side format check (see setup.html) already gates the htmx
-    // request to plausible-looking keys and gives instant feedback for
-    // anything else — this is just a defensive fallback (e.g. JS disabled).
+    // The client check (app.js `keyState`) only sends this request for a
+    // well-formed key; this rejects a hand-crafted one.
     let signer: PrivateKeySigner = match form.private_key.trim().parse() {
         Ok(s) => s,
         Err(_) => return render_detect(false, "", "Invalid private key".to_string(), false, Vec::new()),

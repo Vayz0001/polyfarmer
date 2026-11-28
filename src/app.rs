@@ -266,11 +266,9 @@ pub async fn run() -> Result<()> {
     // ── Spawn: Heartbeat ──────────────────────────────────────────────────────
     heartbeat::spawn(Arc::clone(&executor), Arc::clone(&alerter), Arc::clone(&state), stop_rx.clone());
 
-    // markets.json needs no poll loop — the web handlers are the only write path
-    // and mutate `AppState` directly; ws_manager's
-    // connect loop always re-derives its subscription set fresh from
-    // `AppState.configs` on every (re)connect, so there's nothing left to
-    // reconcile from a periodic file diff.
+    // markets.json needs no poll loop: everything that writes it (web handlers,
+    // the engine) updates `AppState` first, and ws_manager re-derives its
+    // subscriptions from `AppState.configs` on every (re)connect.
 
     // ── Spawn: 30s quote timer (fallback re-evaluation) ───────────────────────
     tokio::spawn(quote_loop(
@@ -489,8 +487,9 @@ pub async fn shutdown_signal() {
 /// process is asked to shut down. Returns `true` when we should exit now.
 ///
 /// The `notified()` arm is the fast path (fires the instant `set_wallet` pings
-/// it); the 3s sleep is belt-and-suspenders so a missed notify still self-heals
-/// — the caller re-reads the file each loop, so the bot can't silently hang.
+/// it); the `retry_after` sleep is belt-and-suspenders so a missed notify
+/// still self-heals — the caller re-reads the file each loop, so the bot can't
+/// silently hang.
 async fn wait_or_exit(wallet_ready: &Notify, retry_after: Duration, shutdown: &mut Shutdown) -> bool {
     if shutdown.requested() {
         return true;

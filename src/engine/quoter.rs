@@ -69,17 +69,11 @@ pub fn evaluate(
     own: &[(Decimal, Decimal)],
 ) -> QuoteAction {
     // ── 1. Deactivate checks (highest priority) ────────────────────────────
-    // Only emit Deactivate when there is an order to cancel or the status needs
-    // transitioning (Live / Cancelling / Placing). If the market is already Idle
-    // and the condition persists (paused, expired, volatile), return Hold — the
-    // work is done and we don't need to fire another alert on every price tick.
-    //
-    // A leg already Cancelling holds too: its cancel is in flight, or unconfirmed
-    // and being retried by the timer (placer::confirm_stuck_cancel). Deactivating
-    // it again would repeat the alert and the cancel call on every book update.
-    // One exception: a volatility trip must still pause the leg (and save that),
-    // so it fires once whatever the status — even with no order yet — and the
-    // leg is then paused and holds from the next update.
+    // Paused or expired with nothing to cancel (Idle): hold, so the alert fires
+    // once, not on every book update. Cancelling: hold, its cancel is in flight
+    // or retried by the timer (placer::confirm_stuck_cancel). A volatility trip
+    // on an unpaused leg fires whatever the status, even with no order, so the
+    // pause is saved; the leg then holds as paused.
     if matches!(status, OrderStatus::Cancelling { .. }) {
         if !config.paused && volatility_tripped(config, book) {
             return QuoteAction::Deactivate { order_id: live_order_id(status), reason: DeactivateReason::Volatility };
@@ -160,9 +154,8 @@ pub fn evaluate(
             }
 
             // ── Is our EXISTING order still protected? ─────────────────────
-            // Check depth between current order price and best_bid (not target).
-            // The order at current_price is only exposed if there's nothing between
-            // it and best_bid — using target here would cancel a valid order just
+            // Check depth between the current order price and best_bid, not the
+            // target: using the target would cancel a still-protected order just
             // because depth is thin at a position we haven't moved to yet.
             let current_depth = book.others_depth_between(*current_price, best_bid, own);
             if current_depth < config.min_depth_between {
@@ -300,7 +293,7 @@ mod tests {
     fn replaces_when_best_bid_moves_into_order() {
         // best_bid moved to 0.20 — gap = 0.20 - 0.19 = 0.01 < distance 0.02 → must move farther out
         // book_with_depth places level at best_bid - distance/2 = 0.20 - 0.01 = 0.19
-        // bid_depth_between(target=0.18, best_bid=0.20) includes the level at 0.19 → $500 depth
+        // others_depth_between(target=0.18, best_bid=0.20) includes the level at 0.19 → $500 depth
         let cfg = config(dec!(0.02), dec!(100));
         let book = book_with_depth(dec!(0.20), dec!(500), dec!(0.02));
         let status = OrderStatus::Live { order_id: "ord1".to_string(), price: dec!(0.19) };
@@ -311,7 +304,8 @@ mod tests {
     #[test]
     fn replaces_when_best_bid_moves_away() {
         // best_bid moved from 0.21 to 0.25 — our order at 0.19 is now too far out.
-        // target = 0.23, depth at (0.23, 0.25) = $500, current_depth at (0.19, 0.25) = $500.
+        // target = 0.23, depth at (0.23, 0.25] = $144, current_depth at (0.19, 0.25] = $276,
+        // both above the $100 minimum.
         // Expects Replace to 0.23 (move closer to maintain spread).
         let cfg = config(dec!(0.02), dec!(100));
         // Place depth at 0.24 (between new target 0.23 and best_bid 0.25) and at 0.22 (between old 0.19 and 0.25)

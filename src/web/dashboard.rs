@@ -264,9 +264,10 @@ pub(super) async fn build_rows(state: &WebState) -> Vec<MarketRow> {
         .collect()
 }
 
-/// Polymarket scores a market's two sides together: with both sides live the
-/// weaker one sets the score; one side alone scores a third (midpoint 10–90¢)
-/// or nothing (outside). Each leg's raw weight becomes that market score.
+/// Polymarket scores a market's two sides together: the weaker side's weight,
+/// or a third of the stronger side's if that is more (midpoint 10–90¢ only);
+/// so one side alone scores a third (10–90¢) or nothing (outside). Each leg's
+/// raw weight becomes that market score.
 fn apply_two_sided(legs: &mut [LegRow]) {
     let live: Vec<(String, Decimal)> = legs.iter().filter_map(|l| Some((l.token_id.clone(), l.raw_weight?))).collect();
     for leg in legs.iter_mut() {

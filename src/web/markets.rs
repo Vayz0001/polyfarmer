@@ -2224,9 +2224,9 @@ async fn pause_resume(
             return reply(&state, &session, &form.view, Some(format!("Can't resume {problem}"))).await;
         }
     }
-    // Read every restart price before resuming anything, so a group resume
-    // resumes all its legs or none (a lone leg would only wait on the
-    // two-sided rule).
+    // Read every restart price before resuming anything, so a failed lookup
+    // resumes none of the group's legs (a lone leg would only wait on the
+    // two-sided rule). A save failure part-way still leaves earlier legs resumed.
     let mut restart = Vec::with_capacity(ids.len());
     for id in &ids {
         match if pausing { Ok(None) } else { restart_price(&state, id).await } {

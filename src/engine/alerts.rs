@@ -71,7 +71,7 @@ impl Alerter {
                 Ok(_) => {
                     buf.pop_front();
                 }
-                Err(_) => break, // disk still failing — stop draining, append new alert to buffer
+                Err(_) => break, // disk still failing — keep the rest for the next drain
             }
         }
 

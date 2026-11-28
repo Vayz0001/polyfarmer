@@ -115,7 +115,7 @@ async fn seed_demo(state: &WebState, dir: &str) -> eyre::Result<()> {
     state.set_wallet_address(Some(wallet.unwrap_or_else(|| DEMO_ADDRESS.into())));
     println!("\n  DEMO mode — password: demo-password\n");
 
-    // Top reward markets by daily pool → one both-sides and two one-side farms.
+    // Top reward markets by daily pool → one both-sides and up to four one-side farms.
     let query = markets_browse::BrowseQuery {
         order_by: Some("rate_per_day".into()),
         position: Some("DESC".into()),

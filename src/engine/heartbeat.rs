@@ -72,9 +72,10 @@ pub fn spawn(
 
                                 match executor.cancel_orders(&live_order_ids).await {
                                     Ok(still_open) => {
-                                        // Confirmed gone → Idle. Still open → Cancelling, so the
-                                        // bot never places over it and the 30s timer keeps
-                                        // cancelling it (placer::confirm_stuck_cancel).
+                                        // Live and confirmed gone → Idle. Live and still open →
+                                        // Cancelling, so the bot never places over it and the 30s
+                                        // timer keeps cancelling it (placer::confirm_stuck_cancel).
+                                        // Legs already Cancelling stay so: the timer confirms them.
                                         let mut s = state.write().await;
                                         for status in s.order_status.values_mut() {
                                             // Only orders in this cancel request: one placed
@@ -111,7 +112,6 @@ pub fn spawn(
                                             "Heartbeat cancel failed — manual check required: {}",
                                             e
                                         ));
-                                        // Still pause placement even if cancel failed — CLOB unreachable
                                         let mut s = state.write().await;
                                         s.heartbeat_paused = true;
                                     }

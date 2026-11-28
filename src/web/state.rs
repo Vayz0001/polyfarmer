@@ -31,8 +31,8 @@ const REWARDS_TTL: Duration = Duration::from_secs(30);
 const PAYOUTS_TTL: Duration = Duration::from_secs(300);
 /// A market's minimum order size is set when it is listed and rarely changes;
 /// ten minutes keeps repeat edits off the network while a change still shows
-/// up soon. A stale minimum only lets an order through that Polymarket then
-/// rejects, as it did before Edit checked at all.
+/// up soon. A stale minimum can let through an order that Polymarket then
+/// rejects, or refuse a valid edit until it expires.
 const MIN_ORDER_TTL: Duration = Duration::from_secs(600);
 
 #[derive(Clone)]

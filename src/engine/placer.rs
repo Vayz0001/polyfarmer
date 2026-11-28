@@ -100,8 +100,6 @@ pub const CANCEL_RETRY_AFTER: Duration = Duration::from_secs(25);
 const CANCEL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(20);
 /// Unconfirmed retries in a row before the user is alerted (once per order).
 pub const CANCEL_ALERT_AFTER: u32 = 3;
-/// After a first "not enough balance", wait this long and try once more: a fill
-/// that is still settling can lock collateral for a few seconds.
 /// After an unclear placement, wait this long before checking the market's open
 /// orders, so an order that was accepted has time to show up.
 const RECONCILE_AFTER_UNCLEAR: Duration = Duration::from_secs(2);
@@ -195,6 +193,8 @@ async fn reconcile_inner<A: OrderApi>(api: &A, state: &RwLock<AppState>, alerter
 
 /// Placement outages in a row for one leg before the user is told (once).
 const OUTAGE_ALERT_AFTER: u32 = 5;
+/// After a first "not enough balance", wait this long and try once more: a fill
+/// that is still settling can lock collateral for a few seconds.
 pub const LOW_BALANCE_RETRY: Duration = Duration::from_secs(15);
 
 /// Polymarket refused an order for lack of funds.
@@ -302,9 +302,8 @@ pub async fn confirm_stuck_cancel<A: OrderApi>(
         Some((o, n)) if o == order_id && *n >= CANCEL_ALERT_AFTER);
     if gone {
         s.cancel_failures.remove(config_id);
-        // A Replace whose pre-check failed may have put the leg back to Live
-        // with this same (now cancelled) order while the retry ran: free that too,
-        // or the leg would show a live order that no longer exists.
+        // A leg still Live with this same (now cancelled) order is freed too,
+        // or it would show a live order that no longer exists.
         let restored_live = matches!(s.order_status.get(config_id),
             Some(OrderStatus::Live { order_id: o, .. }) if o == order_id);
         if restored_live {
@@ -882,7 +881,7 @@ mod tests {
         legs.iter().map(|c| c.tick_size).collect()
     }
 
-    // ── part 1: the reported bug ─────────────────────────────────────────
+    // ── tick size ────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn fake_reproduces_the_reported_error_without_the_fix() {
@@ -943,7 +942,7 @@ mod tests {
         assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Placed));
     }
 
-    // ── part 3: backoff, outages and pause after rejections ─────────────
+    // ── backoff, outages and pause after rejections ─────────────────────
 
     #[test]
     fn retry_delay_doubles_and_is_capped() {
@@ -1678,9 +1677,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_confirmed_retry_also_frees_a_leg_put_back_to_live_with_the_same_order() {
-        // A Replace's pre-check can restore Live{ord1} while the timer's retry is
-        // cancelling ord1; once the retry confirms, the leg must not keep showing
-        // an order that no longer exists.
+        // A leg still Live with ord1 when the retry confirms ord1 gone must not
+        // keep showing an order that no longer exists.
         let e = env(vec![leg("a", dec!(0.01))]);
         let api = Fake::new(dec!(0.01), dec!(0.01));
         e.state
