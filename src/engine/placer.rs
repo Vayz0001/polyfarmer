@@ -21,6 +21,7 @@
 //! its old order is gone, and an auto-pause is saved under the state lock.
 
 use std::future::Future;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -422,6 +423,26 @@ pub fn begin_place(s: &mut AppState, config_id: &str, price: Decimal, now: Insta
     let attempt = s.next_attempt;
     s.place_attempt.insert(config_id.to_string(), attempt);
     Some(attempt)
+}
+
+/// One placement call counted in `AppState::placements_in_flight` for as long
+/// as it lives. Dropped however the call ends: a reply, an error, a timeout,
+/// or its task cancelled or unwinding from a panic.
+pub struct InFlight(Arc<AtomicUsize>);
+
+impl InFlight {
+    /// Count a placement call now. Taken under the lock that claims the leg
+    /// ([`begin_place`]), so no status change can hide the call from shutdown.
+    pub fn start(s: &AppState) -> Self {
+        s.placements_in_flight.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(&s.placements_in_flight))
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// Claim a leg's order for cancelling: only while the leg still holds that very
@@ -972,6 +993,40 @@ mod tests {
         // Back up: placed, and the outage count is cleared.
         assert_eq!(attempt(&e, &api, "a", dec!(0.21), Instant::now()).await, Some(Outcome::Placed));
         assert!(e.state.read().await.place_outage.is_empty());
+    }
+
+    /// A placement call is counted until it ends, however it ends: returned,
+    /// its task panicking (unwinding) or cancelled.
+    #[tokio::test]
+    async fn a_placement_call_is_counted_until_it_ends_however_it_ends() {
+        let s = AppState::new(std::path::PathBuf::from("unused.json"));
+        let count = || s.placements_in_flight.load(Ordering::SeqCst);
+        let (first, second) = (InFlight::start(&s), InFlight::start(&s));
+        assert_eq!(count(), 2);
+        drop(first);
+        assert_eq!(count(), 1);
+        drop(second);
+        assert_eq!(count(), 0);
+
+        let call = InFlight::start(&s);
+        let panicked = tokio::spawn(async move {
+            let _call = call;
+            panic!("the call panicked");
+        })
+        .await;
+        assert!(panicked.is_err_and(|e| e.is_panic()));
+        assert_eq!(count(), 0, "released while unwinding");
+
+        let call = InFlight::start(&s);
+        let task = tokio::spawn(async move {
+            let _call = call;
+            std::future::pending::<()>().await;
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(count(), 1);
+        task.abort();
+        assert!(task.await.is_err_and(|e| e.is_cancelled()));
+        assert_eq!(count(), 0, "released when its task is cancelled");
     }
 
     /// The order check cancels only what no leg tracks, and clears the

@@ -574,15 +574,22 @@ impl Shutdown {
 }
 
 /// Give placements already in flight up to `limit` to land, so their orders
-/// are cancelled with the rest instead of left resting after exit. New ones
-/// are refused once `AppState.stopping` is set.
+/// are cancelled with the rest instead of left resting after exit. That is
+/// every placement call still out, including one whose leg was released
+/// meanwhile (paused, expired, removed): it cancels the order it gets back.
+/// New ones are refused once `AppState.stopping` is set.
 async fn settle_placements(state: &RwLock<AppState>, limit: Duration) -> usize {
     let deadline = tokio::time::Instant::now() + limit;
     loop {
-        let placing =
-            state.read().await.order_status.values().filter(|s| matches!(s, OrderStatus::Placing { .. })).count();
-        if placing == 0 || tokio::time::Instant::now() >= deadline {
-            return placing;
+        let in_flight = {
+            let s = state.read().await;
+            // The runner counts every call it starts; a leg marked Placing still
+            // counts too, should one have been claimed without the runner.
+            let placing = s.order_status.values().filter(|st| matches!(st, OrderStatus::Placing { .. })).count();
+            placing.max(s.placements_in_flight.load(std::sync::atomic::Ordering::SeqCst))
+        };
+        if in_flight == 0 || tokio::time::Instant::now() >= deadline {
+            return in_flight;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

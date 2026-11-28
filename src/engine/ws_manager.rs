@@ -144,6 +144,11 @@ pub struct AppState {
     pub place_outage: HashMap<String, u32>,
     /// Shutting down: nothing new is placed (`placer::begin_place`).
     pub stopping: bool,
+    /// Placement calls still out (`placer::run_place`), whether or not their
+    /// leg still waits for them: one whose leg was released meanwhile (paused,
+    /// expired, removed) still gets an order back and cancels it. Shutdown
+    /// waits for them (`app::settle_placements`). Kept by `placer::InFlight`.
+    pub placements_in_flight: Arc<std::sync::atomic::AtomicUsize>,
     /// Tokens whose open orders must be checked before any leg on them places
     /// again: a placement there failed in a way that leaves it unclear whether
     /// the order reached Polymarket (`placer::reconcile`).
@@ -186,6 +191,7 @@ impl AppState {
             feed_down: false,
             place_outage: HashMap::new(),
             stopping: false,
+            placements_in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             reconcile_tokens: HashSet::new(),
             reconciling: HashSet::new(),
             repegging_now: HashSet::new(),

@@ -66,22 +66,17 @@ async fn place<A: OrderApi>(
         let mut s = state.write().await;
         let size = s.configs.iter().find(|c| c.id == config_id).map(|c| c.order_size);
         match (size, placer::begin_place(&mut s, &config_id, price, tokio::time::Instant::now())) {
-            (Some(size), Some(attempt)) => Some((attempt, size)),
+            (Some(size), Some(attempt)) => Some((attempt, size, placer::InFlight::start(&s))),
             _ => None,
         }
     };
-    let Some((attempt, order_size)) = claimed else { return };
-    tokio::spawn(placer::run_place(
-        Arc::clone(api),
-        Arc::clone(state),
-        Arc::clone(alerter),
-        config_id,
-        attempt,
-        token_id,
-        order_size,
-        price,
-        tick_size,
-    ));
+    let Some((attempt, order_size, in_flight)) = claimed else { return };
+    let (api, state, alerter) = (Arc::clone(api), Arc::clone(state), Arc::clone(alerter));
+    tokio::spawn(async move {
+        // Counted until the call ends, even if the leg is released meanwhile.
+        let _in_flight = in_flight;
+        placer::run_place(api, state, alerter, config_id, attempt, token_id, order_size, price, tick_size).await
+    });
 }
 
 /// The leg's label and outcome, for alerts (`None` once it was removed).
@@ -313,6 +308,28 @@ mod tests {
         // A second Place for a leg that is no longer Idle does nothing.
         run(&e, &api, &n, vec![d("a", QuoteAction::Place { price: dec!(0.21) })]).await;
         assert_eq!(api.placed.lock().unwrap().len(), 1);
+    }
+
+    /// Each placement the runner starts is counted while its call is out (for
+    /// shutdown) and released when the call ends, whatever the outcome.
+    #[tokio::test]
+    async fn placement_calls_are_counted_until_they_end_whatever_the_outcome() {
+        let (e, api, n) = setup(vec![leg("a", dec!(0.01)), leg("b", dec!(0.01)), leg("c", dec!(0.01))]);
+        let answer = Arc::new(Notify::new());
+        *api.place_gate.lock().unwrap() = Some(Arc::clone(&answer));
+        api.script(Ok(()));
+        api.script(Err("invalid order size"));
+        api.script(Err("Internal: error sending request"));
+        let place = |id: &str| d(id, QuoteAction::Place { price: dec!(0.20) });
+        run(&e, &api, &n, vec![place("a"), place("b"), place("c")]).await;
+        assert_eq!(e.state.read().await.placements_in_flight.load(std::sync::atomic::Ordering::SeqCst), 3);
+        answer.notify_waiters(); // Polymarket answers all three
+        settle().await;
+        let s = e.state.read().await;
+        assert!(matches!(s.order_status.get("a"), Some(OrderStatus::Live { .. })), "placed");
+        assert_eq!(s.place_failures.get("b"), Some(&1), "rejected");
+        assert_eq!(s.place_outage.get("c"), Some(&1), "outage");
+        assert_eq!(s.placements_in_flight.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
