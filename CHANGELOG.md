@@ -46,6 +46,9 @@ anything may change between releases.
   `DATA_DIR` (`MARKETS_FILE` and `ALERTS_FILE` still override). If your `markets.json` is still in `./data`, the bot
   stops at startup and says to move it; an `alerts.json` left there only gets a warning. Nothing is moved for you.
   Without `DATA_DIR` nothing changes.
+- **The market page no longer shows the other outcome's order book after a quick Yes/No switch.** A slow reply for
+  the outcome you had just left could replace the ladder of the one you switched back to, so clicking a level priced
+  the wrong outcome.
 
 ## [0.1.1] - 2026-11-27
 
