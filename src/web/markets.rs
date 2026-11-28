@@ -2700,10 +2700,10 @@ mod tests {
             std::fs::read_to_string(e.dir.join("markets.json")).unwrap()
         }
 
-        /// The bug: Resume in another tab while Remove waits on a slow cancel.
-        /// The engine quotes the resumed leg again (a new order), then the
-        /// remove finished and deleted the leg, leaving that new order resting
-        /// on Polymarket with nothing tracking it.
+        /// Resume in another tab while Remove waits on a slow cancel; the engine
+        /// quotes the resumed leg again (a new order). When the cancel returns,
+        /// the leg must be kept with that order tracked: deleting it would leave
+        /// the order resting on Polymarket with nothing tracking it.
         #[tokio::test]
         async fn a_leg_resumed_during_its_remove_keeps_its_new_order_tracked() {
             let e = leg_with(live("old")).await;

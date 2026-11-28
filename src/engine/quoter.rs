@@ -200,9 +200,9 @@ mod tests {
         evaluate(c, b, s, &[])
     }
 
-    /// The bug this guards against: best bid moves into our order, and the only
-    /// "depth" between the new target and the best bid is our own old order. It
-    /// must not count as protection — after the re-peg it is gone.
+    /// Best bid moves into our order, and the "depth" between the new target and
+    /// the best bid is mostly our own old order. It must not count as
+    /// protection — after the re-peg it is gone.
     #[test]
     fn our_own_order_is_not_depth_ahead() {
         let cfg = config(dec!(0.02), dec!(400)); // need $400 ahead

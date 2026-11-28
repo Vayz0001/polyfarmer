@@ -282,8 +282,8 @@ mod tests {
     #[test]
     fn reads_every_polymarket_link_shape() {
         let cases = [
-            // The link from the bug report (query and fragment are stripped
-            // earlier by the web handler; Url ignores them anyway).
+            // An esports game page, bare and as a share link (query and fragment
+            // are stripped earlier by the web handler; only the path is read anyway).
             (
                 "https://polymarket.com/esports/league-of-legends/worlds/lol-blg-gen-2026-11-14",
                 ev("lol-blg-gen-2026-11-14"),
