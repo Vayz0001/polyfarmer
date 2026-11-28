@@ -105,19 +105,16 @@ pub fn evaluate(
         return QuoteAction::Hold;
     }
 
-    // ── 3. Need best_bid to compute target ────────────────────────────────
     let best_bid = match book.best_bid {
         Some(b) => b,
         None => return QuoteAction::Hold, // no data yet
     };
 
-    // ── 4. Compute target price (snapped to tick, always ≤ best_bid - distance) ──
+    // ── 3. Compute target price (snapped to tick, always ≤ best_bid - distance) ──
     let raw_target = best_bid - config.distance;
     if raw_target <= dec!(0) {
         // Degenerate market — best_bid is too low to quote below it. Pull a
-        // live order; with none there is nothing to cancel (sending a Cancel
-        // with an empty id made a pointless API call and a false "Order
-        // cancelled" alert on every book update).
+        // live order; with none, hold (a Cancel needs an order id).
         return match live_order_id(status) {
             Some(order_id) => QuoteAction::Cancel { order_id, reason: CancelReason::DepthDropped },
             None => QuoteAction::Hold,
@@ -127,7 +124,6 @@ pub fn evaluate(
 
     match status {
         OrderStatus::Idle => {
-            // Placing from scratch — check depth at the target we're about to use.
             let depth = book.others_depth_between(target, best_bid, own);
             if depth >= config.min_depth_between {
                 QuoteAction::Place { price: target }
@@ -143,7 +139,6 @@ pub fn evaluate(
             // This takes priority over the current_depth check because the order
             // position is already invalid regardless of depth — we can't stay here.
             if gap < config.distance {
-                // Check whether the new target position is safe to place at.
                 let target_depth = book.others_depth_between(target, best_bid, own);
                 if target_depth >= config.min_depth_between {
                     return QuoteAction::Replace { order_id: order_id.clone(), new_price: target };
@@ -170,7 +165,6 @@ pub fn evaluate(
                 if target_depth >= config.min_depth_between {
                     return QuoteAction::Replace { order_id: order_id.clone(), new_price: target };
                 }
-                // New target not ready yet — existing order is still protected, hold.
                 return QuoteAction::Hold;
             }
 

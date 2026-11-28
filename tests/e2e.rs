@@ -110,10 +110,8 @@ async fn e2e_complete_server_and_trading_lifecycle() {
     let welcome_html = res.text().await.unwrap();
     assert!(welcome_html.contains("Welcome") && welcome_html.contains("Setup code"));
     let csrf_welcome = extract_csrf_token(&welcome_html);
-    // Retrieve real setup code generated on disk
     let setup_code = server.state.store.setup_code().expect("setup code exists");
 
-    // Rejection of invalid setup code
     let bad_form = [
         ("csrf", csrf_welcome.as_str()),
         ("code", "0000-wrong"),
@@ -131,7 +129,6 @@ async fn e2e_complete_server_and_trading_lifecycle() {
     let bad_body = res.text().await.unwrap();
     assert!(bad_body.contains("Setup code is incorrect"));
 
-    // Submission of valid setup code + admin password
     let good_form = [
         ("csrf", csrf_welcome.as_str()),
         ("code", setup_code.as_str()),
@@ -157,7 +154,6 @@ async fn e2e_complete_server_and_trading_lifecycle() {
     assert!(setup_html.contains("Settings"));
     let csrf_setup = extract_csrf_token(&setup_html);
 
-    // Rejection of invalid private key format
     let bad_wallet_form = [
         ("csrf", csrf_setup.as_str()),
         ("private_key", "not-a-hex-key"),
@@ -173,7 +169,6 @@ async fn e2e_complete_server_and_trading_lifecycle() {
     assert_eq!(res.status(), StatusCode::OK);
     assert!(res.text().await.unwrap().contains("Private key is not valid"));
 
-    // Valid private key + valid proxy wallet address
     let valid_privkey = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     let valid_proxy = "0x1111111111111111111111111111111111111111";
     let good_wallet_form =
@@ -226,7 +221,6 @@ async fn e2e_complete_server_and_trading_lifecycle() {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK, "Route {route} should render 200 OK");
 
-        // Verify standard security headers on every response
         let csp = res.headers().get(header::CONTENT_SECURITY_POLICY).expect("CSP header");
         assert!(csp.to_str().unwrap().contains("script-src 'self'"));
         assert_eq!(res.headers().get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
@@ -240,7 +234,6 @@ async fn e2e_complete_server_and_trading_lifecycle() {
     assert_eq!(sse_res.status(), StatusCode::OK);
     assert_eq!(sse_res.headers().get(header::CONTENT_TYPE).unwrap(), "text/event-stream");
 
-    // Broadcast live alert and verify stream chunk arrives
     server
         .state
         .alert_tx
@@ -275,12 +268,10 @@ async fn e2e_complete_server_and_trading_lifecycle() {
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
 
-    // Attempting to access protected dashboard with revoked session redirects to /login
     let res = client.get(format!("{}/", server.base_url)).header(header::COOKIE, &session_cookie).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/login");
 
-    // Clean up temporary files
     let _ = std::fs::remove_dir_all(&server.data_dir);
 }
 

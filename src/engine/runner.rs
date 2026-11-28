@@ -617,10 +617,10 @@ mod tests {
         assert_eq!(e.state.read().await.order_status.get("a"), Some(&OrderStatus::Idle), "cancelled for the re-peg");
     }
 
-    /// The bug: someone else (the two-sided rule, auto-pause, the dashboard)
-    /// was already cancelling the order; a re-peg whose tick read then failed
-    /// "restored" the leg to Idle, dropping that cancel — the order stayed up
-    /// while the leg could place a second one.
+    /// Someone else (the two-sided rule, auto-pause, the dashboard) is already
+    /// cancelling the order. A re-peg whose tick read fails must leave that
+    /// cancel alone: setting the leg Idle would let it place a second order
+    /// beside one still up.
     #[tokio::test]
     async fn a_failed_re_peg_never_drops_someone_elses_cancel() {
         let (e, _, n) = setup(vec![leg("a", dec!(0.001))]);

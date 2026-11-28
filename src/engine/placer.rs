@@ -955,7 +955,7 @@ mod tests {
     }
 
     /// Three real rejections in a row (spaced by the backoff) pause the leg and
-    /// save that — it used to be deleted for good. Other legs are untouched.
+    /// save that, never delete it. Other legs are untouched.
     #[tokio::test(start_paused = true)]
     async fn rejections_back_off_and_the_leg_is_paused_not_removed_after_three() {
         use tokio::time::advance;
@@ -1289,10 +1289,10 @@ mod tests {
         assert!(!text.contains("Order placement failed"), "{text}");
     }
 
-    /// The bug: the second refusal only paused within 2 minutes of the first.
-    /// When depth or the two-sided rule held the retry back longer, it counted
-    /// as a fresh "first" refusal, and the leg cycled forever without a "No
-    /// balance" status. Now the next attempt's refusal pauses, however late.
+    /// A second refusal pauses the leg however late it comes: depth or the
+    /// two-sided rule may hold the retry back a long time, and counting it as a
+    /// fresh "first" refusal would cycle the leg forever without a "No balance"
+    /// status.
     #[tokio::test(start_paused = true)]
     async fn a_late_second_refusal_still_pauses() {
         let e = env(vec![leg("a", dec!(0.01))]);
@@ -1466,7 +1466,7 @@ mod tests {
         assert_eq!(changed, vec!["leg a (1¢ → 0.1¢)".to_string()]);
     }
 
-    // ── races and failure paths the review asked for ─────────────────────
+    // ── races and failure paths ──────────────────────────────────────────
 
     #[tokio::test]
     async fn a_late_failure_does_not_touch_a_newer_attempt() {

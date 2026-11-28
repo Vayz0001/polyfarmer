@@ -68,7 +68,6 @@ pub async fn run() -> Result<()> {
 
     let config = Arc::new(Config::from_env()?);
 
-    // ── Credential store ──────────────────────────────────────────────────────
     let store = Arc::new(crate::creds::CredentialStore::open(config.data_dir.clone())?);
     if let Some(code) = store.setup_code() {
         // Shown here (and saved as <data>/setup.code) because the first-run
@@ -153,12 +152,9 @@ pub async fn run() -> Result<()> {
         }
     };
 
-    // ── Wallet credentials: wait until one is configured, then build the
-    //    executor. Each leg can fail without killing the process — on failure
-    //    we set EnginePhase::Error and loop back to waiting, so re-saving the
-    //    wallet in the dashboard retries. This is the first-run auto-start path.
-    // Re-checks happen every few seconds; these flags keep us from flooding the
-    // log / external notifier while idle-waiting or during a sustained outage.
+    // ── Wallet credentials: wait for a wallet, then build the executor. A
+    //    failure sets EnginePhase::Error and waits again (re-saving the wallet
+    //    retries). The flags keep the log and notifier quiet while waiting.
     let mut waiting_logged = false;
     let mut failure_alerted = false;
 
@@ -245,7 +241,6 @@ pub async fn run() -> Result<()> {
 
     set_phase(&state, EnginePhase::Running).await;
 
-    // ── Channels ──────────────────────────────────────────────────────────────
     let (ws_cmd_tx, ws_cmd_rx) = mpsc::channel::<WsCommand>(20);
     let (stop_tx, stop_rx) = watch::channel(false);
 
@@ -253,7 +248,6 @@ pub async fn run() -> Result<()> {
     // handlers (market add/remove/pause, reward reads) — see web/state.rs.
     engine_handle.set(Arc::clone(&executor), ws_cmd_tx.clone()).await;
 
-    // ── Spawn: WebSocket manager ──────────────────────────────────────────────
     ws_manager::spawn(
         Arc::clone(&state),
         Arc::clone(&executor),
@@ -263,7 +257,6 @@ pub async fn run() -> Result<()> {
         stop_rx.clone(),
     );
 
-    // ── Spawn: Heartbeat ──────────────────────────────────────────────────────
     heartbeat::spawn(Arc::clone(&executor), Arc::clone(&alerter), Arc::clone(&state), stop_rx.clone());
 
     // markets.json needs no poll loop: everything that writes it (web handlers,

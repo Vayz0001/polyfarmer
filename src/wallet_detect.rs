@@ -325,7 +325,7 @@ mod tests {
 
     /// A revert is a definite "not a Deposit Wallet"; a network or server
     /// error is not an answer at all (the engine start retries instead of
-    /// guessing — the old code guessed "not a Deposit Wallet" on any error).
+    /// guessing).
     #[test]
     fn a_revert_is_an_answer_but_a_network_error_is_not() {
         let revert = eyre!("RPC error from https://x: {{\"code\":3,\"message\":\"execution reverted\"}}");

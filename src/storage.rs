@@ -65,7 +65,6 @@ const ALERT_ROTATE_BYTES: u64 = 10 * 1024 * 1024;
 /// O_APPEND is atomic at the OS level for small writes, so a reader never sees
 /// a partial line.
 pub fn append_alert(path: &Path, alert: &Alert) -> Result<()> {
-    // Rotate if needed
     if let Ok(meta) = fs::metadata(path) {
         if meta.len() >= ALERT_ROTATE_BYTES {
             let rotated = path.with_extension("json.1");

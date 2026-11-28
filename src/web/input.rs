@@ -2,7 +2,7 @@
 //!
 //! Rule: input is untrusted and must be rejected with a message, never allowed to
 //! reach arithmetic that can panic. Concretely this module guards against
-//! * multibyte input where code assumed ASCII (`"7日"` used to panic a slice),
+//! * multibyte input where code assumed ASCII (`"7日"` would panic a byte slice),
 //! * absurd magnitudes that overflow `chrono::Duration` / `Decimal` maths
 //!   (`"99999999999999d"`, `"79228162514264337593543950335"`),
 //! * unbounded strings that end up in caches and logs.
