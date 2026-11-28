@@ -640,7 +640,7 @@ pub async fn run_place<A: OrderApi>(
             let mut s = state.write().await;
             return if release(&mut s, &config_id, attempt) { Outcome::Requote } else { Outcome::Superseded };
         }
-        TickCheck::Error(msg) => return fail(&state, &alerter, &config_id, attempt, msg).await,
+        TickCheck::Error(msg) => return fail(&state, &alerter, &config_id, attempt, msg, None).await,
     }
 
     // 2. Place.
@@ -725,8 +725,31 @@ pub async fn run_place<A: OrderApi>(
                     }
                 }
             }
-            fail(&state, &alerter, &config_id, attempt, msg).await
+            fail(&state, &alerter, &config_id, attempt, msg, Some(shares)).await
         }
+    }
+}
+
+/// Polymarket refused the order as under the market's minimum size (its
+/// wording: "Size (4.88) lower than the minimum: 5").
+pub fn is_too_small(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    m.contains("lower than the minimum") || m.contains("below minimum")
+}
+
+/// Why a leg was paused after [`MAX_PLACE_FAILURES`] rejections, for the
+/// alert. A minimum-size rejection is said plainly first, with the order's
+/// shares (`None` when no order was built), then in Polymarket's words. The
+/// engine doesn't know the market's minimum, so it isn't named.
+fn pause_reason(msg: &str, shares: Option<Decimal>) -> String {
+    match shares {
+        Some(shares) if is_too_small(msg) => format!(
+            "Order too small: {} shares, below Polymarket's minimum. Raise the size in Edit.\nPolymarket said: {msg}",
+            shares.normalize()
+        ),
+        _ => format!(
+            "{MAX_PLACE_FAILURES} placements in a row were rejected. Last reason: {msg}\nFix the leg (Edit) and Resume."
+        ),
     }
 }
 
@@ -776,8 +799,16 @@ async fn outage(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &st
 /// A real rejection: back off, and after [`MAX_PLACE_FAILURES`] in a row pause
 /// the leg (saved, under the lock) and say why. Never deletes it: a leg's
 /// settings are the user's, and a rejection is usually fixable (size, price,
-/// funds) — before, three in a row removed the leg for good.
-async fn fail(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &str, attempt: u64, msg: String) -> Outcome {
+/// funds) — before, three in a row removed the leg for good. `shares` is the
+/// rejected order's size, `None` when it failed before an order was built.
+async fn fail(
+    state: &Arc<RwLock<AppState>>,
+    alerter: &Alerter,
+    config_id: &str,
+    attempt: u64,
+    msg: String,
+    shares: Option<Decimal>,
+) -> Outcome {
     if is_transient(&msg) {
         return outage(state, alerter, config_id, attempt, &msg).await;
     }
@@ -810,10 +841,7 @@ async fn fail(state: &Arc<RwLock<AppState>>, alerter: &Alerter, config_id: &str,
             "'{label}' is paused but the pause could not be saved: {e}\nIt would resume after a restart."
         ));
     }
-    alerter.error(format!(
-        "Paused · {label}\n{MAX_PLACE_FAILURES} placements in a row were rejected. Last reason: {msg}\nFix the leg \
-         (Edit) and Resume."
-    ));
+    alerter.error(format!("Paused · {label}\n{}", pause_reason(&msg, shares)));
     Outcome::PausedAfterRejections
 }
 
@@ -1172,6 +1200,40 @@ mod tests {
         ] {
             assert!(!is_transient(r), "{r}");
         }
+    }
+
+    /// Minimum-size rejections are told apart from the rest, and only they
+    /// change the pause alert's reason; every other one reads as before.
+    #[test]
+    fn only_a_minimum_size_rejection_is_explained_plainly() {
+        let polymarket = "order 0x1 is invalid. Size (4.88) lower than the minimum: 5";
+        for t in [polymarket, "order rejected: order size below minimum"] {
+            assert!(is_too_small(t), "{t}");
+        }
+        for t in [
+            "order 0.213 is invalid: breaks minimum tick size rule: 0.01",
+            "not enough balance / allowance",
+            "Status: error(400 Bad Request) making POST call to /order with invalid amount",
+        ] {
+            assert!(!is_too_small(t), "{t}");
+            assert_eq!(
+                pause_reason(t, Some(dec!(4.88))),
+                format!("3 placements in a row were rejected. Last reason: {t}\nFix the leg (Edit) and Resume.")
+            );
+        }
+        assert_eq!(
+            pause_reason(polymarket, Some(dec!(4.88))),
+            format!(
+                "Order too small: 4.88 shares, below Polymarket's minimum. Raise the size in Edit.\nPolymarket said: \
+                 {polymarket}"
+            )
+        );
+        assert!(pause_reason(polymarket, Some(dec!(2.60))).starts_with("Order too small: 2.6 shares, below"));
+        // No order was built (the tick couldn't be read): nothing to explain.
+        assert_eq!(
+            pause_reason(polymarket, None),
+            format!("3 placements in a row were rejected. Last reason: {polymarket}\nFix the leg (Edit) and Resume.")
+        );
     }
 
     #[tokio::test(start_paused = true)]
