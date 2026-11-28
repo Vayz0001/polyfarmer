@@ -15,7 +15,7 @@ use axum::Form;
 use chrono::Utc;
 use futures_util::stream::Stream;
 use polymarket_client_sdk_v2::clob::types::Interval;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 use rust_decimal_macros::dec;
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -23,6 +23,7 @@ use tokio::sync::RwLock;
 use tower_sessions::Session;
 
 use crate::cache::TtlCache;
+use crate::engine::executor::Executor;
 use crate::engine::placer::OrderApi;
 use crate::engine::ws_manager::AppState;
 use crate::rewards::gamma_resolve::{self, MarketRef};
@@ -1087,6 +1088,113 @@ fn start_distance(best_bid: Decimal, price: Decimal) -> Result<Decimal, String> 
     input::distance(best_bid - price)
 }
 
+/// The settings every leg of one Start shares.
+struct StartSettings {
+    distance: Decimal,
+    min_depth_between: Decimal,
+    /// Per side: a both-sides Start splits the order size in half.
+    order_size: Decimal,
+    expires_at: chrono::DateTime<Utc>,
+    max_volatility: Option<Decimal>,
+}
+
+const NO_LIVE_BIDS: &str = "No live bids on this market right now.";
+
+/// The legs a Start creates from fresh books, or why it can't: `book` is the
+/// chosen side's, `other_book` the other side's when farming both. Each leg's
+/// best bid becomes its auto-pause benchmark.
+fn start_configs(
+    mr: &MarketRef,
+    side: usize,
+    book: &market_data::BookSnapshot,
+    other_book: Option<&market_data::BookSnapshot>,
+    settings: &StartSettings,
+) -> Result<Vec<MarketConfig>, String> {
+    let make = |token_idx: usize, benchmark: Decimal| MarketConfig {
+        id: new_config_id(),
+        url: poly_event_url(&mr.event_slug, &mr.market_slug),
+        label: mr.question.clone(),
+        condition_id: mr.condition_id.clone(),
+        token_id: mr.token_ids[token_idx].clone(),
+        token_label: mr.outcomes[token_idx].clone(),
+        tick_size: mr.tick_size,
+        distance: settings.distance,
+        min_depth_between: settings.min_depth_between,
+        order_size: settings.order_size,
+        expires_at: settings.expires_at,
+        paused: false,
+        benchmark_bid: Some(benchmark),
+        max_volatility: settings.max_volatility,
+    };
+    let best_bid = book.best_bid.ok_or(NO_LIVE_BIDS)?;
+    let mut configs = vec![make(side, best_bid)];
+    if let Some(other_book) = other_book {
+        let other = 1 - side;
+        let best_bid_b = other_book.best_bid.ok_or("No live bids on the other side right now.")?;
+        // The other leg bids the same distance below its own best bid: that must
+        // be a real price, or the leg would sit waiting forever.
+        if other_side_price(best_bid_b, settings.distance, mr.tick_size).is_none() {
+            let other_label = mr.outcomes.get(other).cloned().unwrap_or_default();
+            return Err(format!(
+                "{other_label}'s best bid is {}¢, so there's no room {}¢ below it. Farm one side, or bid closer to \
+                 the best bid.",
+                cents(best_bid_b),
+                cents(settings.distance)
+            ));
+        }
+        configs.push(make(other, best_bid_b));
+    }
+    for cfg in &configs {
+        cfg.validate()?;
+    }
+    // Polymarket rejects an order under the book's minimum size. When several
+    // legs fall short, name the one needing the most, so its fix covers both.
+    let books = std::iter::once(book).chain(other_book);
+    let shortfall = configs
+        .iter()
+        .zip(books)
+        .filter_map(|(cfg, book)| min_order_shortfall(cfg, book))
+        .max_by_key(|(needed_usd, _)| *needed_usd);
+    // The form's size is the total, split across both sides.
+    if let Some((needed_usd, reason)) = shortfall {
+        return Err(match other_book {
+            Some(_) => format!("{reason} Enter at least ${:.2} (split across both sides).", needed_usd * dec!(2)),
+            None => format!("{reason} Enter at least ${needed_usd:.2}."),
+        });
+    }
+    Ok(configs)
+}
+
+/// The per-side size `cfg` needs to meet `book`'s minimum order, and why its
+/// own is too small, when it is (the caller says what to enter). Shares are counted as the engine sizes the
+/// order, at the price the leg rests at. A minimum of 0 means none is known
+/// (only books built from the live feed lack one; Start reads the REST book).
+fn min_order_shortfall(cfg: &MarketConfig, book: &market_data::BookSnapshot) -> Option<(Decimal, String)> {
+    let min_shares = book.min_order_size;
+    if min_shares <= dec!(0) {
+        return None;
+    }
+    let rest = other_side_price(book.best_bid?, cfg.distance, cfg.tick_size)?;
+    // `rest` is above 0, the only price `shares_from_usd` refuses.
+    let shares = Executor::shares_from_usd(cfg.order_size, rest).ok()?;
+    if shares >= min_shares {
+        return None;
+    }
+    let needed_usd = (min_shares * rest).round_dp_with_strategy(2, RoundingStrategy::AwayFromZero);
+    Some((
+        needed_usd,
+        format!(
+            "Too small for this market: ${:.2} per side is {} shares of {} at {}¢; Polymarket's minimum order is {} \
+             shares.",
+            cfg.order_size,
+            shares.round_dp_with_strategy(1, RoundingStrategy::ToZero),
+            cfg.token_label,
+            (rest * dec!(100)).normalize(),
+            min_shares.normalize()
+        ),
+    ))
+}
+
 fn render_start_error(message: &str) -> Response {
     render(&StartFarmingResultTemplate { error: Some(message.to_string()) }).into_response()
 }
@@ -1135,7 +1243,7 @@ pub async fn start_farming(
         _ => return render_start_error("Could not load the order book — try again."),
     };
     let Some(best_bid_a) = book_a.best_bid else {
-        return render_start_error("No live bids on this market right now.");
+        return render_start_error(NO_LIVE_BIDS);
     };
     // Both sides share this distance — applied to the other leg's own best bid.
     let distance = match start_distance(best_bid_a, price) {
@@ -1143,51 +1251,19 @@ pub async fn start_farming(
         Err(e) => return render_start_error(&e),
     };
     let per_side_size = if both_sides { order_size / dec!(2) } else { order_size };
-
-    let make = |token_idx: usize, benchmark: Decimal| MarketConfig {
-        id: new_config_id(),
-        url: poly_event_url(&mr.event_slug, &mr.market_slug),
-        label: mr.question.clone(),
-        condition_id: mr.condition_id.clone(),
-        token_id: mr.token_ids[token_idx].clone(),
-        token_label: mr.outcomes[token_idx].clone(),
-        tick_size: mr.tick_size,
-        distance,
-        min_depth_between,
-        order_size: per_side_size,
-        expires_at,
-        paused: false,
-        benchmark_bid: Some(benchmark),
-        max_volatility,
-    };
-    let mut new_configs = vec![make(side, best_bid_a)];
-    if both_sides {
-        let other = 1 - side;
-        let book_b = match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(&mr.token_ids[other])).await {
-            Ok(Ok(b)) => b,
+    let book_b = if both_sides {
+        match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(&mr.token_ids[1 - side])).await {
+            Ok(Ok(b)) => Some(b),
             _ => return render_start_error("Could not load the order book for the other side — try again."),
-        };
-        let Some(best_bid_b) = book_b.best_bid else {
-            return render_start_error("No live bids on the other side right now.");
-        };
-        // The other leg bids the same distance below its own best bid: that must
-        // be a real price, or the leg would sit waiting forever.
-        if other_side_price(best_bid_b, distance, mr.tick_size).is_none() {
-            let other_label = mr.outcomes.get(other).cloned().unwrap_or_default();
-            return render_start_error(&format!(
-                "{other_label}'s best bid is {}¢, so there's no room {}¢ below it. Farm one side, or bid closer to \
-                 the best bid.",
-                cents(best_bid_b),
-                cents(distance)
-            ));
         }
-        new_configs.push(make(other, best_bid_b));
-    }
-    for cfg in &new_configs {
-        if let Err(e) = cfg.validate() {
-            return render_start_error(&e);
-        }
-    }
+    } else {
+        None
+    };
+    let settings = StartSettings { distance, min_depth_between, order_size: per_side_size, expires_at, max_volatility };
+    let new_configs = match start_configs(&mr, side, &book_a, book_b.as_ref(), &settings) {
+        Ok(c) => c,
+        Err(e) => return render_start_error(&e),
+    };
 
     let new_token_ids: Vec<String> = new_configs.iter().map(|c| c.token_id.clone()).collect();
     let newly_subscribed = {
@@ -2227,6 +2303,131 @@ mod tests {
             one_day_price_change: None,
             end_date: None,
         }
+    }
+
+    fn book_at(best_bid: Decimal, min_order_size: Decimal) -> market_data::BookSnapshot {
+        market_data::BookSnapshot {
+            bids: vec![(best_bid, dec!(100))],
+            asks: vec![],
+            best_bid: Some(best_bid),
+            best_ask: None,
+            tick_size: dec!(0.01),
+            min_order_size,
+        }
+    }
+
+    fn start_settings(distance: Decimal, per_side: Decimal) -> StartSettings {
+        StartSettings {
+            distance,
+            min_depth_between: dec!(0),
+            order_size: per_side,
+            expires_at: Utc::now() + chrono::Duration::days(7),
+            max_volatility: None,
+        }
+    }
+
+    /// Polymarket rejects an order under the market's minimum size (5 shares
+    /// here), so Start refuses one before saving, checking each side at the
+    /// price it would rest at and naming the per-side size that would do.
+    #[test]
+    fn start_refuses_a_per_side_size_below_the_minimum_order() {
+        let mr = two_outcome_market();
+        // Both sides at $2 ($1 per side), 2¢ below 40¢ and 62¢ best bids: 38¢ and 60¢.
+        let (yes, no) = (book_at(dec!(0.40), dec!(5)), book_at(dec!(0.62), dec!(5)));
+        let refusal = start_configs(&mr, 0, &yes, Some(&no), &start_settings(dec!(0.02), dec!(1))).unwrap_err();
+        assert_eq!(
+            refusal,
+            "Too small for this market: $1.00 per side is 1.6 shares of No at 60¢; Polymarket's minimum order is 5 \
+             shares. Enter at least $6.00 (split across both sides)."
+        );
+
+        // One side is big enough, the other isn't: $2.50 is 6.5 Yes shares but 4.1 No shares.
+        let refusal = start_configs(&mr, 0, &yes, Some(&no), &start_settings(dec!(0.02), dec!(2.5))).unwrap_err();
+        assert!(refusal.contains("$2.50 per side is 4.1 shares of No at 60¢"), "{refusal}");
+        assert!(refusal.ends_with("Enter at least $6.00 (split across both sides)."), "{refusal}");
+
+        // One side only.
+        let refusal = start_configs(&mr, 0, &yes, None, &start_settings(dec!(0.02), dec!(1))).unwrap_err();
+        assert!(refusal.contains("$1.00 per side is 2.6 shares of Yes at 38¢"), "{refusal}");
+        assert!(refusal.ends_with("Enter at least $1.90."), "{refusal}");
+
+        // A decimal price: 38.25¢ on a 0.1¢ tick rests at 38.2¢.
+        let fine_tick = MarketRef { tick_size: dec!(0.001), ..two_outcome_market() };
+        let refusal =
+            start_configs(&fine_tick, 0, &book_at(dec!(0.402), dec!(5)), None, &start_settings(dec!(0.0195), dec!(1)))
+                .unwrap_err();
+        assert_eq!(
+            refusal,
+            "Too small for this market: $1.00 per side is 2.6 shares of Yes at 38.2¢; Polymarket's minimum order is 5 \
+             shares. Enter at least $1.91."
+        );
+    }
+
+    /// The amount a refusal says to enter, as typed in the form's size box.
+    fn amount_to_enter(refusal: &str) -> Decimal {
+        let after = refusal.split("Enter at least $").nth(1).unwrap();
+        // "$1.90." or "$3.82 (split…": the amount, without the sentence's full stop.
+        after.split_whitespace().next().unwrap().trim_end_matches('.').parse().unwrap()
+    }
+
+    /// Entering the amount a refusal names starts the farm: for both sides the
+    /// form's size is the total, so it covers each side's minimum once split.
+    #[test]
+    fn the_amount_a_too_small_refusal_names_is_enough() {
+        let fine_tick = MarketRef { tick_size: dec!(0.001), ..two_outcome_market() };
+        let mr = two_outcome_market();
+        let cases = [
+            // (market, chosen side's book, other side's book, distance, total typed)
+            (&fine_tick, book_at(dec!(0.402), dec!(5)), Some(book_at(dec!(0.402), dec!(5))), dec!(0.0195), dec!(2)),
+            (&fine_tick, book_at(dec!(0.402), dec!(5)), None, dec!(0.0195), dec!(1)),
+            (&mr, book_at(dec!(0.40), dec!(5)), Some(book_at(dec!(0.62), dec!(5))), dec!(0.02), dec!(5)),
+            (&mr, book_at(dec!(0.40), dec!(5)), None, dec!(0.02), dec!(1)),
+        ];
+        for (market, book, other, distance, typed) in cases {
+            let per_side = |total: Decimal| if other.is_some() { total / dec!(2) } else { total };
+            let refusal = start_configs(market, 0, &book, other.as_ref(), &start_settings(distance, per_side(typed)))
+                .unwrap_err();
+            let enter = amount_to_enter(&refusal);
+            if other.is_some() {
+                assert!(refusal.ends_with("(split across both sides)."), "{refusal}");
+            }
+            let started = start_configs(market, 0, &book, other.as_ref(), &start_settings(distance, per_side(enter)));
+            assert!(started.is_ok(), "entering ${enter} after {refusal:?} must start: {started:?}");
+        }
+        // The decimal-price example, both sides: $1.91 per side.
+        let both = start_configs(
+            &fine_tick,
+            0,
+            &book_at(dec!(0.402), dec!(5)),
+            Some(&book_at(dec!(0.402), dec!(5))),
+            &start_settings(dec!(0.0195), dec!(1)),
+        )
+        .unwrap_err();
+        assert!(both.ends_with("Enter at least $3.82 (split across both sides)."), "{both}");
+    }
+
+    #[test]
+    fn start_accepts_a_per_side_size_at_the_minimum_order() {
+        let mr = two_outcome_market();
+        let (yes, no) = (book_at(dec!(0.40), dec!(5)), book_at(dec!(0.62), dec!(5)));
+        // Exactly 5 shares at 38¢ and at 60¢.
+        let one = start_configs(&mr, 0, &yes, None, &start_settings(dec!(0.02), dec!(1.90))).unwrap();
+        assert_eq!(one.len(), 1);
+        let both = start_configs(&mr, 0, &yes, Some(&no), &start_settings(dec!(0.02), dec!(3))).unwrap();
+        assert_eq!(both.len(), 2);
+        // The decimal-price suggestion is enough: $1.91 at 38.2¢ is 5 shares.
+        let fine_tick = MarketRef { tick_size: dec!(0.001), ..two_outcome_market() };
+        let at_min = start_configs(
+            &fine_tick,
+            0,
+            &book_at(dec!(0.402), dec!(5)),
+            None,
+            &start_settings(dec!(0.0195), dec!(1.91)),
+        );
+        assert!(at_min.is_ok(), "{at_min:?}");
+        // No minimum in the book (0): nothing to check.
+        let no_min = start_configs(&mr, 0, &book_at(dec!(0.40), dec!(0)), None, &start_settings(dec!(0.02), dec!(1)));
+        assert!(no_min.is_ok(), "{no_min:?}");
     }
 
     /// Holders are valued at their own outcome's mid; names from Polymarket are

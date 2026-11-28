@@ -7,6 +7,12 @@ anything may change between releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Start refuses an order too small for Polymarket.** It now checks each side's shares, at the price the order would
+  rest at, against the market's minimum order (5 shares on most markets) and says how much to enter. Before, the leg
+  was saved anyway, Polymarket rejected its order three times and the bot paused it.
+
 ## [0.1.1] - 2026-11-27
 
 ### Added
