@@ -208,13 +208,10 @@ mod tests {
     #[test]
     fn data_dir_holds_the_markets_and_alerts_files_by_default() {
         let paths = data_paths(&vars(Some("/var/lib/polyfarmer"), None, None));
+        let dir = PathBuf::from("/var/lib/polyfarmer");
         assert_eq!(
             paths,
-            DataPaths {
-                data_dir: PathBuf::from("/var/lib/polyfarmer"),
-                markets_file: PathBuf::from("/var/lib/polyfarmer/markets.json"),
-                alerts_file: PathBuf::from("/var/lib/polyfarmer/alerts.json"),
-            }
+            DataPaths { markets_file: dir.join("markets.json"), alerts_file: dir.join("alerts.json"), data_dir: dir }
         );
     }
 
@@ -308,8 +305,8 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    /// No DATA_DIR, or one that is the old folder itself (or a link to it):
-    /// the files are where they always were.
+    /// No DATA_DIR, or one that is the old folder itself: the files are where
+    /// they always were.
     #[test]
     fn the_old_folder_itself_is_not_left_behind() {
         let (root, old, _) = workdir();
@@ -318,6 +315,16 @@ mod tests {
         let unset = vars(None, None, None);
         assert_eq!(files_left_behind(&unset, &data_paths(&unset), &old).unwrap(), None);
         assert_eq!(left_behind_with(&old, &old).unwrap(), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A DATA_DIR that links to the old folder is the old folder too.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_the_old_folder_is_not_left_behind() {
+        let (root, old, _) = workdir();
+        std::fs::write(old.join("markets.json"), "[]").unwrap();
+        std::fs::write(old.join("alerts.json"), "").unwrap();
         let link = root.join("link");
         std::os::unix::fs::symlink(&old, &link).unwrap();
         assert_eq!(left_behind_with(&link, &old).unwrap(), None);
