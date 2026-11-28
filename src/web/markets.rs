@@ -1243,6 +1243,7 @@ pub async fn start_farming(
         Ok(Ok(b)) => b,
         _ => return render_start_error("Could not load the order book — try again."),
     };
+    state.caches.min_order_size.put(&mr.token_ids[side], book_a.min_order_size);
     let Some(best_bid_a) = book_a.best_bid else {
         return render_start_error(NO_LIVE_BIDS);
     };
@@ -1254,7 +1255,10 @@ pub async fn start_farming(
     let per_side_size = if both_sides { order_size / dec!(2) } else { order_size };
     let book_b = if both_sides {
         match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(&mr.token_ids[1 - side])).await {
-            Ok(Ok(b)) => Some(b),
+            Ok(Ok(b)) => {
+                state.caches.min_order_size.put(&mr.token_ids[1 - side], b.min_order_size);
+                Some(b)
+            }
             _ => return render_start_error("Could not load the order book for the other side — try again."),
         }
     } else {
@@ -1783,8 +1787,7 @@ pub async fn edit_submit(
         },
     };
 
-    // A new auto-pause threshold is measured from today's best bid.
-    let (token, old_vol) = {
+    let leg = {
         let s = state.engine.read().await;
         match s.configs.iter().find(|c| c.id == id) {
             Some(c) => match c.describe_problem() {
@@ -1793,13 +1796,20 @@ pub async fn edit_submit(
                     drop(s);
                     return fail(problem).await;
                 }
-                _ => (c.token_id.clone(), c.max_volatility),
+                _ => c.clone(),
             },
             None => return fail("This market leg no longer exists.".into()).await,
         }
     };
-    let new_benchmark = if max_volatility.is_some() && max_volatility != old_vol {
-        match best_bid_now(&state, &token).await {
+    // Only size and distance change the order's shares.
+    if leg.order_size != order_size || leg.distance != distance {
+        if let Err(e) = check_min_order(&state, &MarketConfig { order_size, distance, ..leg.clone() }).await {
+            return fail(e).await;
+        }
+    }
+    // A new auto-pause threshold is measured from today's best bid.
+    let new_benchmark = if max_volatility.is_some() && max_volatility != leg.max_volatility {
+        match best_bid_now(&state, &leg.token_id).await {
             Some(bb) => Some(bb),
             None => {
                 return fail("Could not read the current best bid for the auto-pause benchmark — try again.".into())
@@ -2056,6 +2066,38 @@ async fn best_bid_now(state: &WebState, token: &str) -> Option<Decimal> {
         Ok(Ok(b)) => b.best_bid,
         _ => None,
     }
+}
+
+/// Whether `cfg` (a leg with its edited size and distance) meets Polymarket's
+/// minimum order where it would rest now, below the engine's live best bid.
+/// The engine subscribes every configured leg, paused ones too, so a missing
+/// book means it hasn't loaded yet: refused, as there is no price to check at.
+async fn check_min_order(state: &WebState, cfg: &MarketConfig) -> Result<(), String> {
+    let best_bid = state.engine.read().await.books.get(&cfg.token_id).and_then(|b| b.best_bid);
+    let Some(best_bid) = best_bid else {
+        return Err("The order book for this market isn't loaded yet — try again in a few seconds.".into());
+    };
+    let min_shares = min_order_size(state, &cfg.token_id).await?;
+    match min_order_shortfall(cfg, best_bid, min_shares) {
+        Some((needed_usd, reason)) => Err(format!("{reason} Enter at least ${needed_usd:.2}.")),
+        None => Ok(()),
+    }
+}
+
+/// Polymarket's minimum order (shares) for `token`: cached (Start fills it from
+/// its REST book), else read from the REST book. A failed read is an error, never
+/// "no minimum".
+async fn min_order_size(state: &WebState, token: &str) -> Result<Decimal, String> {
+    state
+        .caches
+        .min_order_size
+        .get_or_fetch(token, || async {
+            match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(token)).await {
+                Ok(Ok(book)) => Ok(book.min_order_size),
+                _ => Err("Couldn't check Polymarket's minimum order size — try again.".to_string()),
+            }
+        })
+        .await
 }
 
 /// The best bid a resumed leg's auto-pause limit restarts from: `None` when
