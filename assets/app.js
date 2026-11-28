@@ -953,7 +953,9 @@
       case "tab": $$("button", el.parentElement).forEach(function (b) { b.classList.toggle("selected", b === el); if (b.hasAttribute("aria-pressed")) b.setAttribute("aria-pressed", String(b === el)); }); break;
       case "side": if (MV) mvSelectSide(parseInt(el.dataset.side, 10)); break;
       case "mode": if (MV) mvSetMode(el.dataset.mode); break;
-      case "book-price": if (MV) { $("#price").value = fmtC(num(el.dataset.price) * 100); mvSyncShares(); mvUpdate(); } break;
+      // Right after a Yes/No switch the other outcome's ladder is still on
+      // screen until the new one arrives: its prices aren't this outcome's.
+      case "book-price": if (MV && MV.shown.side === MV.side) { $("#price").value = fmtC(num(el.dataset.price) * 100); mvSyncShares(); mvUpdate(); } break;
       case "group": if (MV) mvSetGroup(el.dataset.group); break;
       case "collapse": setCollapsed(el.dataset.key, el.getAttribute("aria-expanded") === "true"); break;
       case "range": if (MV) { MV.range = el.dataset.range; $$("#ranges button").forEach(function (b) { b.classList.toggle("selected", b === el); }); mvLoadChart(); } break;

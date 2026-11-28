@@ -53,6 +53,9 @@ anything may change between releases.
   froze once the live stream had failed after working. It now refreshes every 3 seconds, one request at a time (given
   up after 15 seconds, so a slow server can't tie up the browser's connections), and shows "live" again when the
   stream returns.
+- **A click on the previous outcome's order book no longer prices your order.** Right after switching Yes/No, the
+  old ladder stays on screen until the new one loads; clicking one of its rows put that outcome's price into the
+  order form. Those clicks are now ignored until the right ladder is shown.
 
 ## [0.1.1] - 2026-11-27
 
