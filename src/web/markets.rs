@@ -1154,7 +1154,7 @@ fn start_configs(
     let shortfall = configs
         .iter()
         .zip(books)
-        .filter_map(|(cfg, book)| min_order_shortfall(cfg, book))
+        .filter_map(|(cfg, book)| min_order_shortfall(cfg, book.best_bid?, book.min_order_size))
         .max_by_key(|(needed_usd, _)| *needed_usd);
     // The form's size is the total, split across both sides.
     if let Some((needed_usd, reason)) = shortfall {
@@ -1166,16 +1166,16 @@ fn start_configs(
     Ok(configs)
 }
 
-/// The per-side size `cfg` needs to meet `book`'s minimum order, and why its
-/// own is too small, when it is (the caller says what to enter). Shares are counted as the engine sizes the
-/// order, at the price the leg rests at. A minimum of 0 means none is known
-/// (only books built from the live feed lack one; Start reads the REST book).
-fn min_order_shortfall(cfg: &MarketConfig, book: &market_data::BookSnapshot) -> Option<(Decimal, String)> {
-    let min_shares = book.min_order_size;
+/// The per-side size `cfg` needs to meet the market's minimum order of
+/// `min_shares`, and why its own is too small, when it is (the caller says what
+/// to enter). Shares are counted as the engine sizes the order, at the price
+/// the leg rests at below `best_bid`. A minimum of 0 means none is known (only
+/// books built from the live feed lack one; the minimum comes from the REST book).
+fn min_order_shortfall(cfg: &MarketConfig, best_bid: Decimal, min_shares: Decimal) -> Option<(Decimal, String)> {
     if min_shares <= dec!(0) {
         return None;
     }
-    let rest = other_side_price(book.best_bid?, cfg.distance, cfg.tick_size)?;
+    let rest = other_side_price(best_bid, cfg.distance, cfg.tick_size)?;
     // `rest` is above 0, the only price `shares_from_usd` refuses.
     let shares = Executor::shares_from_usd(cfg.order_size, rest).ok()?;
     if shares >= min_shares {
