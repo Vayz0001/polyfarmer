@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use crate::cache::TtlCache;
 
-// ── New resolution model (binary-market-aware, outcome-agnostic) ─────────────
 // Every tradeable CLOB market is binary (exactly 2 outcome tokens); a
 // multi-outcome *event* (e.g. "World Cup Winner") is N separate binary
 // sub-markets. So resolving a URL yields either one market or a candidate list.

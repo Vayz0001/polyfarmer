@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # ./check: the one command that decides "passes" for this repo.
 # You run it, the agent runs it before it says done, CI runs it. Keep all three on this script.
-# Sections for stacks this repo doesn't have are skipped automatically; delete them if you like.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -60,7 +59,5 @@ if have shellcheck; then
 fi
 if have gitleaks; then step "secrets (gitleaks)"; gitleaks git --redact .
 else echo "skip: gitleaks not installed here (CI runs it)"; fi
-
-# --- Repo-specific steps go here (e2e suites, builds) -----------------------
 
 printf '\nall checks passed\n'

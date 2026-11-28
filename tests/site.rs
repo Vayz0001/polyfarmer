@@ -73,8 +73,7 @@ fn theme_colour_follows_light_and_dark() {
 
 #[test]
 fn logo_links_scroll_to_the_top_of_the_page() {
-    // href="#top" scrolls to the page top only while no element has id="top"
-    // (the sticky header used to, which made the link a no-op).
+    // href="#top" scrolls to the page top only while no element has id="top".
     let html = read("index.html");
     assert!(html.contains("href=\"#top\""));
     assert!(!attr_values(&html, "id").contains(&"top"), "no element may have id=\"top\"");

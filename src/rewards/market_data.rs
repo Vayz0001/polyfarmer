@@ -149,8 +149,7 @@ pub fn evaluate_placement(
     let per_side_size = if both_sides { order_size / dec!(2) } else { order_size };
 
     // The reward minimum is a SHARE count, not USD — compare shares
-    // (per-side USD / price), not the dollar amount. (Was a units bug: e.g. at
-    // 50c, "$200" is 400 shares, but comparing 200 >= 200 mis-qualified.)
+    // (per-side USD / price), not the dollar amount.
     let per_side_shares = if your_price > dec!(0) { (per_side_size / your_price).round_dp(2) } else { dec!(0) };
     let per_side_meets_min = per_side_shares >= min_size;
 
@@ -184,7 +183,6 @@ fn fill_risk(book: &BookSnapshot, your_price: Decimal, size: Decimal) -> FillRis
     if your_price >= best_bid {
         return FillRisk::High;
     }
-    // USDC depth strictly above your price, up to and including best bid.
     let depth_ahead: Decimal =
         book.bids.iter().filter(|(p, _)| *p > your_price && *p <= best_bid).map(|(p, s)| p * s).sum();
     if size <= dec!(0) {
@@ -399,11 +397,9 @@ pub fn build_ladder(
     let bid_levels: Vec<(Decimal, Decimal)> = bid_all.iter().take(per_side).copied().collect();
     let ask_levels: Vec<(Decimal, Decimal)> = ask_all.iter().take(per_side).copied().collect();
 
-    // "Total" column = cumulative shares from the best level outward, and the
-    // depth bar draws that same running total, so bars grow away from the
-    // spread and always agree with the number beside them (each level's own
-    // size is still in the "Shares" column). Both sides share one scale: the
-    // deeper side's total is 100%.
+    // "Total" column = cumulative shares from the best level outward; the depth
+    // bar draws the same running total, so it agrees with the number beside it.
+    // Both sides share one scale: the deeper side's total is 100%.
     let cum = |levels: &[(Decimal, Decimal)]| -> Vec<Decimal> {
         let mut acc = dec!(0);
         levels
@@ -607,9 +603,8 @@ pub fn price_chart_svg(points: &[(i64, Decimal)]) -> String {
     hi += pad;
     let span = hi - lo;
 
-    // NB: plot over the (possibly downsampled) `prices`, so `n` must be its
-    // length — using the original points.len() squished the line into the left
-    // edge whenever the history was downsampled (>120 pts).
+    // `n` is the length of the (possibly downsampled) `prices`, not of the
+    // original points, so the line spans the full width.
     let n = prices.len() as f64;
     let x = |i: usize| (i as f64) / (n - 1.0) * W;
     let y = |p: f64| PAD_Y + (1.0 - (p - lo) / span) * (H - 2.0 * PAD_Y);

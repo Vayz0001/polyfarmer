@@ -1,6 +1,4 @@
-/* polyfarmer dashboard — one script for every page (loaded deferred, after htmx).
-   Sections: prefs · util · live events (SSE) + toasts · alerts window · confirm
-   modal · drawer · activity filters · settings · market view · action router. */
+/* polyfarmer dashboard — one script for every page (loaded deferred, after htmx). */
 (function () {
   "use strict";
   var PF = (window.PF = window.PF || {});
@@ -439,8 +437,7 @@
 
   // ── "Added to your markets" after Start farming ─────────────────────────
   // The start request answers with a redirect to Markets; note the market in
-  // sessionStorage and say so on the next page. (No handler change: this only
-  // reads the response the form already gets.)
+  // sessionStorage and say so on the next page.
   document.addEventListener("htmx:afterRequest", function (e) {
     var d = e.detail;
     // (htmx follows HX-Redirect before it sets d.successful, so check the status.)
@@ -669,7 +666,6 @@
       bar.style.width = Math.min(100, eff * 100) + "%";
       why.textContent = reasons.length ? reasons.join(" · ") : both() ? "Inside the zone, two-sided, above the size minimum." : "Inside the zone and above the size minimum.";
     }
-    // peg hint
     var hint = $("#peg-hint");
     if (hint) hint.textContent = b && b.bb > 0 && p > 0 && p < b.bb ? "follows " + ((b.bb - p) * 100).toFixed(1) + "¢ below best bid" : "";
     mvMarkBid();

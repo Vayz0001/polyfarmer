@@ -1039,8 +1039,8 @@ pub async fn view_preview(
         effective_tone,
         sided_note,
         per_side_size: super::dashboard::usd(eval.per_side_size),
-        // As the engine places it: 2 decimals (`{:.0}` truncated, and hid a
-        // shortfall like 49.6 shares under a 50 minimum).
+        // As the engine places it: 2 decimals, so a shortfall like 49.6 shares
+        // under a 50 minimum shows.
         per_side_shares: eval.per_side_shares.normalize().to_string(),
         per_side_meets_min: eval.per_side_meets_min,
         min_size: min_size.normalize().to_string(),
@@ -2554,8 +2554,7 @@ mod tests {
     #[test]
     fn min_depth_is_parsed_as_usd_not_cents() {
         // The quoter compares min_depth_between to USDC notional — "500" must mean
-        // $500 (the old form divided by 100 → $5). Kept here as a regression guard
-        // for the unit; the full bounds tests live in web/input.rs.
+        // $500. The full bounds tests live in web/input.rs.
         assert_eq!(input::depth_usd("500"), Ok(dec!(500)));
         assert_eq!(input::depth_usd("$1,250.50"), Ok(dec!(1250.50)));
     }
@@ -2590,7 +2589,7 @@ mod tests {
         assert_eq!(with_tab, "https://polymarket.com/event/trump");
 
         // `\trump`: the tab precedes "rump", so the cleaned slug is "rump",
-        // not "rtrump" (reviewer case, PR #115).
+        // not "rtrump".
         let leading_tab = sanitize_market_url("https://polymarket.com/event/\trump").unwrap();
         assert_eq!(leading_tab, "https://polymarket.com/event/rump");
 
@@ -2612,7 +2611,7 @@ mod tests {
             sanitize_market_url(" lol-blg-gen-2026-11-14 ").unwrap(),
             "https://polymarket.com/event/lol-blg-gen-2026-11-14"
         );
-        // The link from the bug report: query and fragment dropped, path kept.
+        // A share link: query and fragment dropped, path kept.
         assert_eq!(
             sanitize_market_url(
                 "https://polymarket.com/esports/league-of-legends/worlds/lol-blg-gen-2026-11-14?r=earnfees#L97Nndk"

@@ -183,7 +183,7 @@ mod tests {
         let mut book = TokenBook::default();
         book.bids.insert(dec!(0.20), dec!(500)); // $100, someone else's
         book.bids.insert(dec!(0.19), dec!(3000)); // $570: $500 of it is ours
-                                                  // All of it, as before:
+                                                  // Plain depth counts every bid:
         assert_eq!(book.bid_depth_between(dec!(0.18), dec!(0.20)), dec!(670));
         // Without ours: only the other people's $170.
         assert_eq!(book.others_depth_between(dec!(0.18), dec!(0.20), &[(dec!(0.19), dec!(500))]), dec!(170));
@@ -228,7 +228,6 @@ mod tests {
 
     #[test]
     fn decimal_key_deduplicates_equivalent_price_strings() {
-        // Verifies that "0.19" and "0.1900000" map to the same level.
         let mut book = TokenBook::default();
         book.bids.insert(Decimal::from_str("0.19").unwrap(), dec!(100));
         // Overwrite with different-scale representation of the same price
@@ -239,7 +238,6 @@ mod tests {
 
     #[test]
     fn remove_uses_decimal_not_string() {
-        // Verifies that a remove with a different-scale key still works.
         let mut book = TokenBook::default();
         book.bids.insert(Decimal::from_str("0.19").unwrap(), dec!(100));
 

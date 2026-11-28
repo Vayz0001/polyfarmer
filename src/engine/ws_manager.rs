@@ -236,13 +236,11 @@ pub fn spawn(
         let mut disconnect_alerted = false;
 
         loop {
-            // Check for shutdown
             if *stop_rx.borrow() {
                 info!("WS manager stopping");
                 break;
             }
 
-            // Collect currently subscribed token_ids from state
             let token_ids: Vec<String> = state.read().await.farmed_tokens();
 
             // Don't connect until we have at least one market — the server
@@ -311,15 +309,12 @@ pub fn spawn(
             }
             let mut last_heard = std::time::Instant::now();
 
-            // PING interval
             let mut ping_ticker = tokio::time::interval(PING_INTERVAL);
 
-            // Track subscribed tokens so we can diff subscribe/unsubscribe
             let mut subscribed: HashSet<String> = token_ids.into_iter().collect();
 
             let disconnect_reason = loop {
                 tokio::select! {
-                    // ── Incoming WS message ─────────────────────────────────
                     msg = read.next() => {
                         const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024; // 64 MB
                         if matches!(msg, Some(Ok(_))) {
@@ -358,7 +353,6 @@ pub fn spawn(
                         }
                     }
 
-                    // ── PING ────────────────────────────────────────────────
                     _ = ping_ticker.tick() => {
                         if silent_too_long(last_heard, std::time::Instant::now()) {
                             break format!("no messages for {}s", SILENCE_LIMIT.as_secs());
@@ -368,7 +362,6 @@ pub fn spawn(
                         }
                     }
 
-                    // ── Subscribe/Unsubscribe commands ──────────────────────
                     Some(cmd) = cmd_rx.recv() => {
                         match cmd {
                             WsCommand::Subscribe(tokens) => {
@@ -409,7 +402,6 @@ pub fn spawn(
                         }
                     }
 
-                    // ── Graceful shutdown ───────────────────────────────────
                     _ = stop_rx.changed() => {
                         if *stop_rx.borrow() { break "shutdown".to_string(); }
                     }
@@ -479,7 +471,6 @@ pub fn spawn(
                 let resolved = {
                     let mut s = state.write().await;
                     let resolved = reset_after_bulk_cancel(&mut s, &live_order_ids, &remaining);
-                    // Books will be rebuilt from snapshots on reconnect
                     s.snapshotted.clear();
                     s.books.clear();
                     resolved
@@ -670,7 +661,6 @@ async fn handle_book_message<A: OrderApi>(
         }
     };
 
-    // Collect which tokens were affected
     let affected_tokens: HashSet<String> = event.price_changes.iter().map(|c| c.asset_id.clone()).collect();
 
     // Apply changes to books — skip tokens that haven't received their snapshot yet.

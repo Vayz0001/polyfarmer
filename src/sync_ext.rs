@@ -1,13 +1,10 @@
 //! Lock helpers that recover from poisoning instead of panicking.
 //!
-//! A std lock is poisoned when a thread panics while holding its guard. With
-//! `.lock().unwrap()` every later caller then panics too, including
-//! `BookGuard::drop`, so one panic spreads to every task that touches the lock.
-//! The data behind the locks that use these helpers is counters, display-only
-//! order books, an alert buffer and an `Option<String>`: none of it can be left
-//! half-written in a way that matters, so carrying on with the inner data is
-//! the right call. The guard returned is the same one `.lock()` / `.read()` /
-//! `.write()` would give, so it lives exactly as long as before.
+//! With `.lock().unwrap()`, one panic while a guard is held makes every later
+//! caller panic too, including `BookGuard::drop`. The locks that use these
+//! helpers hold counters, display-only order books, an alert buffer and an
+//! `Option<String>`: none of it can be left half-written in a way that
+//! matters, so carrying on with the inner data is the right call.
 
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 

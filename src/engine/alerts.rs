@@ -75,11 +75,10 @@ impl Alerter {
             }
         }
 
-        // Write the new alert
         if let Err(e) = append_alert(&self.path, &alert) {
             error!("Failed to write alert (buffering): {}", e);
             if buf.len() >= BUFFER_CAP {
-                buf.pop_front(); // drop oldest to make room
+                buf.pop_front();
             }
             buf.push_back(alert);
         }

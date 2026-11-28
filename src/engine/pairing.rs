@@ -83,7 +83,7 @@ pub struct Decision {
 
 /// Evaluate the selected legs and apply the two-sided rule. Updates the rule's
 /// bookkeeping in `s` (grace clocks, back-off, display reasons). Legs without a
-/// book yet are skipped, as before.
+/// book yet are skipped.
 pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Instant) -> Vec<Decision> {
     // Drop bookkeeping for removed legs.
     let ids: HashSet<String> = s.configs.iter().map(|c| c.id.clone()).collect();
@@ -1085,7 +1085,7 @@ mod tests {
         s.books.get_mut("YES").unwrap().best_ask = None;
         assert_eq!(action_of(&all(&mut s, Instant::now()), "y"), QuoteAction::Hold);
         assert_eq!(s.pair_wait.get("y"), Some(&PairWait::OtherSide));
-        // No midpoint anywhere: the rule can't tell, so quoting is as before.
+        // No midpoint anywhere: the rule can't tell, so it doesn't hold the leg.
         s.books.get_mut("NO").unwrap().best_ask = None;
         assert!(matches!(action_of(&all(&mut s, Instant::now()), "y"), QuoteAction::Place { .. }));
     }
@@ -1093,7 +1093,7 @@ mod tests {
     #[test]
     fn own_cancels_deactivations_and_re_pegs_pass_through() {
         let now = Instant::now();
-        // Paused with a live order: deactivates as before, alone or not.
+        // Paused with a live order: deactivates, alone or not.
         let mut s = state(dec!(100), dec!(0));
         s.configs[0].paused = true;
         live(&mut s, "y", dec!(0.94));

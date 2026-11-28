@@ -1,10 +1,10 @@
 //! Private-file helpers for everything the bot persists under its data dir.
 //!
 //! Secrets (wallet ciphertext, master key, admin hash, setup code) must never
-//! exist on disk with looser permissions than 0600, not even briefly. The old
-//! pattern — `fs::write` then `chmod 0600` — creates the file with the default
-//! umask (typically 0644) first, leaving a window where another local user can
-//! read it. Here the file is created with its final mode in the same
+//! exist on disk with looser permissions than 0600, not even briefly.
+//! `fs::write` then `chmod 0600` would create the file with the default umask
+//! (typically 0644) first, leaving a window where another local user can read
+//! it. Here the file is created with its final mode in the same
 //! `open(2)` call (`O_CREAT|O_EXCL`, mode 0600), written, fsynced, and only then
 //! renamed into place, so a reader sees either the old file or the complete new
 //! one — never a partial or world-readable one.

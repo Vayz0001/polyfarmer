@@ -23,11 +23,9 @@ const RETRY_ATTEMPTS: u32 = 3;
 const _: () = assert!(RETRY_ATTEMPTS >= 1);
 
 // Time limits on calls to Polymarket. The SDK's HTTP client has none, so a
-// stalled connection would otherwise wait forever: a hung heartbeat would never
-// count as a failure, a hung placement would leave its leg "Placing" for good,
-// and a hung cancel would block a shutdown or a Remove. Each retry attempt gets
-// its own limit. A timeout's message says "timed out", which the placer treats
-// as an outage (placer::is_transient), not a rejection.
+// stalled call would otherwise wedge the heartbeat, a placement or a cancel.
+// Each retry attempt gets its own limit. A timeout's message says "timed out",
+// which the placer treats as an outage (placer::is_transient), not a rejection.
 const HEARTBEAT_LIMIT: Duration = Duration::from_secs(5);
 const CANCEL_LIMIT: Duration = Duration::from_secs(10);
 const LIST_LIMIT: Duration = Duration::from_secs(10);
@@ -165,7 +163,6 @@ impl Executor {
     pub async fn place_buy_order(&self, token_id: &str, price: Decimal, size: Decimal) -> Result<String> {
         use polymarket_client_sdk_v2::clob::types::Side;
 
-        // SDK V2 builders take a typed U256 token id; our token_id is a decimal string.
         let token_id_u256 = parse_token(token_id)?;
         // The SDK compares decimal places, not value: 0.210 fails on a 0.01
         // tick although it is 0.21. Drop trailing zeros first.
@@ -341,7 +338,6 @@ impl Executor {
     /// Retries each page fetch on transient errors.
     pub async fn fetch_open_order_ids(&self, token_id: &str) -> Result<Vec<String>> {
         use polymarket_client_sdk_v2::clob::types::request::OrdersRequest;
-        // SDK V2: asset_id is a typed U256; parse our decimal-string token id.
         let asset_id = U256::from_str(token_id).map_err(|e| eyre::eyre!("invalid token_id {token_id}: {e}"))?;
         let req = OrdersRequest::builder().asset_id(asset_id).build();
         let mut ids = Vec::new();
@@ -661,8 +657,8 @@ mod tests {
         assert!(msg(accepted_order_id(false, "0xabc", Some(""))).contains("rejected"));
     }
 
-    /// The startup check used to log a market whose open orders couldn't be
-    /// listed and carry on as if it had none — then trade beside its old orders.
+    /// A market whose open orders can't be listed fails the startup check:
+    /// carrying on as if it had none would trade beside its old orders.
     #[test]
     fn a_market_that_cannot_be_listed_fails_the_startup_check() {
         let ok = |v: &[&str]| Ok(v.iter().map(|s| s.to_string()).collect::<Vec<_>>());

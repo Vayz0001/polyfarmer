@@ -816,7 +816,7 @@ mod tests {
         let lone = with_pair_wait(idle(false), Some(PairWait::NoOtherSide));
         assert_eq!((lone.status_label, lone.status_class), ("Needs both sides", "warn"));
         assert!(lone.status_title.contains("only this side is farmed"));
-        // Any other status wins: a paused or live leg reads as before.
+        // Any other status wins: a paused or live leg keeps its own label.
         let paused = with_pair_wait(idle(true), Some(PairWait::NoOtherSide));
         assert_eq!(paused.status_label, "Paused");
         let live = with_pair_wait(leg("y", "yes", 0, Some(dec!(0.94)), dec!(0.95)), Some(PairWait::OtherSide));

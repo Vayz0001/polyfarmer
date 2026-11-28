@@ -418,8 +418,7 @@ async fn repeated_wrong_passwords_lock_out_login() {
             .unwrap()
         }
     };
-    // 15 wrong guesses in a row from a proxied/unknown peer → locked (this limiter
-    // used to reset its counter on every check, so it never engaged).
+    // 15 wrong guesses in a row from a proxied/unknown peer → locked.
     for _ in 0..15 {
         let res = attempt("definitely-wrong".into()).await;
         assert!(body_string(res).await.contains("Incorrect password"));
@@ -1065,8 +1064,8 @@ async fn start_farming_rejects_hostile_values_with_a_message_not_a_panic() {
     };
     let cases = [
         // (price, size, depth, volatility, expiry) -> text the error must contain
-        (start("18", "100", "0", "", "7日"), "Invalid expiry"), // multibyte: used to panic
-        (start("18", "100", "0", "", "99999999999999d"), "Invalid expiry"), // duration overflow: used to panic
+        (start("18", "100", "0", "", "7日"), "Invalid expiry"), // multibyte
+        (start("18", "100", "0", "", "99999999999999d"), "Invalid expiry"), // duration overflow
         (start("18", "100", "0", "", "99999999999999999999d"), "Invalid expiry"),
         (start("18", "100", "0", "", "💥"), "Invalid expiry"),
         (start("18", "79228162514264337593543950335", "0", "", "7d"), "Order size"), // Decimal-max size
