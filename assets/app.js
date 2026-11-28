@@ -729,8 +729,12 @@
     if (b && bids) b.scrollTop = Math.max(0, bids.offsetTop - b.clientHeight / 2);
   }
 
+  // `shown` is the side and grouping the ladder was asked for. A reply asked
+  // before a Yes/No or grouping switch can land after it (a slow REST reply):
+  // it would put the other outcome's ladder under this one, so it is dropped.
   function mvSwapBook(html, shown) {
     var b = $("#book"); if (!b) return;
+    if (shown.side !== MV.side || shown.group !== MV.group) return;
     MV.shown = shown;
     var top = b.scrollTop;
     b.innerHTML = html;
