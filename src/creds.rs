@@ -541,4 +541,26 @@ mod tests {
 
         let _ = fs::remove_dir_all(&dir);
     }
+
+    /// A new random key can never decrypt the existing wallet.enc, so writing one
+    /// would only hide the real problem behind a decrypt error later.
+    #[test]
+    fn missing_master_key_with_saved_wallet_is_an_error_and_writes_nothing() {
+        let dir = temp_dir();
+        CredentialStore::open(&dir).unwrap().set_wallet("0xprivkey", "0xWalletAddr").unwrap();
+        let wallet_before = fs::read(dir.join("wallet.enc")).unwrap();
+        fs::remove_file(dir.join("master.key")).unwrap();
+
+        let Err(e) = CredentialStore::open(&dir) else {
+            panic!("open must fail when master.key is missing but wallet.enc exists");
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("master.key is missing but wallet.enc exists"), "{msg}");
+        assert!(msg.contains(&dir.display().to_string()), "names the data dir: {msg}");
+        assert!(msg.contains("Restore master.key from the same backup as wallet.enc"), "{msg}");
+        assert!(!dir.join("master.key").exists(), "no replacement key is written");
+        assert_eq!(fs::read(dir.join("wallet.enc")).unwrap(), wallet_before, "wallet.enc is untouched");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
