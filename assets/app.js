@@ -24,7 +24,7 @@
       return r;
     });
   }
-  function fetchFragment(url) { return fetchFragmentResponse(url).then(function (r) { return r.text(); }); }
+  function fetchFragment(url, signal) { return fetchFragmentResponse(url, signal).then(function (r) { return r.text(); }); }
   // Older than a week: the date, and (where there's room) the time of day,
   // which the day headings above a feed don't give.
   function relTime(iso, withTime) {
@@ -530,7 +530,7 @@
       range: "1w",
       es: null,
       gotEvent: false,
-      fallbackTimer: null,
+      poll: null,
       scrolled: false,
       book: null
     };
@@ -752,33 +752,63 @@
 
   function mvBookParams() { return "slug=" + encodeURIComponent(MV.slug) + "&side=" + MV.side + (MV.group ? "&group=" + encodeURIComponent(MV.group) : ""); }
   function mvAsked() { return { side: MV.side, group: MV.group }; }
-  function mvFetchBook() {
+  // Settles (never rejects) once the reply is swapped in or has failed.
+  function mvFetchBook(signal) {
     var asked = mvAsked();
-    fetchFragment("/markets/view/book?" + mvBookParams()).then(function (h) { mvSwapBook(h, asked); }).catch(function () {});
+    return fetchFragment("/markets/view/book?" + mvBookParams(), signal).then(function (h) { mvSwapBook(h, asked); }).catch(function () {});
   }
 
-  // Live book over SSE; if no update arrives, fall back to REST polling until it does.
+  // REST polling while the live book is down, one request at a time: the next
+  // poll is due 3 s after the last one settled, so a slow server never gets a
+  // pile of them holding the browser's few connections per host. A poll that
+  // hangs is given up after BOOK_POLL_TIMEOUT_MS; stopping aborts the one in
+  // flight. At most one chain: the stream's error handler runs again on every
+  // failed reconnect.
+  var BOOK_POLL_TIMEOUT_MS = 15000;
+  function mvStartPolling() {
+    if (!MV.poll) { MV.poll = { timer: null, ctrl: null }; mvPollLater(MV.poll); }
+    mvLive("polling");
+  }
+  function mvPollLater(poll) {
+    poll.timer = setTimeout(function () {
+      var ctrl = (poll.ctrl = new AbortController());
+      var giveUp = setTimeout(function () { ctrl.abort(); }, BOOK_POLL_TIMEOUT_MS);
+      mvFetchBook(ctrl.signal).then(function () {
+        clearTimeout(giveUp);
+        if (MV.poll === poll) mvPollLater(poll);
+      });
+    }, 3000);
+  }
+  function mvStopPolling() {
+    if (!MV.poll) return;
+    clearTimeout(MV.poll.timer);
+    if (MV.poll.ctrl) MV.poll.ctrl.abort();
+    MV.poll = null;
+  }
+
+  // Live book over SSE. While it is down (no update within 8 s of connecting,
+  // or a stream error, also after it has worked) poll over REST; the next
+  // update from the stream stops that.
   function mvConnect() {
     if (MV.es) MV.es.close();
-    clearInterval(MV.fallbackTimer);
+    mvStopPolling();
     MV.gotEvent = false;
     mvLive("connecting");
-    if (!window.EventSource) { MV.fallbackTimer = setInterval(mvFetchBook, 3000); mvLive("polling"); return; }
+    if (!window.EventSource) { mvStartPolling(); return; }
     var asked = mvAsked(), es = (MV.es = new EventSource("/markets/view/book/stream?" + mvBookParams()));
     es.addEventListener("book", function (e) {
-      if (!MV.gotEvent) { MV.gotEvent = true; clearInterval(MV.fallbackTimer); }
+      MV.gotEvent = true;
+      mvStopPolling();
       mvLive("live");
       mvSwapBook(e.data, asked);
     });
-    es.onerror = function () { mvLive("polling"); };
-    setTimeout(function () {
-      if (!MV.gotEvent && MV.es === es) { mvLive("polling"); MV.fallbackTimer = setInterval(function () { if (!MV.gotEvent) mvFetchBook(); }, 3000); }
-    }, 8000);
+    es.onerror = function () { if (MV.es === es) mvStartPolling(); };
+    setTimeout(function () { if (!MV.gotEvent && MV.es === es) mvStartPolling(); }, 8000);
   }
 
   function mvDisconnect() {
     if (MV.es) { MV.es.close(); MV.es = null; }
-    clearInterval(MV.fallbackTimer);
+    mvStopPolling();
   }
 
   function mvSyncGroup() { $$("#group button").forEach(function (b) { b.classList.toggle("selected", b.dataset.group === MV.group || (!MV.group && b === $("#group button"))); }); }
