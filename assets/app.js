@@ -757,28 +757,37 @@
     fetchFragment("/markets/view/book?" + mvBookParams()).then(function (h) { mvSwapBook(h, asked); }).catch(function () {});
   }
 
-  // Live book over SSE; if no update arrives, fall back to REST polling until it does.
+  // REST polling while the live book is down. At most one timer: the stream's
+  // error handler runs again on every failed reconnect.
+  function mvStartPolling() {
+    if (!MV.fallbackTimer) MV.fallbackTimer = setInterval(mvFetchBook, 3000);
+    mvLive("polling");
+  }
+  function mvStopPolling() { clearInterval(MV.fallbackTimer); MV.fallbackTimer = null; }
+
+  // Live book over SSE. While it is down (no update within 8 s of connecting,
+  // or a stream error, also after it has worked) poll over REST; the next
+  // update from the stream stops that.
   function mvConnect() {
     if (MV.es) MV.es.close();
-    clearInterval(MV.fallbackTimer);
+    mvStopPolling();
     MV.gotEvent = false;
     mvLive("connecting");
-    if (!window.EventSource) { MV.fallbackTimer = setInterval(mvFetchBook, 3000); mvLive("polling"); return; }
+    if (!window.EventSource) { mvStartPolling(); return; }
     var asked = mvAsked(), es = (MV.es = new EventSource("/markets/view/book/stream?" + mvBookParams()));
     es.addEventListener("book", function (e) {
-      if (!MV.gotEvent) { MV.gotEvent = true; clearInterval(MV.fallbackTimer); }
+      MV.gotEvent = true;
+      mvStopPolling();
       mvLive("live");
       mvSwapBook(e.data, asked);
     });
-    es.onerror = function () { mvLive("polling"); };
-    setTimeout(function () {
-      if (!MV.gotEvent && MV.es === es) { mvLive("polling"); MV.fallbackTimer = setInterval(function () { if (!MV.gotEvent) mvFetchBook(); }, 3000); }
-    }, 8000);
+    es.onerror = function () { if (MV.es === es) mvStartPolling(); };
+    setTimeout(function () { if (!MV.gotEvent && MV.es === es) mvStartPolling(); }, 8000);
   }
 
   function mvDisconnect() {
     if (MV.es) { MV.es.close(); MV.es = null; }
-    clearInterval(MV.fallbackTimer);
+    mvStopPolling();
   }
 
   function mvSyncGroup() { $$("#group button").forEach(function (b) { b.classList.toggle("selected", b.dataset.group === MV.group || (!MV.group && b === $("#group button"))); }); }
