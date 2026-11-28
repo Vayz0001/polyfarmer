@@ -94,6 +94,20 @@ pub fn distance(d: Decimal) -> Result<Decimal, String> {
     }
 }
 
+/// `value` (price units) if it is a whole number of the market's `tick`s, else
+/// "`what` must be in steps of <tick>¢ on this market." The engine rests a leg
+/// at best bid − distance rounded down to the tick, so a distance between ticks
+/// would quietly rest a tick further away than typed. A tick of 0 or below is
+/// passed through: `MarketConfig::validate` refuses that leg with its own message.
+pub fn on_tick(value: Decimal, tick: Decimal, what: &str) -> Result<Decimal, String> {
+    match value.checked_rem(tick) {
+        Some(r) if tick > dec!(0) && !r.is_zero() => {
+            Err(format!("{what} must be in steps of {}¢ on this market.", (tick * dec!(100)).normalize()))
+        }
+        _ => Ok(value),
+    }
+}
+
 fn distance_cents_in_range(c: Decimal) -> bool {
     c > dec!(0) && c <= MAX_DISTANCE_CENTS
 }
@@ -235,6 +249,32 @@ mod tests {
         assert_eq!(distance(dec!(0)), Err(refusal.clone()));
         assert_eq!(distance(dec!(-0.01)), Err(refusal.clone()));
         assert_eq!(distance(Decimal::MAX), Err(refusal), "no overflow panic");
+    }
+
+    #[test]
+    fn values_must_be_whole_ticks() {
+        assert_eq!(on_tick(dec!(0.02), dec!(0.01), "Distance"), Ok(dec!(0.02)));
+        assert_eq!(on_tick(dec!(0.015), dec!(0.001), "Distance"), Ok(dec!(0.015)));
+        assert_eq!(on_tick(dec!(0.0155), dec!(0.0001), "Distance"), Ok(dec!(0.0155)));
+        assert_eq!(
+            on_tick(dec!(0.535), dec!(0.01), "Your price"),
+            Err("Your price must be in steps of 1¢ on this market.".into())
+        );
+        assert_eq!(
+            on_tick(dec!(0.0155), dec!(0.01), "Distance"),
+            Err("Distance must be in steps of 1¢ on this market.".into())
+        );
+        assert_eq!(
+            on_tick(dec!(0.0155), dec!(0.001), "Distance"),
+            Err("Distance must be in steps of 0.1¢ on this market.".into())
+        );
+        assert_eq!(
+            on_tick(dec!(0.00015), dec!(0.0001), "Distance"),
+            Err("Distance must be in steps of 0.01¢ on this market.".into())
+        );
+        // A broken tick is left to `MarketConfig::validate`; no division by zero.
+        assert_eq!(on_tick(dec!(0.0155), dec!(0), "Distance"), Ok(dec!(0.0155)));
+        assert_eq!(on_tick(dec!(0.0155), dec!(-0.01), "Distance"), Ok(dec!(0.0155)));
     }
 
     #[test]

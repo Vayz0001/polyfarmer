@@ -56,6 +56,10 @@ anything may change between releases.
 - **A click on the previous outcome's order book no longer prices your order.** Right after switching Yes/No, the
   old ladder stays on screen until the new one loads; clicking one of its rows put that outcome's price into the
   order form. Those clicks are now ignored until the right ladder is shown.
+- **Edit and Start refuse a distance or price between the market's ticks.** Edit accepted e.g. 1.55¢ on a 1¢ market,
+  and Start an off-tick price, and the order then quietly rested one tick further from the best bid than typed. Both
+  now say which steps the market allows, and the Edit box steps by the market's tick. A leg already saved off-tick can
+  still save other edits.
 
 ## [0.1.1] - 2026-11-27
 

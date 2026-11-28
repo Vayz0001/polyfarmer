@@ -18,7 +18,7 @@
       </div>
       <div class="field">
         <label class="label" for="e-dist">Distance <span class="hint">¢ below best bid</span></label>
-        <div class="affix"><input class="input mono" id="e-dist" name="distance_cents" type="number" step="any" min="0.1" value="{{ distance_cents }}" required /><span class="suf">¢</span></div>
+        <div class="affix"><input class="input mono" id="e-dist" name="distance_cents" type="number" {% if let Some(step) = distance_step %}step="{{ step }}" min="{{ step }}"{% else %}step="any" min="0.01"{% endif %} value="{{ distance_cents }}" required /><span class="suf">¢</span></div>
       </div>
     </div>
     <p class="help">The engine keeps this leg's bid exactly this far below the best bid, following it as it moves.</p>
