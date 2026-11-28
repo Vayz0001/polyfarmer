@@ -60,6 +60,9 @@ anything may change between releases.
   and Start an off-tick price, and the order then quietly rested one tick further from the best bid than typed. Both
   now say which steps the market allows, and the Edit box steps by the market's tick. A leg already saved off-tick can
   still save other edits.
+- **Re-pegs and dashboard changes no longer re-list every market's open orders.** Each re-peg, resume or edit made
+  the bot list the open orders of every farmed market, so many re-pegs at once sent a burst of requests to
+  Polymarket. That check now runs on the 30-second timer only; quoting still reacts at once.
 
 ## [0.1.1] - 2026-11-27
 
