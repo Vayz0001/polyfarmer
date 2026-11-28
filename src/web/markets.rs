@@ -1155,14 +1155,18 @@ fn start_configs(
         .zip(books)
         .filter_map(|(cfg, book)| min_order_shortfall(cfg, book))
         .max_by_key(|(needed_usd, _)| *needed_usd);
-    if let Some((_, refusal)) = shortfall {
-        return Err(refusal);
+    // The form's size is the total, split across both sides.
+    if let Some((needed_usd, reason)) = shortfall {
+        return Err(match other_book {
+            Some(_) => format!("{reason} Enter at least ${:.2} (split across both sides).", needed_usd * dec!(2)),
+            None => format!("{reason} Enter at least ${needed_usd:.2}."),
+        });
     }
     Ok(configs)
 }
 
 /// The per-side size `cfg` needs to meet `book`'s minimum order, and why its
-/// own is too small, when it is. Shares are counted as the engine sizes the
+/// own is too small, when it is (the caller says what to enter). Shares are counted as the engine sizes the
 /// order, at the price the leg rests at. A minimum of 0 means none is known
 /// (only books built from the live feed lack one; Start reads the REST book).
 fn min_order_shortfall(cfg: &MarketConfig, book: &market_data::BookSnapshot) -> Option<(Decimal, String)> {
@@ -1181,7 +1185,7 @@ fn min_order_shortfall(cfg: &MarketConfig, book: &market_data::BookSnapshot) -> 
         needed_usd,
         format!(
             "Too small for this market: ${:.2} per side is {} shares of {} at {}¢; Polymarket's minimum order is {} \
-             shares. Use at least ${needed_usd:.2} per side.",
+             shares.",
             cfg.order_size,
             shares.round_dp_with_strategy(1, RoundingStrategy::ToZero),
             cfg.token_label,
@@ -2334,18 +2338,18 @@ mod tests {
         assert_eq!(
             refusal,
             "Too small for this market: $1.00 per side is 1.6 shares of No at 60¢; Polymarket's minimum order is 5 \
-             shares. Use at least $3.00 per side."
+             shares. Enter at least $6.00 (split across both sides)."
         );
 
         // One side is big enough, the other isn't: $2.50 is 6.5 Yes shares but 4.1 No shares.
         let refusal = start_configs(&mr, 0, &yes, Some(&no), &start_settings(dec!(0.02), dec!(2.5))).unwrap_err();
         assert!(refusal.contains("$2.50 per side is 4.1 shares of No at 60¢"), "{refusal}");
-        assert!(refusal.ends_with("Use at least $3.00 per side."), "{refusal}");
+        assert!(refusal.ends_with("Enter at least $6.00 (split across both sides)."), "{refusal}");
 
         // One side only.
         let refusal = start_configs(&mr, 0, &yes, None, &start_settings(dec!(0.02), dec!(1))).unwrap_err();
         assert!(refusal.contains("$1.00 per side is 2.6 shares of Yes at 38¢"), "{refusal}");
-        assert!(refusal.ends_with("Use at least $1.90 per side."), "{refusal}");
+        assert!(refusal.ends_with("Enter at least $1.90."), "{refusal}");
 
         // A decimal price: 38.25¢ on a 0.1¢ tick rests at 38.2¢.
         let fine_tick = MarketRef { tick_size: dec!(0.001), ..two_outcome_market() };
@@ -2355,8 +2359,51 @@ mod tests {
         assert_eq!(
             refusal,
             "Too small for this market: $1.00 per side is 2.6 shares of Yes at 38.2¢; Polymarket's minimum order is 5 \
-             shares. Use at least $1.91 per side."
+             shares. Enter at least $1.91."
         );
+    }
+
+    /// The amount a refusal says to enter, as typed in the form's size box.
+    fn amount_to_enter(refusal: &str) -> Decimal {
+        let after = refusal.split("Enter at least $").nth(1).unwrap();
+        // "$1.90." or "$3.82 (split…": the amount, without the sentence's full stop.
+        after.split_whitespace().next().unwrap().trim_end_matches('.').parse().unwrap()
+    }
+
+    /// Entering the amount a refusal names starts the farm: for both sides the
+    /// form's size is the total, so it covers each side's minimum once split.
+    #[test]
+    fn the_amount_a_too_small_refusal_names_is_enough() {
+        let fine_tick = MarketRef { tick_size: dec!(0.001), ..two_outcome_market() };
+        let mr = two_outcome_market();
+        let cases = [
+            // (market, chosen side's book, other side's book, distance, total typed)
+            (&fine_tick, book_at(dec!(0.402), dec!(5)), Some(book_at(dec!(0.402), dec!(5))), dec!(0.0195), dec!(2)),
+            (&fine_tick, book_at(dec!(0.402), dec!(5)), None, dec!(0.0195), dec!(1)),
+            (&mr, book_at(dec!(0.40), dec!(5)), Some(book_at(dec!(0.62), dec!(5))), dec!(0.02), dec!(5)),
+            (&mr, book_at(dec!(0.40), dec!(5)), None, dec!(0.02), dec!(1)),
+        ];
+        for (market, book, other, distance, typed) in cases {
+            let per_side = |total: Decimal| if other.is_some() { total / dec!(2) } else { total };
+            let refusal = start_configs(market, 0, &book, other.as_ref(), &start_settings(distance, per_side(typed)))
+                .unwrap_err();
+            let enter = amount_to_enter(&refusal);
+            if other.is_some() {
+                assert!(refusal.ends_with("(split across both sides)."), "{refusal}");
+            }
+            let started = start_configs(market, 0, &book, other.as_ref(), &start_settings(distance, per_side(enter)));
+            assert!(started.is_ok(), "entering ${enter} after {refusal:?} must start: {started:?}");
+        }
+        // The decimal-price example, both sides: $1.91 per side.
+        let both = start_configs(
+            &fine_tick,
+            0,
+            &book_at(dec!(0.402), dec!(5)),
+            Some(&book_at(dec!(0.402), dec!(5))),
+            &start_settings(dec!(0.0195), dec!(1)),
+        )
+        .unwrap_err();
+        assert!(both.ends_with("Enter at least $3.82 (split across both sides)."), "{both}");
     }
 
     #[test]
