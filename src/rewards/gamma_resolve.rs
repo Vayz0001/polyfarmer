@@ -129,7 +129,11 @@ static MARKETS: LazyLock<Arc<TtlCache<MarketRef>>> = LazyLock::new(|| Arc::new(T
 
 /// Load one binary market by its market slug — always a fresh Gamma call.
 pub async fn market_by_slug(slug: &str) -> Result<MarketRef> {
-    let m = GAMMA.market_by_slug(&MarketBySlugRequest::builder().slug(slug.to_string()).build()).await?;
+    market_from(&GAMMA, slug).await
+}
+
+async fn market_from(gamma: &GammaClient, slug: &str) -> Result<MarketRef> {
+    let m = gamma.market_by_slug(&MarketBySlugRequest::builder().slug(slug.to_string()).build()).await?;
     MarketRef::from_market(m)
 }
 
@@ -156,16 +160,16 @@ pub async fn resolve_url(url: &str) -> Result<Resolved> {
             .filter(|mr| valid_slug(&mr.market_slug))
             .map(|mr| Resolved::Single(Box::new(mr)))
             .ok_or_else(|| eyre::eyre!("Polymarket has no tradeable market called \"{slug}\"")),
-        Link::Event(slug) => resolve_event(&slug).await,
+        Link::Event(slug) => resolve_event(&GAMMA, &slug).await,
     }
 }
 
-async fn resolve_event(slug: &str) -> Result<Resolved> {
-    let event = match GAMMA.event_by_slug(&EventBySlugRequest::builder().slug(slug.to_string()).build()).await {
+async fn resolve_event(gamma: &GammaClient, slug: &str) -> Result<Resolved> {
+    let event = match gamma.event_by_slug(&EventBySlugRequest::builder().slug(slug.to_string()).build()).await {
         Ok(e) => e,
         // Older links put a standalone market's own slug after /event/.
         Err(event_err) => {
-            let standalone = market_by_slug(slug).await.ok().filter(|mr| valid_slug(&mr.market_slug));
+            let standalone = market_from(gamma, slug).await.ok().filter(|mr| valid_slug(&mr.market_slug));
             return standalone.map(|mr| Resolved::Single(Box::new(mr))).ok_or_else(|| {
                 if event_err.to_string().contains("404") {
                     eyre::eyre!(
@@ -519,5 +523,125 @@ mod tests {
         sort_candidates(&mut refs, "game");
         let order: Vec<&str> = refs.iter().map(|m| m.market_slug.as_str()).collect();
         assert_eq!(order, ["game", "game-1", "game-kills", "game-baron", "game-dragon"]);
+    }
+
+    /// A Gamma host on loopback that accepts connections and never answers.
+    async fn silent_gamma() -> GammaClient {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+        GammaClient::new(&format!("http://{addr}/")).unwrap()
+    }
+
+    /// A Gamma host on loopback: every event lookup is a 404, every market
+    /// lookup gets `status` and `body`.
+    async fn answering_gamma(status: &'static str, body: String) -> GammaClient {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut req = Vec::new();
+                    let mut buf = [0u8; 1024];
+                    while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match sock.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => req.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    let (status, body) =
+                        if req.starts_with(b"GET /events/") { ("404 Not Found", "{}".to_string()) } else { (status, body) };
+                    let reply = format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(reply.as_bytes()).await;
+                });
+            }
+        });
+        GammaClient::new(&format!("http://{addr}/")).unwrap()
+    }
+
+    fn market_json(slug: &str) -> String {
+        serde_json::json!({
+            "id": "1",
+            "slug": slug,
+            "question": "Will it?",
+            "conditionId": format!("0x{}", "ab".repeat(32)),
+            "outcomes": "[\"Yes\",\"No\"]",
+            "clobTokenIds": "[\"11\",\"22\"]",
+            "orderPriceMinTickSize": 0.01,
+        })
+        .to_string()
+    }
+
+    /// Far longer than any sane Gamma limit: reaching it means the call hung.
+    const HUNG: Duration = Duration::from_secs(3600);
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_gamma_market_lookup_ends_in_an_error() {
+        let gamma = silent_gamma().await;
+        let r = tokio::time::timeout(HUNG, market_from(&gamma, "x")).await;
+        let err = r.expect("the lookup must end on its own").err().expect("a timeout is an error");
+        assert!(err.to_string().contains("timed out"), "{err}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_gamma_event_lookup_ends_in_an_error() {
+        let gamma = silent_gamma().await;
+        let r = tokio::time::timeout(HUNG, resolve_event(&gamma, "x")).await;
+        let err = r.expect("the lookup must end on its own").err().expect("a timeout is an error");
+        assert!(err.to_string().contains("timed out"), "{err}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_background_refresh_frees_its_slot() {
+        let gamma = silent_gamma().await;
+        let cache: Arc<TtlCache<MarketRef>> = Arc::new(TtlCache::new(MARKET_TTL));
+        assert!(cache.get_swr("x", move || async move { market_from(&gamma, "x").await }).is_none());
+        tokio::time::sleep(HUNG).await;
+        // The silent refresh has ended, so this read starts a new one.
+        let fresh = market("x", dec!(0), None, None);
+        assert!(cache.get_swr("x", move || async move { Ok::<_, eyre::Report>(fresh) }).is_none());
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(cache.peek("x").map(|(m, _)| m.market_slug), Some("x".to_string()));
+    }
+
+    #[tokio::test]
+    async fn an_answering_gamma_still_resolves_the_market() {
+        let gamma = answering_gamma("200 OK", market_json("x")).await;
+        let mr = market_from(&gamma, "x").await.unwrap();
+        assert_eq!(mr.market_slug, "x");
+        assert_eq!(mr.outcomes, ["Yes", "No"]);
+        assert_eq!(mr.token_ids, ["11", "22"]);
+        assert_eq!(mr.tick_size, dec!(0.01));
+    }
+
+    #[tokio::test]
+    async fn a_missing_event_still_says_so_and_a_standalone_market_still_resolves() {
+        let gamma = answering_gamma("404 Not Found", "{}".to_string()).await;
+        let err = resolve_event(&gamma, "x").await.err().unwrap().to_string();
+        assert!(err.contains("no market or event called"), "{err}");
+        // An event 404 whose slug is a standalone market falls back to it.
+        let gamma = answering_gamma("200 OK", market_json("x")).await;
+        let Resolved::Single(mr) = resolve_event(&gamma, "x").await.unwrap() else { panic!("one market") };
+        assert_eq!(mr.market_slug, "x");
+    }
+
+    #[tokio::test]
+    async fn a_failed_lookup_still_serves_the_stale_cached_market() {
+        let cache: TtlCache<MarketRef> = TtlCache::new(Duration::from_millis(5));
+        cache.put("x", market("x", dec!(0), None, None));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let gamma = answering_gamma("500 Internal Server Error", "{}".to_string()).await;
+        let mr = cache.get_or_fetch("x", || market_from(&gamma, "x")).await.unwrap();
+        assert_eq!(mr.market_slug, "x");
     }
 }
