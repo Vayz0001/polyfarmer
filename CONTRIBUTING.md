@@ -105,9 +105,10 @@ committed; commit it with any dependency change. Cargo won't pick a crate versio
   `CHANGELOG.md` under "Unreleased") in the same pull request. Screenshots in `docs/screenshots` come from
   demo mode.
 - **Dependencies:** add one only when it earns its place, and say why in the pull request.
-  `alloy`, `reqwest` and `polymarket_client_sdk_v2` are pinned together because the Polymarket SDK
-  requires specific major versions; do not bump their majors on their own. Any new license or
-  advisory has to pass `cargo deny check`.
+  `alloy` and `polymarket_client_sdk_v2` majors move together because we share the SDK's `alloy`;
+  do not bump either major on its own. `reqwest` is not pinned by the SDK: ours is 0.12, the SDK's
+  is 0.13, and the binary carries both. Moving ours to 0.13 is a separate change that needs the
+  owner's approval. Any new license or advisory has to pass `cargo deny check`.
 - **Settings:** if you add an environment variable, document it in `.env.example`; a test fails
   otherwise.
 
