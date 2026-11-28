@@ -27,6 +27,9 @@ anything may change between releases.
 - **Live updates stop when you sign out.** An open page kept receiving alerts, status and the market's order book
   after you logged out, changed the password on another device, or the session expired. The streams now end within
   10 seconds, and the page goes to the login screen.
+- **A paused leg whose order is still on the book says "Pausing".** It used to say "Paused: no order" while
+  Polymarket hadn't yet confirmed the cancel, so a real order could be resting behind that label. It now shows
+  "Pausing" until the order is gone. The "Paused" hint also says that Activity tells you why the bot paused a leg.
 
 ## [0.1.1] - 2026-11-27
 

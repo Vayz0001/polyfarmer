@@ -1673,7 +1673,10 @@ async fn markets_markup_supports_focus_restore_and_clear_names() {
     assert!(table.contains("id=\"mkt-0xabc-name\"") && table.contains("id=\"mkt-0xabc-ext\""));
     assert!(table.contains("data-confirm-label=\"Remove\""), "the dialog names the action");
     assert_eq!(table.matches("class=\"actions-col\"").count(), 2, "header + one row");
-    assert!(table.contains("title=\"Paused: no order. Resume to quote again.\""), "status explained on hover");
+    assert!(
+        table.contains("title=\"Paused: no order. Resume to quote again. If the bot paused it, Activity says why.\""),
+        "status explained on hover"
+    );
 
     let (_, page, _) = get_authed(&app, &cookie, "/markets").await;
     assert!(page.contains("Find markets") && page.contains(">Open link</button>"));
