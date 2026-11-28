@@ -65,6 +65,8 @@ anything may change between releases.
   Polymarket. That check now runs on the 30-second timer only; quoting still reacts at once.
 - **Corrected the docs on reqwest.** They said the Polymarket SDK pins our `reqwest`; it doesn't: we use 0.12 and the
   SDK uses 0.13, so the bot builds both. No dependency changed.
+- **A Gamma lookup that never answers no longer freezes a market's dashboard data.** Market and event lookups now give
+  up after 10 seconds. Before, a hung background refresh kept that market's zone and data stale until a restart.
 
 ## [0.1.1] - 2026-11-27
 
