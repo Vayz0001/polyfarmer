@@ -12,6 +12,10 @@ anything may change between releases.
 - **Start refuses an order too small for Polymarket.** It now checks each side's shares, at the price the order would
   rest at, against the market's minimum order (5 shares on most markets) and says how much to enter. Before, the leg
   was saved anyway, Polymarket rejected its order three times and the bot paused it.
+- **An order still being cancelled no longer counts as other people's depth.** With two legs on the same outcome,
+  one leg's order that was being cancelled (sent but not yet confirmed, which can take 30 seconds or more) counted as
+  depth ahead of the other leg, which could then place with less real depth in front of it than you set. It now
+  counts as yours, at the price and size it was placed with, until Polymarket confirms it gone.
 
 ## [0.1.1] - 2026-11-27
 

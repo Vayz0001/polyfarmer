@@ -90,6 +90,17 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
     s.place_outage.retain(|id, _| ids.contains(id));
     let tokens: HashSet<String> = s.configs.iter().map(|c| c.token_id.clone()).collect();
     s.reconcile_tokens.retain(|t| tokens.contains(t));
+    // Forget orders no leg holds any more (cancel confirmed, filled, leg
+    // removed), whichever path let go of them.
+    let held: HashSet<&str> = s
+        .order_status
+        .values()
+        .filter_map(|st| match st {
+            OrderStatus::Live { order_id, .. } | OrderStatus::Cancelling { order_id, .. } => Some(order_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    s.placed_orders.retain(|order_id, _| held.contains(order_id.as_str()));
 
     let mut out = Vec::new();
     for i in 0..s.configs.len() {
@@ -132,15 +143,17 @@ pub fn decide(s: &mut AppState, select: impl Fn(&MarketConfig) -> bool, now: Ins
     out
 }
 
-/// Our own orders resting on `token` (price, USD): live ones and ones being
-/// placed (the order may already be on the book). A leg being cancelled has
-/// no known price and leaves the book within moments; it is not counted.
+/// Our own orders resting on `token` (price, USD): live ones, ones being
+/// placed (the order may already be on the book), and ones being cancelled,
+/// at the price and size they were placed with: a cancel can stay unconfirmed
+/// for 30 s and more, and the order rests in the book until it is confirmed.
 pub fn own_orders(s: &AppState, token: &str) -> Vec<(Decimal, Decimal)> {
     s.configs
         .iter()
         .filter(|c| c.token_id == token)
         .filter_map(|c| match s.order_status.get(&c.id) {
             Some(OrderStatus::Live { price, .. } | OrderStatus::Placing { price }) => Some((*price, c.order_size)),
+            Some(OrderStatus::Cancelling { order_id, .. }) => s.placed_orders.get(order_id).map(|o| (o.price, o.usd)),
             _ => None,
         })
         .collect()
@@ -437,6 +450,31 @@ mod tests {
 
     fn all(s: &mut AppState, now: Instant) -> Vec<Decision> {
         decide(s, |_| true, now)
+    }
+
+    /// A placed order's price is kept only while a leg holds that order (live
+    /// or being cancelled): once no leg does (its cancel confirmed by any path,
+    /// or its leg removed) the next pass forgets it.
+    #[test]
+    fn a_placed_order_is_forgotten_once_no_leg_holds_it() {
+        use crate::engine::ws_manager::PlacedOrder;
+        let mut s = state(dec!(100), dec!(100));
+        for (order, price) in [("ord-y", dec!(0.94)), ("ord-n", dec!(0.03)), ("confirmed", dec!(0.93))] {
+            s.placed_orders.insert(order.into(), PlacedOrder { price, usd: dec!(50) });
+        }
+        live(&mut s, "y", dec!(0.94));
+        s.order_status
+            .insert("n".into(), OrderStatus::Cancelling { order_id: "ord-n".into(), since: std::time::Instant::now() });
+        all(&mut s, Instant::now());
+        let kept: HashSet<&str> = s.placed_orders.keys().map(String::as_str).collect();
+        assert_eq!(kept, HashSet::from(["ord-y", "ord-n"]), "only orders a leg holds");
+
+        // n's cancel is confirmed; y's leg is removed.
+        s.order_status.insert("n".into(), OrderStatus::Idle);
+        s.configs.retain(|c| c.id != "y");
+        s.order_status.remove("y");
+        all(&mut s, Instant::now());
+        assert!(s.placed_orders.is_empty());
     }
 
     /// An auto-pause is recorded when it is decided, so a second evaluation
