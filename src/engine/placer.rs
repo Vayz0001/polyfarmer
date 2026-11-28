@@ -962,6 +962,55 @@ mod tests {
         assert!(text.contains("Paused · leg a") && text.contains("invalid amount"), "{text}");
     }
 
+    /// The size is in dollars, so a re-peg to a higher price can take an order
+    /// under Polymarket's minimum in shares ($2 at 41¢ is 4.88 shares). After
+    /// three such rejections the pause alert says so plainly first, with the
+    /// order's real shares, then keeps Polymarket's own words.
+    #[tokio::test(start_paused = true)]
+    async fn a_pause_for_an_order_under_the_minimum_says_so_plainly() {
+        let mut a = leg("a", dec!(0.01));
+        a.order_size = dec!(2);
+        let e = env(vec![a]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        let raw = r#"Status: error(400 Bad Request) making POST call to /order with {"error":"order 0x1 is invalid. Size (4.88) lower than the minimum: 5"}"#;
+        for _ in 0..3 {
+            api.script(Err(raw));
+        }
+        // The `attempt` helper places $150; this leg's order is $2.
+        for expected in
+            [Outcome::Failed { failures: 1 }, Outcome::Failed { failures: 2 }, Outcome::PausedAfterRejections]
+        {
+            let claimed = begin_place(&mut *e.state.write().await, "a", dec!(0.41), Instant::now()).unwrap();
+            let (state, alerter) = (Arc::clone(&e.state), Arc::clone(&e.alerter));
+            let outcome = run_place(
+                Arc::clone(&api),
+                state,
+                alerter,
+                "a".into(),
+                claimed,
+                TOKEN.into(),
+                dec!(2),
+                dec!(0.41),
+                dec!(0.01),
+            )
+            .await;
+            assert_eq!(outcome, expected);
+            tokio::time::advance(Duration::from_secs(61)).await;
+        }
+        let messages: Vec<String> =
+            alerts(&e).lines().map(|l| serde_json::from_str::<crate::types::Alert>(l).unwrap().message).collect();
+        assert_eq!(
+            messages.last().map(String::as_str),
+            Some(
+                format!(
+                    "Paused · leg a\nOrder too small: 4.88 shares, below Polymarket's minimum. Raise the size in \
+                     Edit.\nPolymarket said: {raw}"
+                )
+                .as_str()
+            )
+        );
+    }
+
     /// Network errors, timeouts, 5xx and 429 say nothing about the order: they
     /// back off (2 s doubling to a minute) but never count, so an outage can't
     /// pause or delete legs. One alert if it keeps happening.
