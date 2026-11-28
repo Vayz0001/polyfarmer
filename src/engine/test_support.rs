@@ -115,15 +115,17 @@ impl Fake {
         } else if let Some(Err(e)) = scripted {
             Err(eyre::eyre!(e))
         } else {
-            let n = {
-                let mut placed = self.placed.lock().unwrap();
-                placed.push(price);
-                placed.len()
-            };
-            self.placed_shares.lock().unwrap().push(shares);
-            if *self.keeps_book.lock().unwrap() {
-                let id = format!("0xorder-{n}");
-                self.open.lock().unwrap().entry(token.to_string()).or_default().push(id.clone());
+            let keeps_book = *self.keeps_book.lock().unwrap();
+            // One step, the locks always taken in this order: nobody sees the
+            // order in `placed` before it is listed.
+            let mut placed = self.placed.lock().unwrap();
+            let mut placed_shares = self.placed_shares.lock().unwrap();
+            let mut open = self.open.lock().unwrap();
+            placed.push(price);
+            placed_shares.push(shares);
+            if keeps_book {
+                let id = format!("0xorder-{}", placed.len());
+                open.entry(token.to_string()).or_default().push(id.clone());
                 Ok(id)
             } else {
                 Ok("0xorder".to_string())
@@ -191,17 +193,21 @@ impl OrderApi for Fake {
             }
         }
     }
-    async fn open_orders(&self, token_id: &str) -> Result<Vec<String>> {
+    fn open_orders(&self, token_id: &str) -> impl Future<Output = Result<Vec<String>>> + Send {
+        // Read when called, not when first polled: a held reply is the book
+        // as it was at the call.
         let listing = if *self.list_fails.lock().unwrap() {
             Err(eyre::eyre!("Internal: error sending request"))
         } else {
             Ok(self.open.lock().unwrap().get(token_id).cloned().unwrap_or_default())
         };
         let gate = self.list_gate.lock().unwrap().clone();
-        if let Some(gate) = gate {
-            gate.notified().await;
+        async move {
+            if let Some(gate) = gate {
+                gate.notified().await;
+            }
+            listing
         }
-        listing
     }
     async fn cancel_many(&self, order_ids: &[String]) -> Result<Vec<String>> {
         let mut open = self.open.lock().unwrap();
@@ -363,6 +369,26 @@ mod tests {
         assert_eq!(listing.await.unwrap().unwrap(), ids(&["0xorder-1"]), "the book at the call");
         *api.list_gate.lock().unwrap() = None;
         assert_eq!(api.open_orders(TOKEN).await.unwrap(), ids(&["0xorder-1", "0xorder-2"]));
+    }
+
+    /// The listing (or its failure) is taken when `open_orders` is called,
+    /// even if its future is first polled later.
+    #[tokio::test]
+    async fn a_held_listing_is_taken_at_the_call_not_at_the_first_poll() {
+        let api = book();
+        let list = Arc::new(Notify::new());
+        *api.list_gate.lock().unwrap() = Some(Arc::clone(&list));
+        assert_eq!(api.place_buy(TOKEN, dec!(0.2), dec!(750)).await.unwrap(), "0xorder-1");
+        let listing = api.open_orders(TOKEN);
+        assert_eq!(api.place_buy(TOKEN, dec!(0.21), dec!(750)).await.unwrap(), "0xorder-2");
+        list.notify_one();
+        assert_eq!(listing.await.unwrap(), ids(&["0xorder-1"]), "the book at the call");
+
+        *api.list_fails.lock().unwrap() = true;
+        let failing = api.open_orders(TOKEN);
+        *api.list_fails.lock().unwrap() = false;
+        list.notify_one();
+        assert!(failing.await.is_err(), "failed when asked");
     }
 
     #[tokio::test(start_paused = true)]
