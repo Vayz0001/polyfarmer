@@ -1158,10 +1158,10 @@ mod tests {
         assert!(e.state.read().await.reconciling.is_empty(), "the check slot is freed");
     }
 
-    /// The bug behind it: a placement that times out (or hits a network
-    /// error / 5xx) may still have reached Polymarket. Its leg must not place
-    /// again until that market's open orders are checked — then the stray order
-    /// is cancelled and placing resumes.
+    /// A placement that times out (or hits a network error / 5xx) may still
+    /// have reached Polymarket. No leg on that market may place again until its
+    /// open orders are checked — then the stray order is cancelled and placing
+    /// resumes.
     #[tokio::test(start_paused = true)]
     async fn an_unclear_placement_blocks_the_market_until_its_orders_are_checked() {
         let e = env(vec![leg("a", dec!(0.01))]);
@@ -1202,7 +1202,8 @@ mod tests {
     }
 
     /// Minimum-size rejections are told apart from the rest, and only they
-    /// change the pause alert's reason; every other one reads as before.
+    /// change the pause alert's reason; every other rejection keeps the generic
+    /// "placements in a row were rejected" reason.
     #[test]
     fn only_a_minimum_size_rejection_is_explained_plainly() {
         let polymarket = "order 0x1 is invalid. Size (4.88) lower than the minimum: 5";

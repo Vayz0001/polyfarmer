@@ -815,9 +815,10 @@ mod bulk_cancel_tests {
         assert!(s.cancel_failures.is_empty());
     }
 
-    /// The bug: an order placed while the bulk cancel was running wasn't in the
-    /// request, but the reset set its leg Idle anyway — forgetting the order and
-    /// letting the leg place a second one beside it.
+    /// An order placed while the bulk cancel was running isn't in the request:
+    /// its leg is not reset to Idle, so the order stays tracked and the leg
+    /// can't place a second one beside it. A cancel started meanwhile is left
+    /// to finish.
     #[test]
     fn an_order_placed_during_the_cancel_stays_tracked() {
         let mut s = AppState::new(PathBuf::from("unused.json"));
@@ -958,9 +959,9 @@ mod book_message_tests {
         (e, api, n)
     }
 
-    /// The bug: a trade swept the bids ahead of our order and Polymarket sent
-    /// a fresh `book`, but the engine only re-checked its orders on a
-    /// price_change (or the 30 s timer), leaving the order exposed meanwhile.
+    /// A trade sweeps the bids ahead of our order and Polymarket sends a fresh
+    /// `book`, with no price_change. That snapshot alone must pull the order,
+    /// not leave it exposed until the next price_change or the 30 s timer.
     #[tokio::test]
     async fn a_snapshot_that_removes_the_depth_ahead_pulls_the_order() {
         let (e, api, n) = live_with_depth(vec![protected_leg()]).await;
