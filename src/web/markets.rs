@@ -28,7 +28,7 @@ use crate::engine::placer::OrderApi;
 use crate::engine::ws_manager::AppState;
 use crate::rewards::gamma_resolve::{self, MarketRef};
 use crate::rewards::{market_data, market_flow, markets_browse};
-use crate::types::{MarketConfig, OrderStatus, WsCommand};
+use crate::types::{EnginePhase, MarketConfig, OrderStatus, WsCommand};
 
 use super::auth::{csrf_token, verify_csrf};
 use super::dashboard::{cents, render_markets_table, until};
@@ -1154,7 +1154,7 @@ fn start_configs(
     let shortfall = configs
         .iter()
         .zip(books)
-        .filter_map(|(cfg, book)| min_order_shortfall(cfg, book))
+        .filter_map(|(cfg, book)| min_order_shortfall(cfg, book.best_bid?, book.min_order_size))
         .max_by_key(|(needed_usd, _)| *needed_usd);
     // The form's size is the total, split across both sides.
     if let Some((needed_usd, reason)) = shortfall {
@@ -1166,16 +1166,16 @@ fn start_configs(
     Ok(configs)
 }
 
-/// The per-side size `cfg` needs to meet `book`'s minimum order, and why its
-/// own is too small, when it is (the caller says what to enter). Shares are counted as the engine sizes the
-/// order, at the price the leg rests at. A minimum of 0 means none is known
-/// (only books built from the live feed lack one; Start reads the REST book).
-fn min_order_shortfall(cfg: &MarketConfig, book: &market_data::BookSnapshot) -> Option<(Decimal, String)> {
-    let min_shares = book.min_order_size;
+/// The per-side size `cfg` needs to meet the market's minimum order of
+/// `min_shares`, and why its own is too small, when it is (the caller says what
+/// to enter). Shares are counted as the engine sizes the order, at the price
+/// the leg rests at below `best_bid`. A minimum of 0 means none is known (only
+/// books built from the live feed lack one; the minimum comes from the REST book).
+fn min_order_shortfall(cfg: &MarketConfig, best_bid: Decimal, min_shares: Decimal) -> Option<(Decimal, String)> {
     if min_shares <= dec!(0) {
         return None;
     }
-    let rest = other_side_price(book.best_bid?, cfg.distance, cfg.tick_size)?;
+    let rest = other_side_price(best_bid, cfg.distance, cfg.tick_size)?;
     // `rest` is above 0, the only price `shares_from_usd` refuses.
     let shares = Executor::shares_from_usd(cfg.order_size, rest).ok()?;
     if shares >= min_shares {
@@ -1243,6 +1243,7 @@ pub async fn start_farming(
         Ok(Ok(b)) => b,
         _ => return render_start_error("Could not load the order book — try again."),
     };
+    state.caches.min_order_size.put(&mr.token_ids[side], book_a.min_order_size);
     let Some(best_bid_a) = book_a.best_bid else {
         return render_start_error(NO_LIVE_BIDS);
     };
@@ -1254,7 +1255,10 @@ pub async fn start_farming(
     let per_side_size = if both_sides { order_size / dec!(2) } else { order_size };
     let book_b = if both_sides {
         match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(&mr.token_ids[1 - side])).await {
-            Ok(Ok(b)) => Some(b),
+            Ok(Ok(b)) => {
+                state.caches.min_order_size.put(&mr.token_ids[1 - side], b.min_order_size);
+                Some(b)
+            }
             _ => return render_start_error("Could not load the order book for the other side — try again."),
         }
     } else {
@@ -1783,8 +1787,7 @@ pub async fn edit_submit(
         },
     };
 
-    // A new auto-pause threshold is measured from today's best bid.
-    let (token, old_vol) = {
+    let leg = {
         let s = state.engine.read().await;
         match s.configs.iter().find(|c| c.id == id) {
             Some(c) => match c.describe_problem() {
@@ -1793,13 +1796,20 @@ pub async fn edit_submit(
                     drop(s);
                     return fail(problem).await;
                 }
-                _ => (c.token_id.clone(), c.max_volatility),
+                _ => c.clone(),
             },
             None => return fail("This market leg no longer exists.".into()).await,
         }
     };
-    let new_benchmark = if max_volatility.is_some() && max_volatility != old_vol {
-        match best_bid_now(&state, &token).await {
+    // Only size and distance change the order's shares.
+    if leg.order_size != order_size || leg.distance != distance {
+        if let Err(e) = check_min_order(&state, &MarketConfig { order_size, distance, ..leg.clone() }).await {
+            return fail(e).await;
+        }
+    }
+    // A new auto-pause threshold is measured from today's best bid.
+    let new_benchmark = if max_volatility.is_some() && max_volatility != leg.max_volatility {
+        match best_bid_now(&state, &leg.token_id).await {
             Some(bb) => Some(bb),
             None => {
                 return fail("Could not read the current best bid for the auto-pause benchmark — try again.".into())
@@ -2056,6 +2066,51 @@ async fn best_bid_now(state: &WebState, token: &str) -> Option<Decimal> {
         Ok(Ok(b)) => b.best_bid,
         _ => None,
     }
+}
+
+/// Whether `cfg` (a leg with its edited size and distance) meets Polymarket's
+/// minimum order where it would rest now, below the engine's live best bid.
+/// Without a live book there is no price to check at, so the edit is refused.
+/// A running (or starting) engine subscribes every configured leg, paused ones
+/// too, so its missing book is still loading; with no engine, none will load.
+async fn check_min_order(state: &WebState, cfg: &MarketConfig) -> Result<(), String> {
+    let (phase, best_bid) = {
+        let s = state.engine.read().await;
+        (s.engine_phase.clone(), s.books.get(&cfg.token_id).and_then(|b| b.best_bid))
+    };
+    let Some(best_bid) = best_bid else {
+        return Err(match phase {
+            EnginePhase::Running | EnginePhase::Starting => {
+                "The order book for this market isn't loaded yet — try again in a few seconds."
+            }
+            EnginePhase::AwaitingWallet | EnginePhase::Error => {
+                "The bot isn't running, so there's no live order book to check the size against — start the bot \
+                 (Settings), then edit."
+            }
+        }
+        .into());
+    };
+    let min_shares = min_order_size(state, &cfg.token_id).await?;
+    match min_order_shortfall(cfg, best_bid, min_shares) {
+        Some((needed_usd, reason)) => Err(format!("{reason} Enter at least ${needed_usd:.2}.")),
+        None => Ok(()),
+    }
+}
+
+/// Polymarket's minimum order (shares) for `token`: cached (Start fills it from
+/// its REST book), else read from the REST book. A failed read is an error, never
+/// "no minimum".
+async fn min_order_size(state: &WebState, token: &str) -> Result<Decimal, String> {
+    state
+        .caches
+        .min_order_size
+        .get_or_fetch(token, || async {
+            match tokio::time::timeout(NETWORK_TIMEOUT, market_data::fetch_book(token)).await {
+                Ok(Ok(book)) => Ok(book.min_order_size),
+                _ => Err("Couldn't check Polymarket's minimum order size — try again.".to_string()),
+            }
+        })
+        .await
 }
 
 /// The best bid a resumed leg's auto-pause limit restarts from: `None` when

@@ -38,6 +38,9 @@ anything may change between releases.
   there (for example after a partial restore), the bot made a new key that couldn't unlock the wallet, then stopped
   with an unclear "decrypt failed" error. It now stops at startup and says to restore `master.key` from the same backup
   as `wallet.enc`, or to delete `wallet.enc` and enter the wallet again.
+- **Edit checks Polymarket's minimum order size too.** Changing a leg's size or distance now checks its shares at the
+  live best bid against the market's minimum (5 shares on most markets) and says how much to enter, like Start.
+  Before, a too-small edit was saved, Polymarket rejected the order three times and the leg paused.
 
 ## [0.1.1] - 2026-11-27
 

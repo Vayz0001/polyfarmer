@@ -1162,6 +1162,14 @@ async fn a_failed_engine_start_hints_at_network_vpn_and_region_causes() {
 fn app_with_leg(
     status: polyfarmer::types::OrderStatus,
 ) -> (Router, String, Arc<tokio::sync::RwLock<polyfarmer::engine::ws_manager::AppState>>, std::path::PathBuf) {
+    let (app, pw, engine, markets_file, _) = app_state_with_leg(status);
+    (app, pw, engine, markets_file)
+}
+
+/// [`app_with_leg`] plus its web state, to seed its caches.
+fn app_state_with_leg(
+    status: polyfarmer::types::OrderStatus,
+) -> (Router, String, Engine, std::path::PathBuf, WebState) {
     use polyfarmer::types::MarketConfig;
     use rust_decimal_macros::dec;
     let dir = unique_dir();
@@ -1191,7 +1199,22 @@ fn app_with_leg(
         });
         s.order_status.insert("mar_leg".into(), status);
     }
-    (router(WebState::new(Arc::new(store), Arc::clone(&engine))), pw, engine, markets_file)
+    let state = WebState::new(Arc::new(store), Arc::clone(&engine));
+    (router(state.clone()), pw, engine, markets_file, state)
+}
+
+/// What an edit of size or distance checks, offline: the engine's live book
+/// for `token` (best bid `best_bid`) and Polymarket's minimum order (shares)
+/// in the cache, so the edit never reads it from Polymarket.
+async fn seed_book_and_min(
+    state: &WebState,
+    token: &str,
+    best_bid: rust_decimal::Decimal,
+    min_shares: rust_decimal::Decimal,
+) {
+    let book = polyfarmer::engine::orderbook::TokenBook { best_bid: Some(best_bid), ..Default::default() };
+    state.engine.write().await.books.insert(token.into(), book);
+    state.caches.min_order_size.put(token, min_shares);
 }
 
 /// Body and the `HX-Trigger` header of a remove.
@@ -2003,7 +2026,8 @@ async fn a_dashboard_resume_does_not_undo_an_engine_auto_pause_on_disk() {
 /// changes end up in markets.json.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_dashboard_edit_keeps_an_engine_auto_pause_that_saved_meanwhile() {
-    let (app, pw, engine, markets_file) = app_with_leg(polyfarmer::types::OrderStatus::Idle);
+    let (app, pw, engine, markets_file, state) = app_state_with_leg(polyfarmer::types::OrderStatus::Idle);
+    seed_book_and_min(&state, "123", rust_decimal_macros::dec!(0.40), rust_decimal_macros::dec!(5)).await;
     add_other_leg(&engine).await;
     let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
     let task = race_first_markets_write(&engine, engine_auto_pause(&engine, "mar_other")).await;
@@ -2060,7 +2084,8 @@ fn error_toast(trigger: Option<String>) -> String {
 async fn an_invalid_leg_cannot_resume_until_an_edit_fixes_it() {
     use polyfarmer::types::OrderStatus;
     use rust_decimal_macros::dec;
-    let (app, pw, engine, markets_file) = app_with_leg(OrderStatus::Idle);
+    let (app, pw, engine, markets_file, state) = app_state_with_leg(OrderStatus::Idle);
+    seed_book_and_min(&state, "123", dec!(0.40), dec!(5)).await;
     {
         let mut s = engine.write().await;
         let leg = &mut s.configs[0];
@@ -2148,6 +2173,139 @@ async fn a_leg_without_a_token_id_can_only_be_removed() {
     let (_, trigger) = post_as(&app, &cookie, "/markets/mar_leg/remove", format!("csrf={csrf}")).await;
     assert_eq!(error_toast(trigger), "");
     assert!(engine.read().await.configs.is_empty());
+}
+
+// ── Edit and Polymarket's minimum order ─────────────────────────────────────
+
+/// An edit of a leg to `size` dollars, `distance` cents and `depth` dollars ahead.
+fn edit_leg(csrf: &str, size: &str, distance: &str, depth: &str) -> String {
+    format!(
+        "csrf={csrf}&order_size={size}&distance_cents={distance}&min_depth_usd={depth}&max_volatility_cents=&expires_in=keep"
+    )
+}
+
+/// Polymarket rejects an order under the market's minimum size, and the leg
+/// pauses after three rejections. So Edit refuses a size that would place one,
+/// priced where the leg rests on the engine's live book, and saves nothing.
+#[tokio::test]
+async fn edit_refuses_a_size_below_the_minimum_order() {
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, markets_file, state) = app_state_with_leg(OrderStatus::Idle);
+    seed_book_and_min(&state, "123", dec!(0.40), dec!(5)).await;
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+
+    // $1 at 38¢ (2¢ below the 40¢ best bid) is 2.63 shares.
+    let (status, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "1", "2", "500")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").order_size, dec!(100), "not changed");
+    assert!(!markets_file.exists(), "nothing saved");
+    assert!(out.contains("Too small for this market: $1.00 per side is 2.6 shares of Yes at 38¢;"), "{out}");
+    assert!(out.contains("minimum order is 5 shares. Enter at least $1.90."), "{out}");
+    assert!(out.contains(r#"value="1""#), "what was typed is kept");
+}
+
+/// Exactly the minimum is enough. A distance change moves the price, so it is
+/// checked too: 1¢ closer makes the same $1.90 too small.
+#[tokio::test]
+async fn edit_accepts_the_minimum_order_and_checks_a_distance_change() {
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, _, state) = app_state_with_leg(OrderStatus::Idle);
+    seed_book_and_min(&state, "123", dec!(0.40), dec!(5)).await;
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+
+    // $1.90 at 38¢ is exactly 5 shares.
+    let (status, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "1.90", "2", "500")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!out.contains("alert err"), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").order_size, dec!(1.90), "saved");
+
+    // At 39¢ it is 4.87 shares.
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "1.90", "1", "500")).await;
+    assert!(out.contains("4.8 shares of Yes at 39¢") && out.contains("Enter at least $1.95."), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").distance, dec!(0.02), "not changed");
+}
+
+/// Without the running engine's live book there is no price to check at: a
+/// size or distance edit is refused until it loads. Other edits don't change
+/// the order's shares, so they save without a book or a known minimum.
+#[tokio::test]
+async fn edit_without_a_live_book_refuses_only_size_and_distance_changes() {
+    use polyfarmer::types::{EnginePhase, OrderStatus};
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, _, state) = app_state_with_leg(OrderStatus::Idle);
+    engine.write().await.engine_phase = EnginePhase::Running;
+    state.caches.min_order_size.put("123", dec!(5));
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+
+    for (size, distance) in [("60", "2"), ("100", "3")] {
+        let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, size, distance, "500")).await;
+        assert!(out.contains("loaded yet — try again in a few seconds."), "{size}/{distance}: {out}");
+        let s = engine.read().await;
+        let leg = leg_of(&s, "mar_leg");
+        assert!(leg.order_size == dec!(100) && leg.distance == dec!(0.02), "not changed");
+    }
+
+    // A book without a best bid gives no price either.
+    engine.write().await.books.insert("123".into(), Default::default());
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "60", "2", "500")).await;
+    assert!(out.contains("loaded yet — try again in a few seconds."), "{out}");
+
+    // Depth ahead only: no price or minimum needed, saved.
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "100", "2", "900")).await;
+    assert!(!out.contains("alert err"), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").min_depth_between, dec!(900), "saved");
+}
+
+/// With no engine (no wallet yet, or a failed start) no book will ever load,
+/// so the refusal says to start the bot instead of to wait. A starting engine
+/// is about to load it: wait.
+#[tokio::test]
+async fn edit_without_a_running_bot_says_to_start_it() {
+    use polyfarmer::types::{EnginePhase, OrderStatus};
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, _, state) = app_state_with_leg(OrderStatus::Idle);
+    state.caches.min_order_size.put("123", dec!(5));
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+
+    let not_running = "no live order book to check the size against — start the bot (Settings), then edit.";
+    for phase in [EnginePhase::AwaitingWallet, EnginePhase::Error] {
+        engine.write().await.engine_phase = phase.clone();
+        let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "60", "2", "500")).await;
+        assert!(out.contains("The bot isn") && out.contains(not_running), "{phase:?}: {out}");
+        assert!(!out.contains("loaded yet"), "{phase:?}: {out}");
+        assert_eq!(leg_of(&*engine.read().await, "mar_leg").order_size, dec!(100), "{phase:?}: not changed");
+    }
+
+    engine.write().await.engine_phase = EnginePhase::Starting;
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "60", "2", "500")).await;
+    assert!(out.contains("loaded yet — try again in a few seconds."), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").order_size, dec!(100), "not changed");
+}
+
+/// The minimum comes from Polymarket when it isn't cached. A failed read is
+/// not a pass: the edit is refused. A minimum of 0 means there is none.
+#[tokio::test]
+async fn edit_refuses_when_the_minimum_cannot_be_read_and_a_zero_minimum_is_none() {
+    use polyfarmer::types::OrderStatus;
+    use rust_decimal_macros::dec;
+    let (app, pw, engine, _, state) = app_state_with_leg(OrderStatus::Idle);
+    // A token id Polymarket's client refuses before sending anything: the read
+    // fails offline.
+    engine.write().await.configs[0].token_id = "not-a-token".into();
+    let book = polyfarmer::engine::orderbook::TokenBook { best_bid: Some(dec!(0.40)), ..Default::default() };
+    engine.write().await.books.insert("not-a-token".into(), book);
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "60", "2", "500")).await;
+    assert!(out.contains("minimum order size — try again."), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").order_size, dec!(100), "not changed");
+
+    state.caches.min_order_size.put("not-a-token", dec!(0));
+    let (_, out) = post_form(&app, &cookie, "/markets/mar_leg/edit", edit_leg(&csrf, "0.5", "2", "500")).await;
+    assert!(!out.contains("alert err"), "{out}");
+    assert_eq!(leg_of(&*engine.read().await, "mar_leg").order_size, dec!(0.5), "saved");
 }
 
 /// Logging out while another request of the same session is still running must

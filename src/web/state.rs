@@ -29,6 +29,11 @@ const BALANCE_TTL: Duration = Duration::from_secs(15);
 const PORTFOLIO_TTL: Duration = Duration::from_secs(15);
 const REWARDS_TTL: Duration = Duration::from_secs(30);
 const PAYOUTS_TTL: Duration = Duration::from_secs(300);
+/// A market's minimum order size is set when it is listed and rarely changes;
+/// ten minutes keeps repeat edits off the network while a change still shows
+/// up soon. A stale minimum only lets an order through that Polymarket then
+/// rejects, as it did before Edit checked at all.
+const MIN_ORDER_TTL: Duration = Duration::from_secs(600);
 
 #[derive(Clone)]
 pub struct WebState {
@@ -90,6 +95,9 @@ pub struct Caches {
     pub reward_payouts: Arc<TtlCache<Vec<Activity>>>,
     /// Your PolyRewards leaderboard rank, keyed by wallet address.
     pub lp_rank: Arc<TtlCache<LpRank>>,
+    /// Polymarket's minimum order size in shares, keyed by token id. Filled
+    /// by Start's REST book read and by Edit on a miss.
+    pub min_order_size: Arc<TtlCache<Decimal>>,
 }
 
 impl Default for Caches {
@@ -104,6 +112,7 @@ impl Default for Caches {
             reward_payouts: Arc::new(TtlCache::new(PAYOUTS_TTL)),
             // An hour after a success, five minutes after a failure (see `LpRank::ttl`).
             lp_rank: Arc::new(TtlCache::new(lp_rank::REFRESH_EVERY).with_ttl_for(LpRank::ttl)),
+            min_order_size: Arc::new(TtlCache::new(MIN_ORDER_TTL)),
         }
     }
 }
