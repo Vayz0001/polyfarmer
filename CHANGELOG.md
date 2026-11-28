@@ -30,6 +30,10 @@ anything may change between releases.
 - **A paused leg whose order is still on the book says "Pausing".** It used to say "Paused: no order" while
   Polymarket hadn't yet confirmed the cancel, so a real order could be resting behind that label. It now shows
   "Pausing" until the order is gone. The "Paused" hint also says that Activity tells you why the bot paused a leg.
+- **The alert says plainly when Polymarket rejects an order as too small.** Your size is in dollars, so a higher
+  price can drop an order under Polymarket's share minimum, and the leg pauses after three rejections. The pause
+  alert now starts with "Order too small: 4.88 shares, below Polymarket's minimum. Raise the size in Edit.",
+  then gives Polymarket's own message.
 
 ## [0.1.1] - 2026-11-27
 
