@@ -175,6 +175,8 @@ impl CredentialStore {
     }
 
     /// Open (creating if needed) the store at `dir`, ensuring a master key exists.
+    /// Fails without writing anything if `master.key` is missing but `wallet.enc`
+    /// exists.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self> {
         let dir = dir.into();
         // Created 0700 (an already-existing dir is left alone, with a warning if
@@ -204,6 +206,15 @@ impl CredentialStore {
 
     fn ensure_master_key(&self) -> Result<()> {
         if !self.master_path().exists() {
+            // A fresh key could never decrypt the saved wallet; writing one would
+            // turn a missing file into an unexplained decrypt error later.
+            if self.has_wallet() {
+                return Err(eyre!(
+                    "master.key is missing but wallet.enc exists in {}. Restore master.key from the same backup \
+                     as wallet.enc, or delete wallet.enc and enter the wallet again in Settings.",
+                    self.dir.display()
+                ));
+            }
             let mut key = Zeroizing::new([0u8; KEY_LEN]);
             os_random(&mut *key)?;
             write_private_atomic(&self.master_path(), &*key)?;
@@ -538,6 +549,28 @@ mod tests {
         // master key persists; reopening still decrypts
         let store2 = CredentialStore::open(&dir).unwrap();
         assert_eq!(store2.load_wallet().unwrap().unwrap().expose_key(), "0xprivkey");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A new random key can never decrypt the existing wallet.enc, so writing one
+    /// would only hide the real problem behind a decrypt error later.
+    #[test]
+    fn missing_master_key_with_saved_wallet_is_an_error_and_writes_nothing() {
+        let dir = temp_dir();
+        CredentialStore::open(&dir).unwrap().set_wallet("0xprivkey", "0xWalletAddr").unwrap();
+        let wallet_before = fs::read(dir.join("wallet.enc")).unwrap();
+        fs::remove_file(dir.join("master.key")).unwrap();
+
+        let Err(e) = CredentialStore::open(&dir) else {
+            panic!("open must fail when master.key is missing but wallet.enc exists");
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("master.key is missing but wallet.enc exists"), "{msg}");
+        assert!(msg.contains(&dir.display().to_string()), "names the data dir: {msg}");
+        assert!(msg.contains("Restore master.key from the same backup as wallet.enc"), "{msg}");
+        assert!(!dir.join("master.key").exists(), "no replacement key is written");
+        assert_eq!(fs::read(dir.join("wallet.enc")).unwrap(), wallet_before, "wallet.enc is untouched");
 
         let _ = fs::remove_dir_all(&dir);
     }

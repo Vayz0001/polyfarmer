@@ -34,6 +34,10 @@ anything may change between releases.
   price can drop an order under Polymarket's share minimum, and the leg pauses after three rejections. The pause
   alert now starts with "Order too small: 4.88 shares, below Polymarket's minimum. Raise the size in Edit.",
   then gives Polymarket's own message.
+- **A missing `master.key` no longer gets silently replaced.** If `master.key` was gone but `wallet.enc` was still
+  there (for example after a partial restore), the bot made a new key that couldn't unlock the wallet, then stopped
+  with an unclear "decrypt failed" error. It now stops at startup and says to restore `master.key` from the same backup
+  as `wallet.enc`, or to delete `wallet.enc` and enter the wallet again.
 
 ## [0.1.1] - 2026-11-27
 
