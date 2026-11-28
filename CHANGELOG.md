@@ -16,6 +16,10 @@ anything may change between releases.
   one leg's order that was being cancelled (sent but not yet confirmed, which can take 30 seconds or more) counted as
   depth ahead of the other leg, which could then place with less real depth in front of it than you set. It now
   counts as yours, at the price and size it was placed with, until Polymarket confirms it gone.
+- **A cancelled order no longer counts as depth while the market feed still shows it.** After Polymarket confirmed a
+  cancel, the bot could re-place at once while its live copy of the book still showed the old order, and count that
+  order as other people's depth ahead. It now keeps treating it as yours until the feed shows it gone, for 10 seconds
+  at most.
 
 ## [0.1.1] - 2026-11-27
 

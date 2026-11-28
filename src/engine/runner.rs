@@ -503,6 +503,56 @@ mod tests {
         assert_eq!(*api.placed.lock().unwrap(), vec![dec!(0.29)], "b never placed");
     }
 
+    /// Polymarket confirmed a cancel, but the feed's book still shows the order
+    /// (its update hasn't arrived yet). That order is ours and gone: no
+    /// protection for the leg re-placing behind it, nor for another leg on the
+    /// outcome. Before, it counted as other people's depth the moment the leg
+    /// let go of it, and both legs placed with only $100 of others ahead.
+    #[tokio::test]
+    async fn a_cancelled_order_is_never_depth_ahead_until_the_feed_shows_it_gone() {
+        use crate::engine::orderbook::TokenBook;
+        let mut a = leg("a", dec!(0.01));
+        (a.distance, a.min_depth_between, a.order_size) = (dec!(0.02), dec!(400), dec!(500));
+        let mut b = leg("b", dec!(0.01));
+        (b.distance, b.min_depth_between) = (dec!(0.03), dec!(550));
+        let (e, api, n) = setup(vec![a, b]);
+        let book = |bid: rust_decimal::Decimal, others_usd: rust_decimal::Decimal| {
+            let mut bk = TokenBook { best_bid: Some(bid), best_ask: Some(bid + dec!(0.01)), ..Default::default() };
+            bk.bids.insert(bid, others_usd / bid);
+            bk
+        };
+        e.state.write().await.books.insert(TOKEN.into(), book(dec!(0.30), dec!(450)));
+        let decide = |s: &mut AppState| crate::engine::pairing::decide(s, |_| true, tokio::time::Instant::now());
+        let action = |d: &[Decision], id: &str| d.iter().find(|x| x.config_id == id).map(|x| x.action.clone());
+
+        // a places $500 at 28¢ ($450 ahead); b (27¢, needs $550) waits.
+        let first = decide(&mut *e.state.write().await);
+        assert_eq!(action(&first, "a"), Some(QuoteAction::Place { price: dec!(0.28) }));
+        assert_eq!(action(&first, "b"), Some(QuoteAction::Hold));
+        run(&e, &api, &n, first).await;
+        let shares = api.placed_shares.lock().unwrap()[0];
+        // The best bid drops to 29¢ with $100; the feed shows a's order at 28¢.
+        let mut moved = book(dec!(0.29), dec!(100));
+        moved.bids.insert(dec!(0.28), shares);
+        e.state.write().await.books.insert(TOKEN.into(), moved);
+        // a is now too close to the best bid, with too little ahead to move: cancelled, confirmed.
+        let second = decide(&mut *e.state.write().await);
+        assert!(matches!(action(&second, "a"), Some(QuoteAction::Cancel { reason: CancelReason::DepthDropped, .. })));
+        run(&e, &api, &n, second).await;
+        assert_eq!(e.state.read().await.order_status.get("a"), Some(&OrderStatus::Idle));
+
+        // The feed still shows a's $500 at 28¢: only $100 of others ahead of 27¢ and 26¢.
+        let d = decide(&mut *e.state.write().await);
+        assert_eq!(action(&d, "a"), Some(QuoteAction::Hold), "a's own cancelled order is not depth");
+        assert_eq!(action(&d, "b"), Some(QuoteAction::Hold), "nor is it for another leg");
+        run(&e, &api, &n, d).await;
+        // The feed catches up: still only $100 ahead.
+        e.state.write().await.books.get_mut(TOKEN).unwrap().bids.remove(&dec!(0.28));
+        let d = decide(&mut *e.state.write().await);
+        assert_eq!((action(&d, "a"), action(&d, "b")), (Some(QuoteAction::Hold), Some(QuoteAction::Hold)));
+        assert_eq!(*api.placed.lock().unwrap(), vec![dec!(0.28)], "nothing placed behind the ghost");
+    }
+
     /// The race behind it: a Place is decided, then the leg is paused on the
     /// dashboard before the runner gets to it. Nothing may reach Polymarket.
     #[tokio::test]
