@@ -20,6 +20,10 @@ anything may change between releases.
   cancel, the bot could re-place at once while its live copy of the book still showed the old order, and count that
   order as other people's depth ahead. It now keeps treating it as yours until the feed shows it gone, for 10 seconds
   at most.
+- **Shutdown waits for every order placement still in progress.** If a leg was paused, expired or removed while its
+  order was being placed, shutdown didn't wait for that placement, so the order could land after the final cleanup and
+  stay on the book after the bot stopped. Shutdown now waits for it (up to 5 seconds), and the order it returns is
+  cancelled.
 
 ## [0.1.1] - 2026-11-27
 
