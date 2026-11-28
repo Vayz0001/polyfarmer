@@ -42,6 +42,9 @@ pub(crate) struct Fake {
     /// When set, `cancel_verified` waits for this to be notified before it
     /// replies: a slow Polymarket, held for as long as a test needs.
     pub(crate) verify_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
+    /// When set, `place_buy` waits for this to be notified before it replies
+    /// (the order has reached Polymarket; the answer is slow).
+    pub(crate) place_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
     /// Open orders per token, as `open_orders` reports them.
     pub(crate) open: Mutex<std::collections::HashMap<String, Vec<String>>>,
     /// Makes `open_orders` fail (network).
@@ -64,6 +67,7 @@ impl Fake {
             verify: Mutex::new(VecDeque::new()),
             verify_hangs: Mutex::new(false),
             verify_gate: Mutex::new(None),
+            place_gate: Mutex::new(None),
             open: Mutex::new(std::collections::HashMap::new()),
             list_fails: Mutex::new(false),
             bulk_cancelled: Mutex::new(Vec::new()),
@@ -108,7 +112,13 @@ impl OrderApi for Fake {
             self.placed_shares.lock().unwrap().push(shares);
             Ok("0xorder".to_string())
         };
-        async move { out }
+        let gate = self.place_gate.lock().unwrap().clone();
+        async move {
+            if let Some(gate) = gate {
+                gate.notified().await;
+            }
+            out
+        }
     }
     async fn cancel(&self, o: &str) -> Result<bool> {
         self.cancelled.lock().unwrap().push(o.to_string());

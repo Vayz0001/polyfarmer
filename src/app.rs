@@ -728,6 +728,47 @@ mod tests {
         assert_eq!(super::settle_placements(&state, Duration::from_secs(5)).await, 1);
     }
 
+    /// A leg paused (or expired, removed, auto-paused) while its placement is
+    /// out goes back to Idle at once, but the call still gets an order back and
+    /// cancels it. Before, shutdown only waited for legs marked Placing: it
+    /// moved on at once, and the order could land after the final sweep and be
+    /// left resting. It waits for the call itself.
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_waits_for_a_placement_whose_leg_was_released_meanwhile() {
+        use crate::engine::test_support::{env, leg, Fake, TOKEN};
+        use crate::engine::{pairing::Decision, placer, quoter::QuoteAction, runner};
+        use rust_decimal_macros::dec;
+        use std::sync::Arc;
+        let e = env(vec![leg("a", dec!(0.01))]);
+        let api = Fake::new(dec!(0.01), dec!(0.01));
+        let answer = Arc::new(tokio::sync::Notify::new());
+        *api.place_gate.lock().unwrap() = Some(Arc::clone(&answer)); // Polymarket is slow to answer
+        let place = Decision {
+            config_id: "a".into(),
+            action: QuoteAction::Place { price: dec!(0.2) },
+            token_id: TOKEN.into(),
+            tick_size: dec!(0.01),
+        };
+        runner::execute(vec![place], &api, &e.state, &e.alerter, &Arc::new(tokio::sync::Notify::new())).await;
+        // Paused from the dashboard while the call is out: the leg is released.
+        {
+            let mut s = e.state.write().await;
+            s.configs[0].paused = true;
+            assert_eq!(placer::settle_unplaced(&mut s, "a"), None);
+            assert_eq!(s.order_status.get("a"), Some(&OrderStatus::Idle));
+            s.stopping = true;
+        }
+
+        let state = Arc::clone(&e.state);
+        let settle = tokio::spawn(async move { super::settle_placements(&state, Duration::from_secs(5)).await });
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(!settle.is_finished(), "waits for the placement call still out");
+        answer.notify_one(); // the order lands
+        assert_eq!(settle.await.unwrap(), 0, "done within the limit");
+        assert_eq!(*api.placed.lock().unwrap(), vec![dec!(0.2)]);
+        assert_eq!(*api.cancelled.lock().unwrap(), vec!["0xorder".to_string()], "the order it got back is cancelled");
+    }
+
     /// Core dumps (which would contain the decrypted wallet key) are disabled and,
     /// on Linux, the process is marked non-dumpable.
     #[cfg(target_os = "linux")]
