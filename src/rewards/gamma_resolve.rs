@@ -121,6 +121,21 @@ pub enum Resolved {
 /// One shared Gamma client (connection reuse) for every lookup.
 static GAMMA: LazyLock<GammaClient> = LazyLock::new(GammaClient::default);
 
+/// Time limit on one Gamma call. The SDK's Gamma client has none, and a hung
+/// background refresh would hold its cache slot until restart.
+const GAMMA_LIMIT: Duration = Duration::from_secs(10);
+
+/// Run one Gamma call with [`GAMMA_LIMIT`]; running out of time is an error.
+async fn bounded<T>(
+    what: &str,
+    call: impl std::future::Future<Output = polymarket_client_sdk_v2::Result<T>>,
+) -> Result<T> {
+    match tokio::time::timeout(GAMMA_LIMIT, call).await {
+        Ok(r) => Ok(r?),
+        Err(_) => Err(eyre::eyre!("{what} timed out after {}s", GAMMA_LIMIT.as_secs())),
+    }
+}
+
 /// Market metadata barely changes (question, tokens, tick, reward params), but
 /// the market view, its live book, the placement preview and the markets table
 /// all need it — cache it so none of them re-hit Gamma on every request.
@@ -133,7 +148,8 @@ pub async fn market_by_slug(slug: &str) -> Result<MarketRef> {
 }
 
 async fn market_from(gamma: &GammaClient, slug: &str) -> Result<MarketRef> {
-    let m = gamma.market_by_slug(&MarketBySlugRequest::builder().slug(slug.to_string()).build()).await?;
+    let req = MarketBySlugRequest::builder().slug(slug.to_string()).build();
+    let m = bounded("Gamma market lookup", gamma.market_by_slug(&req)).await?;
     MarketRef::from_market(m)
 }
 
@@ -165,7 +181,8 @@ pub async fn resolve_url(url: &str) -> Result<Resolved> {
 }
 
 async fn resolve_event(gamma: &GammaClient, slug: &str) -> Result<Resolved> {
-    let event = match gamma.event_by_slug(&EventBySlugRequest::builder().slug(slug.to_string()).build()).await {
+    let req = EventBySlugRequest::builder().slug(slug.to_string()).build();
+    let event = match bounded("Gamma event lookup", gamma.event_by_slug(&req)).await {
         Ok(e) => e,
         // Older links put a standalone market's own slug after /event/.
         Err(event_err) => {
@@ -556,8 +573,11 @@ mod tests {
                             Ok(n) => req.extend_from_slice(&buf[..n]),
                         }
                     }
-                    let (status, body) =
-                        if req.starts_with(b"GET /events/") { ("404 Not Found", "{}".to_string()) } else { (status, body) };
+                    let (status, body) = if req.starts_with(b"GET /events/") {
+                        ("404 Not Found", "{}".to_string())
+                    } else {
+                        (status, body)
+                    };
                     let reply = format!(
                         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                         body.len()
