@@ -7,7 +7,7 @@
 //! generic client impl, not the authenticated one), so this works regardless of
 //! whether the trading engine is running. No secrets involved.
 //!
-//! The pure helpers (`evaluate_placement`, `suggest_placement`) carry no
+//! The pure helpers (`evaluate_placement`, `placement_presets`) carry no
 //! network/IO so they're unit-tested below.
 
 use std::str::FromStr;
@@ -26,7 +26,7 @@ use crate::engine::orderbook::TokenBook;
 
 const CLOB_URL: &str = "https://clob.polymarket.com";
 
-/// Cached unauthenticated client (connection reuse across the ~1.5s book polls).
+/// Cached unauthenticated client (connection reuse across market-data reads).
 /// `Client::new` is sync and only fails on a bad URL; it holds the error text
 /// instead of panicking and each read reports it.
 static CLIENT: LazyLock<Result<Client, String>> =
@@ -343,7 +343,7 @@ pub struct Ladder {
     pub band_lo_cents: String, // reward-zone lower bound (display)
     pub band_hi_cents: String, // reward-zone upper bound (display)
     pub in_zone_usdc: String,  // qualifying liquidity in the band (display, e.g. "$9.5k")
-    pub in_zone_raw: String,   // same, plain number for the client-side "your share" calc
+    pub in_zone_raw: String,
     /// Raw top-of-book + midpoint (price units) for the client-side reward math.
     pub best_bid_raw: String,
     pub best_ask_raw: String,
@@ -370,9 +370,9 @@ pub fn build_ladder(
     let band_hi = midpoint + band;
 
     // Aggregate the full book into price buckets of `group` (the grouping
-    // control): bids floor toward the spread, asks ceil. Levels are already
-    // sorted best-first, so same-bucket entries are consecutive. group == tick
-    // (or 0) → identity.
+    // control): bids floor and asks ceil, both away from the spread. Levels
+    // are already sorted best-first, so same-bucket entries are consecutive.
+    // group == tick (or 0) → identity.
     let bucketize = |levels: &[(Decimal, Decimal)], is_bid: bool| -> Vec<(Decimal, Decimal)> {
         if group <= dec!(0) {
             return levels.to_vec();

@@ -47,7 +47,8 @@
   };
 
   // UTC moments rendered by the server (<time class="pf-local">) → the viewer's
-  // own time with the UTC original in brackets: "07:00 (00:00 UTC)".
+  // own time with the UTC original in brackets: "7:00 AM (00:00 UTC)". A viewer
+  // on UTC keeps the server's text.
   PF.localTimes = function (root) {
     $$("time.pf-local[datetime]", root).forEach(function (el) {
       var d = new Date(el.getAttribute("datetime"));
@@ -147,9 +148,9 @@
 
   // ── live events (one SSE stream: alerts + state changes) ───────────────
   var stateTimer = null, eventsEs = null, heldAlerts = null;
-  // Every alert the tab has handled has a row in #pf-win-feed (live rows are
-  // added there even before the Alerts window is first loaded), so a row with
-  // the same timestamp means "already here".
+  // A row with the same timestamp in any feed means "already here". Live rows
+  // go to #pf-win-feed even before the Alerts window is first loaded, but rows
+  // past a feed's limit or a window reload are gone, so this is best-effort.
   function alertShown(ts) {
     return $$(".pf-feed .feed-time[data-ts]").some(function (el) { return el.getAttribute("data-ts") === ts; });
   }
@@ -182,11 +183,11 @@
   // Alerts the reopened stream delivers meanwhile wait, so none shows twice
   // and the feeds stay in order. The cutoff is in server time (the Date
   // header, whole seconds) and reaches back a little further; rows the tab
-  // already has are skipped. The log is read only once the reopened stream
-  // is open (the server subscribes before it answers), so an alert can't fall
-  // between the two.
-  // Live alerts are held until the catch-up ends, so it gets a time limit;
-  // a stream that never opens delays it by STREAM_OPEN_WAIT_MS at most.
+  // already has are skipped. The log is read once the reopened stream is open
+  // (the server subscribes before it answers), so an alert can't fall between
+  // the two. Live alerts are held until the catch-up ends, so it gets a time
+  // limit: after STREAM_OPEN_WAIT_MS the log is read even if the stream hasn't
+  // opened, and then an alert can fall in the gap.
   var CATCH_UP_SLACK_MS = 3000, CATCH_UP_TIMEOUT_MS = 10000, STREAM_OPEN_WAIT_MS = 5000;
   // How many alerts the Activity page loads (FEED_LIMIT in src/web/activity.rs).
   var ACTIVITY_PAGE_ROWS = 300;

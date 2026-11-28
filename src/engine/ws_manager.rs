@@ -103,7 +103,7 @@ pub struct AppState {
     pub markets_file: PathBuf,
     /// How the dashboard writes markets.json (`storage::save_markets`).
     pub markets_writer: crate::storage::MarketsWriter,
-    /// Set by heartbeat after 3 consecutive failures + order cancel.
+    /// Set by heartbeat after MAX_CONSECUTIVE_FAILURES failures, before it cancels.
     /// Prevents new placements until heartbeat recovers.
     pub heartbeat_paused: bool,
     /// Engine lifecycle phase — driven by the boot task, read by the dashboard

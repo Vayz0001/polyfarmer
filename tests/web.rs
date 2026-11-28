@@ -113,7 +113,7 @@ async fn full_login_grants_access() {
     let cookie = session_cookie(&res).expect("session cookie");
     let csrf = extract_csrf(&body_string(res).await);
 
-    // 2) POST /login with correct password → redirect (to /setup, since must_change)
+    // 2) POST /login with correct password → redirect (to /setup: no wallet yet)
     let form = format!("csrf={csrf}&password={pw}");
     let res = app
         .clone()

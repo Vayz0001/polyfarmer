@@ -2,7 +2,7 @@
 # Supply-chain guardrails for a program that holds a trading key.
 
 [graph]
-# Check every platform we might be built on, not just the host.
+# No `targets` list: check every platform we might be built on, not just the host.
 all-features = false
 
 [advisories]
@@ -11,8 +11,8 @@ version = 2
 # security problem) -- never build against one.
 yanked = "deny"
 # Every accepted advisory is a decision, not a suppression: it names the path
-# it arrives by, why it is acceptable, and when to look again. All remaining
-# entries are transitive through `alloy`, whose major version is pinned by
+# it arrives by, why it is acceptable, and when to look again. Most entries
+# are transitive through `alloy`, whose major version is pinned by
 # polymarket_client_sdk_v2, so they can only clear when that SDK moves.
 # (cargo-deny only reports `unsound` crates that are direct dependencies, so the
 # transitive lru issue is documented in .cargo/audit.toml.)
