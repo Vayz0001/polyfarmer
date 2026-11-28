@@ -4,6 +4,7 @@
 use crate::config::Config;
 use crate::engine::alerts::Alerter;
 use crate::engine::executor::Executor;
+use crate::engine::placer::OrderApi;
 use crate::engine::ws_manager::AppState;
 use crate::engine::{heartbeat, pairing, placer, runner, ws_manager};
 use crate::storage::load_markets;
@@ -272,31 +273,13 @@ pub async fn run() -> Result<()> {
     // reconcile from a periodic file diff.
 
     // ── Spawn: 30s quote timer (fallback re-evaluation) ───────────────────────
-    {
-        let state2 = Arc::clone(&state);
-        let executor2 = Arc::clone(&executor);
-        let alerter2 = Arc::clone(&alerter);
-        let nudge = Arc::clone(&quote_nudge);
-        let mut stop = stop_rx.clone();
-
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(QUOTE_TIMER_INTERVAL);
-            loop {
-                tokio::select! {
-                    _ = ticker.tick() => {
-                        evaluate_all_markets(&state2, &executor2, &alerter2, &nudge).await;
-                    }
-                    // Dashboard poke (e.g. resume): re-evaluate now, don't wait.
-                    _ = nudge.notified() => {
-                        evaluate_all_markets(&state2, &executor2, &alerter2, &nudge).await;
-                    }
-                    _ = stop.changed() => {
-                        if *stop.borrow() { break; }
-                    }
-                }
-            }
-        });
-    }
+    tokio::spawn(quote_loop(
+        Arc::clone(&state),
+        Arc::clone(&executor),
+        Arc::clone(&alerter),
+        Arc::clone(&quote_nudge),
+        stop_rx.clone(),
+    ));
 
     // ── Spawn: hourly summary ─────────────────────────────────────────────────
     {
@@ -597,9 +580,35 @@ async fn settle_placements(state: &RwLock<AppState>, limit: Duration) -> usize {
 
 // ── 30s fallback re-evaluation ────────────────────────────────────────────────
 
-async fn evaluate_all_markets(
+/// The quote task: re-evaluates every market on the 30 s timer and whenever
+/// something nudges it, until `stop` turns true.
+async fn quote_loop<A: OrderApi>(
+    state: Arc<RwLock<AppState>>,
+    api: Arc<A>,
+    alerter: Arc<Alerter>,
+    nudge: Arc<Notify>,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut ticker = tokio::time::interval(QUOTE_TIMER_INTERVAL);
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => {
+                evaluate_all_markets(&state, &api, &alerter, &nudge).await;
+            }
+            // Dashboard poke (e.g. resume): re-evaluate now, don't wait.
+            _ = nudge.notified() => {
+                evaluate_all_markets(&state, &api, &alerter, &nudge).await;
+            }
+            _ = stop.changed() => {
+                if *stop.borrow() { break; }
+            }
+        }
+    }
+}
+
+async fn evaluate_all_markets<A: OrderApi>(
     state: &Arc<RwLock<AppState>>,
-    executor: &Arc<Executor>,
+    executor: &Arc<A>,
     alerter: &Arc<Alerter>,
     nudge: &Arc<tokio::sync::Notify>,
 ) {
