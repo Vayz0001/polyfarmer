@@ -2387,3 +2387,93 @@ async fn parallel_wrong_setup_codes_are_throttled_like_sequential_ones() {
     .await;
     assert_eq!(tried, 15, "setup-code guesses checked before the lockout");
 }
+
+// ── Live streams end with the session ─────────────────────────────────────────
+
+/// An app with its state (to send stream events), signed in: (router, state, cookie, CSRF token, password).
+async fn signed_in_app() -> (Router, WebState, String, String, String) {
+    let store = CredentialStore::open(unique_dir()).unwrap();
+    let pw = "test-password-123".to_string();
+    store.set_password(&pw).unwrap();
+    let state = WebState::new(Arc::new(store), empty_engine());
+    let app = router(state.clone());
+    let (cookie, csrf) = authed_with_csrf(&app, &pw).await;
+    (app, state, cookie, csrf, pw)
+}
+
+type EventStream = axum::body::BodyDataStream;
+
+async fn open_events(app: &Router, cookie: &str) -> EventStream {
+    let res = app
+        .clone()
+        .oneshot(Request::builder().uri("/events").header(header::COOKIE, cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    res.into_body().into_data_stream()
+}
+
+/// What the stream does within `within`: `Ok(Some(text))` sent an event,
+/// `Ok(None)` ended, `Err(())` still open (keep-alive comments don't count).
+async fn next_from(events: &mut EventStream, within: std::time::Duration) -> Result<Option<String>, ()> {
+    use futures_util::StreamExt;
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        match tokio::time::timeout_at(deadline, events.next()).await {
+            Ok(Some(chunk)) => {
+                let text = String::from_utf8(chunk.unwrap().to_vec()).unwrap();
+                if !text.starts_with(':') {
+                    return Ok(Some(text));
+                }
+            }
+            Ok(None) => return Ok(None),
+            Err(_) => return Err(()),
+        }
+    }
+}
+
+/// Logout deletes the session from the store while this stream still holds the
+/// session it loaded at connect: the stream must see the store, and end before
+/// sending the next event.
+#[tokio::test]
+async fn the_event_stream_ends_at_its_next_event_after_logout() {
+    let (app, state, cookie, csrf, _) = signed_in_app().await;
+    let mut events = open_events(&app, &cookie).await;
+    state.state_tx.send(()).unwrap();
+    let first = next_from(&mut events, std::time::Duration::from_secs(2)).await;
+    assert!(matches!(&first, Ok(Some(t)) if t.contains("event: state")), "signed in, it streams: {first:?}");
+
+    let (status, _) = post_form(&app, &cookie, "/logout", format!("csrf={csrf}")).await;
+    assert!(status.is_redirection());
+    state.state_tx.send(()).unwrap();
+    let after = next_from(&mut events, std::time::Duration::from_secs(2)).await;
+    assert_eq!(after, Ok(None), "the stream must end after logout, not keep sending");
+}
+
+/// With nothing to send, a signed-out stream still ends within 15 seconds.
+#[tokio::test]
+async fn an_idle_event_stream_ends_within_seconds_after_logout() {
+    let (app, _state, cookie, csrf, _) = signed_in_app().await;
+    tokio::time::pause(); // after the login: its password hashing must not race the clock
+    let mut events = open_events(&app, &cookie).await;
+    let (status, _) = post_form(&app, &cookie, "/logout", format!("csrf={csrf}")).await;
+    assert!(status.is_redirection());
+    let after = next_from(&mut events, std::time::Duration::from_secs(15)).await;
+    assert_eq!(after, Ok(None), "an idle stream must end within 15s of logout");
+}
+
+/// A password change signs out every other session, and their streams with them.
+#[tokio::test]
+async fn the_event_stream_of_another_session_ends_after_a_password_change() {
+    let (app, state, owner, csrf, pw) = signed_in_app().await;
+    let (other, _) = authed_with_csrf(&app, &pw).await;
+    let mut events = open_events(&app, &other).await;
+
+    let form = format!("csrf={csrf}&current={pw}&password=a-brand-new-password&confirm=a-brand-new-password");
+    let (status, page) = post_form(&app, &owner, "/setup/password", form).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("Password changed"), "{page}");
+    state.state_tx.send(()).unwrap();
+    let after = next_from(&mut events, std::time::Duration::from_secs(2)).await;
+    assert_eq!(after, Ok(None), "the other session's stream must end, not keep sending");
+}
